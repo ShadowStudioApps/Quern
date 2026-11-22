@@ -45,6 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -111,9 +113,20 @@ fun HomeScreen(
     var selectedCategory by remember { mutableStateOf("All") }
     var focusedHeroItem by remember { mutableStateOf<MediaItem?>(null) }
     var focusedItemIndex by remember { mutableIntStateOf(0) }
+    // Focus changes land here first (no recomposition); the hero only follows once focus rests ~220 ms,
+    // so fast D-Pad scrolling doesn't swap the backdrop for every card it passes.
+    val pendingHeroFocus = remember { MutableStateFlow<Pair<MediaItem, Int>?>(null) }
+    LaunchedEffect(pendingHeroFocus) {
+        pendingHeroFocus.collectLatest { pending ->
+            if (pending == null) return@collectLatest
+            delay(220L)
+            focusedHeroItem = pending.first
+            focusedItemIndex = pending.second
+        }
+    }
     var autoSlideIndex by remember { mutableIntStateOf(0) }
-    var isHeroExpanded by remember { mutableStateOf(false) }
     val firstRowFocusRequester = remember { FocusRequester() }
+    var isFirstRowItemAttached by remember { mutableStateOf(false) }
     val todayYmd = remember {
         val cal = Calendar.getInstance()
         cal.get(Calendar.YEAR) * 10_000 + (cal.get(Calendar.MONTH) + 1) * 100 + cal.get(Calendar.DAY_OF_MONTH)
@@ -188,6 +201,12 @@ fun HomeScreen(
         (if (primary.isNotEmpty()) primary else fallback).take(8)
     }
 
+    LaunchedEffect(filteredRows.firstOrNull()?.id, filteredRows.firstOrNull()?.items?.firstOrNull()?.id) {
+        if (filteredRows.isEmpty() || filteredRows.firstOrNull()?.items.isNullOrEmpty()) {
+            isFirstRowItemAttached = false
+        }
+    }
+
     // Gentle auto-cycle on Hero Spotlight when no poster is actively hovered
     LaunchedEffect(featuredSlides.size, focusedHeroItem) {
         if (featuredSlides.size > 1 && focusedHeroItem == null) {
@@ -239,15 +258,15 @@ fun HomeScreen(
                         selectedCategory = selectedCategory,
                         onCategorySelected = {
                             selectedCategory = it
+                            pendingHeroFocus.value = null
                             focusedHeroItem = null
                             autoSlideIndex = 0
                         },
                         activeServiceBadge = activeServiceBadge,
                         firstRowFocusRequester = if (filteredRows.isNotEmpty()) firstRowFocusRequester else null,
+                        isFirstRowAttached = { isFirstRowItemAttached },
                         totalSlides = featuredSlides.size,
-                        activeSlideIndex = activeDotIndex,
-                        isExpanded = isHeroExpanded,
-                        onToggleExpand = { isHeroExpanded = !isHeroExpanded }
+                        activeSlideIndex = activeDotIndex
                     )
                 }
 
@@ -279,11 +298,13 @@ fun HomeScreen(
                             showPosterLabels = showPosterLabels,
                             onItemClick = onItemClick,
                             onItemFocused = { item ->
-                                focusedHeroItem = item
-                                focusedItemIndex = row.items.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
-                                if (isHeroExpanded) isHeroExpanded = false
+                                pendingHeroFocus.value =
+                                    item to row.items.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
                             },
-                            firstItemFocusRequester = if (isFirstRow) firstRowFocusRequester else null
+                            firstItemFocusRequester = if (isFirstRow) firstRowFocusRequester else null,
+                            onFirstItemAttachedChanged = if (isFirstRow) {
+                                { attached -> isFirstRowItemAttached = attached }
+                            } else null
                         )
                     }
                 }
@@ -310,14 +331,13 @@ fun HomeScreen(
                                 selectedCategory = selectedCategory,
                                 onCategorySelected = {
                                     selectedCategory = it
+                                    pendingHeroFocus.value = null
                                     focusedHeroItem = null
                                     autoSlideIndex = 0
                                 },
                                 activeServiceBadge = activeServiceBadge,
                                 totalSlides = featuredSlides.size,
-                                activeSlideIndex = activeDotIndex,
-                                isExpanded = isHeroExpanded,
-                                onToggleExpand = { isHeroExpanded = !isHeroExpanded }
+                                activeSlideIndex = activeDotIndex
                             )
                         }
                     }
@@ -356,7 +376,7 @@ fun HomeScreen(
                         cardCorner = cardCorner,
                         showPosterLabels = showPosterLabels,
                         onItemClick = onItemClick,
-                        onItemFocused = { if (isTv) focusedHeroItem = it }
+                        onItemFocused = { if (isTv) pendingHeroFocus.value = it to focusedItemIndex }
                     )
                 }
             }

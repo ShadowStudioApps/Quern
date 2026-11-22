@@ -3,11 +3,8 @@ package com.quern.app.ui.components
 import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -33,8 +30,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -43,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,10 +46,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusEventModifierNode
+import androidx.compose.ui.focus.FocusRequesterModifierNode
+import androidx.compose.ui.focus.FocusState
+import androidx.compose.ui.focus.requestFocus
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.currentValueOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -62,7 +67,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.memory.MemoryCache
 import com.quern.app.domain.model.CardCornerPreset
 import com.quern.app.domain.model.CardShapePreset
 import com.quern.app.domain.model.CardSizePreset
@@ -105,7 +114,57 @@ fun Modifier.tvClickable(
         onFocusChangedState(focused)
         if (focused) onFocused()
     }
+    .then(RememberLastFocusedElement)
     .clickable(enabled = enabled, onClick = onClick)
+
+/**
+ * Remembers the last focused tvClickable inside a content area so focus coming back
+ * from the navigation rail (DPAD_RIGHT) lands on that exact item instead of the
+ * geometrically nearest one. Provided only around screen content, never around the rail.
+ */
+class ContentFocusMemory {
+    internal var last: RememberLastFocusedNode? = null
+
+    /** Requests focus on the remembered item. Returns false if there is nothing to restore. */
+    fun restore(): Boolean {
+        val node = last ?: return false
+        if (!node.isAttached) {
+            last = null
+            return false
+        }
+        return node.requestFocus()
+    }
+}
+
+val LocalContentFocusMemory = staticCompositionLocalOf<ContentFocusMemory?> { null }
+
+private object RememberLastFocusedElement : ModifierNodeElement<RememberLastFocusedNode>() {
+    override fun create() = RememberLastFocusedNode()
+    override fun update(node: RememberLastFocusedNode) = Unit
+    override fun hashCode(): Int = "RememberLastFocused".hashCode()
+    override fun equals(other: Any?): Boolean = other === this
+}
+
+internal class RememberLastFocusedNode :
+    Modifier.Node(),
+    FocusEventModifierNode,
+    FocusRequesterModifierNode,
+    CompositionLocalConsumerModifierNode {
+
+    private var memory: ContentFocusMemory? = null
+
+    override fun onFocusEvent(focusState: FocusState) {
+        if (!focusState.isFocused) return
+        val m = currentValueOf(LocalContentFocusMemory) ?: return
+        memory = m
+        m.last = this
+    }
+
+    override fun onDetach() {
+        memory?.let { if (it.last === this) it.last = null }
+        memory = null
+    }
+}
 
 @Composable
 fun rememberIsTvMode(override: UiModeOverride): Boolean {
@@ -193,26 +252,15 @@ fun LumaHeroBanner(
     onCategorySelected: ((String) -> Unit)? = null,
     activeServiceBadge: String? = null,
     firstRowFocusRequester: FocusRequester? = null,
+    isFirstRowAttached: () -> Boolean = { false },
     totalSlides: Int = 1,
     activeSlideIndex: Int = 0,
-    isExpanded: Boolean = false,
-    onToggleExpand: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val palette = LocalQuernPalette.current
     val strings = LocalQuernStrings.current
-    val targetHeight = when {
-        isExpanded && isTv -> 420.dp
-        isExpanded && !isTv -> 370.dp
-        isTv -> 262.dp
-        else -> 252.dp
-    }
-    val heroHeight by animateDpAsState(
-        targetValue = targetHeight,
-        animationSpec = tween(220),
-        label = "heroHeightAnim"
-    )
+    val heroHeight = if (isTv) 262.dp else 252.dp
     val viewDetailsFocus = remember { FocusRequester() }
     val isAr = strings.watchNow == "شاهد الآن"
     val viewDetailsLabel = if (isAr) "عرض التفاصيل" else "View Details"
@@ -229,13 +277,18 @@ fun LumaHeroBanner(
         "Servers" to strings.servers
     )
 
+    // Memory-cache key of the backdrop currently on screen. The next request uses it as its
+    // placeholder, so Coil's single crossfade goes old image -> new image (no blank frame, no
+    // second Compose Crossfade layer). Plain holder: updating it must not recompose.
+    val shownBackdropKey = remember { arrayOfNulls<MemoryCache.Key>(1) }
     val imageModel = remember(item.backdropUrl, item.posterUrl) {
         val url = item.backdropUrl ?: item.posterUrl
         if (url.isNullOrBlank()) null else {
             ImageRequest.Builder(context)
                 .data(url)
                 .size(960, 540)
-                .crossfade(true)
+                .placeholderMemoryCacheKey(shownBackdropKey[0])
+                .crossfade(260)
                 .build()
         }
     }
@@ -245,38 +298,28 @@ fun LumaHeroBanner(
             .fillMaxWidth()
             .height(heroHeight)
             .clip(RoundedCornerShape(if (isTv) 20.dp else 0.dp))
-            .background(palette.surface)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(palette.accent.copy(alpha = 0.24f), palette.surface, palette.background)
+                )
+            )
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(palette.accent.copy(alpha = 0.24f), palette.surface, palette.background)
-                    )
-                )
-        )
-
         if (imageModel != null) {
-            Crossfade(
-                targetState = imageModel,
-                animationSpec = tween(260),
-                label = "heroBackdropFade"
-            ) { req ->
-                AsyncImage(
-                    model = req,
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            AsyncImage(
+                model = imageModel,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                onSuccess = { shownBackdropKey[0] = it.result.memoryCacheKey },
+                modifier = Modifier.fillMaxSize()
+            )
         }
 
+        // One scrim layer: both gradients built once per size, drawn in a single pass
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
+                .drawWithCache {
+                    val vertical = Brush.verticalGradient(
                         colorStops = arrayOf(
                             0.0f to palette.background.copy(alpha = 0.42f),
                             0.30f to Color.Transparent,
@@ -284,13 +327,7 @@ fun LumaHeroBanner(
                             1.0f to palette.background
                         )
                     )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
+                    val horizontal = Brush.horizontalGradient(
                         colorStops = arrayOf(
                             0.0f to palette.background.copy(alpha = 0.88f),
                             0.38f to palette.background.copy(alpha = 0.48f),
@@ -298,7 +335,11 @@ fun LumaHeroBanner(
                             1.0f to Color.Transparent
                         )
                     )
-                )
+                    onDrawBehind {
+                        drawRect(vertical)
+                        drawRect(horizontal)
+                    }
+                }
         )
 
         // Top Bar
@@ -382,34 +423,6 @@ fun LumaHeroBanner(
                                     contentDescription = "Refresh",
                                     tint = if (refFocused) palette.onAccent else Color.White,
                                     modifier = Modifier.size(15.dp)
-                                )
-                            }
-                        }
-                    }
-                    if (onToggleExpand != null) {
-                        var fsFocused by remember { mutableStateOf(false) }
-                        Surface(
-                            color = if (fsFocused) palette.accent else Color.Black.copy(alpha = 0.55f),
-                            shape = CircleShape,
-                            border = BorderStroke(
-                                width = if (fsFocused) 2.dp else 1.dp,
-                                color = if (fsFocused) palette.focusRing else Color.White.copy(alpha = 0.28f)
-                            ),
-                            modifier = Modifier
-                                .size(32.dp)
-                                .focusProperties { down = viewDetailsFocus }
-                                .clip(CircleShape)
-                                .tvClickable(
-                                    onFocusChangedState = { fsFocused = it },
-                                    onClick = onToggleExpand
-                                )
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (isExpanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                    contentDescription = if (isExpanded) "Exit Fullscreen Preview" else "Expand Preview",
-                                    tint = if (fsFocused) palette.onAccent else Color.White,
-                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -506,7 +519,7 @@ fun LumaHeroBanner(
                     color = Color.White.copy(alpha = 0.86f),
                     fontSize = 11.sp,
                     lineHeight = 15.5.sp,
-                    maxLines = if (isExpanded) 4 else 3,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -521,11 +534,14 @@ fun LumaHeroBanner(
                 border = if (detailsFocused) BorderStroke(2.dp, palette.focusRing) else null,
                 modifier = Modifier
                     .focusRequester(viewDetailsFocus)
-                    .then(
-                        if (firstRowFocusRequester != null) {
-                            Modifier.focusProperties { down = firstRowFocusRequester }
-                        } else Modifier
-                    )
+                    .focusProperties {
+                        // Read at focus-search time, so attaching/detaching the first row never recomposes the hero
+                        down = if (firstRowFocusRequester != null && isFirstRowAttached()) {
+                            firstRowFocusRequester
+                        } else {
+                            FocusRequester.Default
+                        }
+                    }
                     .clip(RoundedCornerShape(999.dp))
                     .tvClickable(
                         onFocusChangedState = { detailsFocused = it },
@@ -631,6 +647,7 @@ fun LumaMediaCarouselRow(
     onItemClick: (MediaItem) -> Unit,
     onItemFocused: ((MediaItem) -> Unit)? = null,
     firstItemFocusRequester: FocusRequester? = null,
+    onFirstItemAttachedChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalQuernPalette.current
@@ -679,6 +696,11 @@ fun LumaMediaCarouselRow(
                 contentType = { "poster" }
             ) { item ->
                 val isFirst = item.id == row.items.firstOrNull()?.id
+                if (isFirst && firstItemFocusRequester != null && onFirstItemAttachedChanged != null) {
+                    DisposableEffect(row.id, item.id) {
+                        onDispose { onFirstItemAttachedChanged(false) }
+                    }
+                }
                 LumaPosterCard(
                     item = item,
                     isTv = isTv,
@@ -689,7 +711,11 @@ fun LumaMediaCarouselRow(
                     onClick = { onItemClick(item) },
                     onFocused = { onItemFocused?.invoke(item) },
                     modifier = if (isFirst && firstItemFocusRequester != null) {
-                        Modifier.focusRequester(firstItemFocusRequester)
+                        Modifier
+                            .focusRequester(firstItemFocusRequester)
+                            .onGloballyPositioned { coords ->
+                                onFirstItemAttachedChanged?.invoke(coords.isAttached)
+                            }
                     } else Modifier
                 )
             }
@@ -713,16 +739,14 @@ fun LumaPosterCard(
     val palette = LocalQuernPalette.current
     var isFocused by remember { mutableStateOf(false) }
 
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.13f else 1f,
-        animationSpec = spring(dampingRatio = 0.78f, stiffness = 460f),
-        label = "posterScale"
+    // One short tween drives both scale and border. Read only inside graphicsLayer/draw lambdas,
+    // so the animation re-draws the card without recomposing it on every frame.
+    val focusProgress = animateFloatAsState(
+        targetValue = if (isFocused) 1f else 0f,
+        animationSpec = tween(120),
+        label = "posterFocus"
     )
-    val borderColor by animateColorAsState(
-        targetValue = if (isFocused) Color.White else palette.border,
-        animationSpec = tween(140),
-        label = "posterBorderColor"
-    )
+    val idleBorder = palette.border
     val baseWidth = if (isTv) cardSize.tvWidthDp else cardSize.phoneWidthDp
     val cardWidth = if (cardShape == CardShapePreset.LANDSCAPE) (baseWidth * 1.45f).toInt().dp else baseWidth.dp
     val cornerShape = RoundedCornerShape(cardCorner.radiusDp.dp)
@@ -733,7 +757,9 @@ fun LumaPosterCard(
             ImageRequest.Builder(context)
                 .data(url)
                 .size(if (cardShape == CardShapePreset.LANDSCAPE) 420 else 260, if (cardShape == CardShapePreset.LANDSCAPE) 236 else 390)
-                .crossfade(160)
+                .crossfade(false)
+                // No allowRgb565 here: Coil only applies it to ARGB_8888 decodes, which means turning off
+                // hardware bitmaps. Measured on the TV, that cost +24 MB PSS and more jank (STEP 5).
                 .build()
         }
     }
@@ -748,8 +774,9 @@ fun LumaPosterCard(
             .width(cardWidth)
             .zIndex(if (isFocused) 10f else 0f)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = 1f + 0.13f * focusProgress.value
+                scaleX = s
+                scaleY = s
             }
             .tvClickable(
                 onFocusChangedState = { isFocused = it },
@@ -763,11 +790,22 @@ fun LumaPosterCard(
                 .aspectRatio(cardShape.aspectRatio)
                 .clip(cornerShape)
                 .background(fallbackBg)
-                .border(
-                    width = if (isFocused) 3.dp else 1.dp,
-                    color = borderColor,
-                    shape = cornerShape
-                )
+                .drawWithCache {
+                    val outline = cornerShape.createOutline(size, layoutDirection, this)
+                    val thin = 1.dp.toPx()
+                    val thick = 3.dp.toPx()
+                    onDrawWithContent {
+                        drawContent()
+                        val p = focusProgress.value
+                        // Stroke is centred on the edge and the shape clip hides the outer half,
+                        // so double the width to keep the same inside border as Modifier.border.
+                        drawOutline(
+                            outline = outline,
+                            color = lerp(idleBorder, Color.White, p),
+                            style = Stroke(width = 2f * (thin + (thick - thin) * p))
+                        )
+                    }
+                }
         ) {
             if (imageModel != null) {
                 AsyncImage(
@@ -798,21 +836,18 @@ fun LumaPosterCard(
             }
 
             if (!item.rating.isNullOrBlank()) {
-                Surface(
-                    color = Color.Black.copy(alpha = 0.78f),
-                    shape = RoundedCornerShape(999.dp),
+                // Plain Row + background: no Surface (no elevation/semantics/content-color providers)
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(4.dp)
+                        .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Star, null, tint = LumaAmber, modifier = Modifier.size(8.dp))
-                        Spacer(Modifier.width(1.5.dp))
-                        Text(item.rating, color = Color.White, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Icon(Icons.Default.Star, null, tint = LumaAmber, modifier = Modifier.size(8.dp))
+                    Spacer(Modifier.width(1.5.dp))
+                    Text(item.rating, color = Color.White, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

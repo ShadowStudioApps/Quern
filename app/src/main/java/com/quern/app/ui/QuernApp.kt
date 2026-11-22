@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.quern.app.ui
 
 import androidx.activity.compose.BackHandler
@@ -13,6 +15,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -44,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,6 +58,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -70,6 +76,8 @@ import com.quern.app.domain.model.ContinueWatchingAction
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.domain.model.NavigationStyle
 import com.quern.app.player.QuernPlayerScreen
+import com.quern.app.ui.components.ContentFocusMemory
+import com.quern.app.ui.components.LocalContentFocusMemory
 import com.quern.app.ui.components.QuernBrandMark
 import com.quern.app.ui.components.rememberIsTvMode
 import com.quern.app.ui.components.tvClickable
@@ -358,6 +366,7 @@ fun QuernApp(
         }
 
         if (isTv) {
+            val contentFocusMemory = remember { ContentFocusMemory() }
             Scaffold(
                 containerColor = palette.background,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -394,8 +403,11 @@ fun QuernApp(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(start = if (!showingDetail) 64.dp else 0.dp)
+                                    .restoreLastContentFocus(contentFocusMemory)
                             ) {
-                                content()
+                                CompositionLocalProvider(LocalContentFocusMemory provides contentFocusMemory) {
+                                    content()
+                                }
                             }
                             if (!showingDetail) {
                                 QuernTvNavigationRail(
@@ -420,8 +432,15 @@ fun QuernApp(
                                     onSelectTab = { currentTab = it }
                                 )
                             }
-                            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                                content()
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .restoreLastContentFocus(contentFocusMemory)
+                            ) {
+                                CompositionLocalProvider(LocalContentFocusMemory provides contentFocusMemory) {
+                                    content()
+                                }
                             }
                         }
                     }
@@ -626,6 +645,16 @@ fun QuernFloatingPhoneDock(
     }
 }
 
+/**
+ * When focus enters the content area from outside (DPAD_RIGHT from the rail), put it back on
+ * the exact item that had it before. Falls back to normal geometric search if that item is gone.
+ */
+private fun Modifier.restoreLastContentFocus(memory: ContentFocusMemory): Modifier = this
+    .focusProperties {
+        enter = { if (memory.restore()) FocusRequester.Cancel else FocusRequester.Default }
+    }
+    .focusGroup()
+
 @Composable
 fun QuernTvNavigationRail(
     currentTab: QuernTab,
@@ -633,7 +662,10 @@ fun QuernTvNavigationRail(
     onSelectTab: (QuernTab) -> Unit
 ) {
     val palette = LocalQuernPalette.current
-    val firstItemFocusRequester = remember { FocusRequester() }
+    // One requester per tab so focus entering the rail lands on the selected tab, not the geometrically nearest one
+    val tabFocusRequesters = remember { QuernTab.entries.associateWith { FocusRequester() } }
+    val firstItemFocusRequester = tabFocusRequesters.getValue(QuernTab.HOME)
+    val latestTab by rememberUpdatedState(currentTab)
     var railHasFocus by remember { mutableStateOf(false) }
 
     val expanded = !autoHideCollapsed || railHasFocus
@@ -679,7 +711,9 @@ fun QuernTvNavigationRail(
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .focusProperties { enter = { tabFocusRequesters.getValue(latestTab) } }
+                .focusGroup(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = if (expanded) Alignment.Start else Alignment.CenterHorizontally
         ) {
@@ -708,32 +742,48 @@ fun QuernTvNavigationRail(
                     else -> Color(0xFF8E94A0)
                 }
 
-                if (expanded) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .graphicsLayer { scaleX = scale; scaleY = scale }
-                            .then(if (tab == QuernTab.HOME) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (focused) Color(0xFF2F80ED) else if (selected) palette.accent.copy(alpha = 0.24f) else Color.Transparent)
-                            .border(
-                                width = if (focused) 2.dp else 0.dp,
-                                color = if (focused) Color.White.copy(alpha = 0.85f) else Color.Transparent,
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .tvClickable(
-                                onFocusChangedState = { focused = it },
-                                onClick = { onSelectTab(tab) }
-                            )
-                            .padding(horizontal = 10.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = label,
-                            tint = if (focused) Color.White else if (selected) palette.focusRing else Color(0xFF8E94A0),
-                            modifier = Modifier.size(21.dp)
+                val itemBg = if (expanded) {
+                    if (focused) Color(0xFF2F80ED)
+                    else if (selected) palette.accent.copy(alpha = 0.24f)
+                    else Color.Transparent
+                } else {
+                    squircleBg
+                }
+                val itemTint = if (expanded) {
+                    if (focused) Color.White else if (selected) palette.focusRing else Color(0xFF8E94A0)
+                } else {
+                    iconTint
+                }
+
+                // Single persistent Row focus target so expanding/collapsing never disposes the focused node
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .graphicsLayer { scaleX = scale; scaleY = scale }
+                        .focusRequester(tabFocusRequesters.getValue(tab))
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(itemBg)
+                        .border(
+                            width = if (expanded && focused) 2.dp else 0.dp,
+                            color = if (expanded && focused) Color.White.copy(alpha = 0.85f) else Color.Transparent,
+                            shape = RoundedCornerShape(14.dp)
                         )
+                        .tvClickable(
+                            onFocusChangedState = { focused = it },
+                            onClick = { onSelectTab(tab) }
+                        )
+                        .padding(horizontal = if (expanded) 10.dp else 0.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = tab.icon,
+                        contentDescription = label,
+                        tint = itemTint,
+                        modifier = Modifier.size(if (expanded) 21.dp else 23.dp)
+                    )
+                    if (expanded) {
                         Spacer(Modifier.width(10.dp))
                         Text(
                             text = label,
@@ -741,28 +791,6 @@ fun QuernTvNavigationRail(
                             fontSize = 12.sp,
                             fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.Medium,
                             maxLines = 1
-                        )
-                    }
-                } else {
-                    // Pure centered squircle icon (exact match to Image #1!)
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .graphicsLayer { scaleX = scale; scaleY = scale }
-                            .then(if (tab == QuernTab.HOME) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(squircleBg)
-                            .tvClickable(
-                                onFocusChangedState = { focused = it },
-                                onClick = { onSelectTab(tab) }
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = label,
-                            tint = iconTint,
-                            modifier = Modifier.size(23.dp)
                         )
                     }
                 }
