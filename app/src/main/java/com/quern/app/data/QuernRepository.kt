@@ -1,0 +1,204 @@
+package com.quern.app.data
+
+import com.quern.app.data.addons.AddonRepository
+import com.quern.app.data.debrid.DebridManager
+import com.quern.app.data.local.FavoriteDao
+import com.quern.app.data.local.FavoriteEntity
+import com.quern.app.data.local.WatchHistoryDao
+import com.quern.app.data.local.WatchHistoryEntity
+import com.quern.app.data.metadata.TmdbClient
+import com.quern.app.data.metadata.TraktClient
+import com.quern.app.data.servers.MediaServerManager
+import com.quern.app.domain.model.CatalogRow
+import com.quern.app.domain.model.MediaDetail
+import com.quern.app.domain.model.MediaItem
+import com.quern.app.domain.model.MediaType
+import com.quern.app.domain.model.SourceOrigin
+import com.quern.app.domain.model.StreamSource
+import com.quern.app.domain.model.SubtitleTrack
+import com.quern.app.domain.model.WatchProgress
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+class QuernRepository(
+    val addonRepository: AddonRepository,
+    val debridManager: DebridManager,
+    val serverManager: MediaServerManager,
+    val tmdbClient: TmdbClient,
+    val traktClient: TraktClient,
+    private val historyDao: WatchHistoryDao,
+    private val favoriteDao: FavoriteDao
+) {
+    val continueWatching: Flow<List<WatchProgress>> = historyDao.observeRecent().map { list ->
+        list.map {
+            WatchProgress(
+                contentId = it.contentId,
+                title = it.title,
+                type = MediaType.fromStremio(it.mediaType),
+                posterUrl = it.posterUrl,
+                backdropUrl = it.backdropUrl,
+                positionMs = it.positionMs,
+                durationMs = it.durationMs,
+                episodeId = it.episodeId,
+                episodeLabel = it.episodeLabel,
+                lastStreamUrl = it.lastStreamUrl,
+                updatedAt = it.updatedAt
+            )
+        }
+    }
+
+    val favorites: Flow<List<MediaItem>> = favoriteDao.observeAll().map { list ->
+        list.map {
+            MediaItem(
+                id = it.contentId,
+                title = it.title,
+                type = MediaType.fromStremio(it.mediaType),
+                posterUrl = it.posterUrl,
+                backdropUrl = it.backdropUrl,
+                year = it.year,
+                rating = it.rating,
+                origin = runCatching { SourceOrigin.valueOf(it.origin) }.getOrDefault(SourceOrigin.ADDON),
+                sourceId = it.sourceId
+            )
+        }
+    }
+
+    fun observeIsFavorite(contentId: String): Flow<Boolean> = favoriteDao.observeIsFavorite(contentId)
+
+    suspend fun toggleFavorite(item: MediaItem, currentlyFavorite: Boolean) {
+        if (currentlyFavorite) {
+            favoriteDao.delete(item.id)
+        } else {
+            favoriteDao.upsert(
+                FavoriteEntity(
+                    contentId = item.id,
+                    title = item.title,
+                    mediaType = item.type.stremioValue,
+                    posterUrl = item.posterUrl,
+                    backdropUrl = item.backdropUrl,
+                    year = item.year,
+                    rating = item.rating,
+                    origin = item.origin.name,
+                    sourceId = item.sourceId,
+                    addedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    suspend fun saveWatchProgress(progress: WatchProgress) {
+        if (progress.durationMs <= 0L) return
+        historyDao.upsert(
+            WatchHistoryEntity(
+                contentId = progress.contentId,
+                title = progress.title,
+                mediaType = progress.type.stremioValue,
+                posterUrl = progress.posterUrl,
+                backdropUrl = progress.backdropUrl,
+                positionMs = progress.positionMs,
+                durationMs = progress.durationMs,
+                episodeId = progress.episodeId,
+                episodeLabel = progress.episodeLabel,
+                lastStreamUrl = progress.lastStreamUrl,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun getSavedPositionMs(contentId: String): Long =
+        historyDao.getById(contentId)?.positionMs ?: 0L
+
+    suspend fun loadHomeCatalogs(hiddenCatalogKeys: Set<String> = emptySet()): List<CatalogRow> = coroutineScope {
+        val tmdbDeferred = async { tmdbClient.getHomeCatalogRows() }
+        val serversDeferred = async { serverManager.getAllCatalogRows() }
+        val addonsDeferred = async { addonRepository.fetchHomeCatalogRows(hiddenCatalogKeys) }
+
+        buildList {
+            addAll(serversDeferred.await())
+            addAll(tmdbDeferred.await())
+            addAll(addonsDeferred.await())
+        }
+    }
+
+    suspend fun searchEverywhere(query: String): List<MediaItem> = coroutineScope {
+        if (query.isBlank()) return@coroutineScope emptyList()
+        val serverTask = async { serverManager.searchAll(query) }
+        val tmdbTask = async { tmdbClient.search(query) }
+        val addonTask = async { addonRepository.searchCatalogs(query) }
+
+        (serverTask.await() + tmdbTask.await() + addonTask.await())
+            .distinctBy { "${it.origin}_${it.type}_${it.id}" }
+    }
+
+    suspend fun loadDetail(item: MediaItem): MediaDetail {
+        // 1. Personal Media Server item (Jellyfin / Emby / Plex / WebDAV)
+        if (!item.sourceId.isNullOrBlank() && item.origin in setOf(
+                SourceOrigin.JELLYFIN, SourceOrigin.EMBY, SourceOrigin.PLEX, SourceOrigin.WEBDAV
+            )
+        ) {
+            serverManager.getDetail(item.sourceId, item.id)?.let { return it }
+        }
+
+        // 2. TMDB item
+        if (item.tmdbId != null) {
+            tmdbClient.getDetail(item.tmdbId, item.type)?.let { return it }
+        }
+
+        // 3. Stremio Addon Protocol meta
+        addonRepository.fetchMeta(item.type, item.id)?.let { return it }
+
+        // Fallback to preview data
+        return MediaDetail(item = item)
+    }
+
+    suspend fun loadStreamsAndSubtitles(
+        detail: MediaDetail,
+        episodeId: String? = null
+    ): Pair<List<StreamSource>, List<SubtitleTrack>> = coroutineScope {
+        val item = detail.item
+        val targetId = episodeId ?: item.imdbId ?: item.id
+
+        val serverStreamsTask = async {
+            if (!item.sourceId.isNullOrBlank() && item.origin in setOf(
+                    SourceOrigin.JELLYFIN, SourceOrigin.EMBY, SourceOrigin.PLEX, SourceOrigin.WEBDAV
+                )
+            ) {
+                serverManager.getStreams(item.sourceId, episodeId ?: item.id)
+            } else {
+                emptyList()
+            }
+        }
+
+        val addonLookupId = when {
+            episodeId != null && !episodeId.startsWith("srv:") -> episodeId
+            !item.imdbId.isNullOrBlank() -> item.imdbId
+            !item.id.startsWith("srv:") && !item.id.startsWith("dav:") -> item.id
+            else -> null
+        }
+
+        val addonStreamsTask = async {
+            if (addonLookupId != null) {
+                addonRepository.fetchAggregatedStreams(item.type, addonLookupId)
+            } else {
+                emptyList()
+            }
+        }
+
+        val subtitlesTask = async {
+            if (addonLookupId != null) {
+                addonRepository.fetchAggregatedSubtitles(item.type, addonLookupId)
+            } else {
+                emptyList()
+            }
+        }
+
+        val allStreams = serverStreamsTask.await() + addonStreamsTask.await()
+        val embeddedSubs = allStreams.flatMap { it.subtitles }
+        val allSubtitles = (subtitlesTask.await() + embeddedSubs).distinctBy { it.url }
+
+        allStreams to allSubtitles
+    }
+}

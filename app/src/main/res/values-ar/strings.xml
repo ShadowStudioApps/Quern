@@ -1,0 +1,256 @@
+<resources>
+    <string name="app_name">Quern</string>
+
+    <!-- First-Run Empty Home State (Client-Only) -->
+    <string name="first_run_title">أضف إضافة (Addon) للبدء</string>
+    <string name="first_run_subtitle">تطبيق Quern هو مشغل عميل فقط ولا يحتوي على أي مصادر أو كتالوجات مدمجة. أضف إضافتك المتوافقة مع Stremio عبر الرابط أو امسح رمز QR من هاتفك.</string>
+    <string name="first_run_add_addon">إضافة Addon (رابط / QR)</string>
+    <string name="first_run_open_settings">فتح الإعدادات</string>
+    <string name="first_run_scan_qr_hint">امسح الرمز بهاتفك على نفس شبكة الواي فاي:</string>
+
+    <!-- Settings Shell & Quern Additions -->
+    <string name="settings_title">الإعدادات</string>
+    <string name="settings_search_placeholder">ابحث في الإعدادات…</string>
+    <string name="settings_search_tv_hint">اضغط OK للبحث عن أي إعداد</string>
+    <string name="settings_search_no_results">لا توجد إعدادات مطابقة.</string>
+    <string name="settings_changed_badge">معدّل</string>
+    <string name="settings_reset_section">إعادة ضبط القسم</string>
+    <string name="settings_reset_done">تمت إعادة القسم للافتراضي</string>
+    <string name="settings_reset_confirm_title">إعادة ضبط %1$s؟</string>
+    <string name="settings_reset_confirm_body">سيتم إرجاع تفضيلات هذا القسم فقط للافتراضي. لن يتم المساس بحساباتك أو بروفايلاتك أو رموز PIN أو الإضافات أو مفاتيح الخدمات.</string>
+    <string name="settings_presets_title">إعدادات جاهزة سريعة</string>
+    <string name="settings_presets_help">تطبيق حزمة إعدادات متكاملة بضغطة واحدة.</string>
+    <string name="preset_tv">شاشة TV</string>
+    <string name="preset_phone">هاتف</string>
+    <string name="preset_low_end">جهاز ضعيف</string>
+    <string name="preset_applied">تم تطبيق وضع: %1$s</string>
+    <string name="settings_advanced_toggle">إعدادات متقدمة</string>
+    <string name="settings_advanced_help">خيارات نادرة الاستخدام مخفية افتراضياً.</string>
+    <string name="settings_export_import_title">نسخ واستعادة الإعدادات (بدون أسرار)</string>
+    <string name="settings_export_import_help">تصدير أو استيراد جميع تفضيلات Quern ككود محمول. لا يشمل أي مفاتيح أو رموز سرية إطلاقاً.</string>
+    <string name="settings_export_btn">عرض كود التصدير</string>
+    <string name="settings_import_btn">استيراد كود الإعدادات</string>
+    <string name="common_back">رجوع</string>
+    <string name="common_cancel">إلغاء</string>
+    <string name="common_save">حفظ</string>
+    <string name="common_close">إغلاق</string>
+    <string name="common_done">تم</string>
+
+    <!-- 7 Top-Level Settings Groups -->
+    <string name="group_addons">الإضافات (Addons)</string>
+    <string name="group_addons_desc">التثبيت بالرابط أو QR، فحص الحالة، الترتيب، وإظهار الكتالوجات</string>
+    <string name="group_appearance">المظهر</string>
+    <string name="group_appearance_desc">الثيم، AMOLED الأسود، اللون المميز، شريط التنقل، الخط، اللغة، والأيقونة</string>
+    <string name="group_home">الرئيسية والتخطيط</string>
+    <string name="group_home_desc">البانر العلوي، بطاقات البوسترات، التسميات، ترتيب الصفوف، ومتابعة المشاهدة</string>
+    <string name="group_playback">التشغيل</string>
+    <string name="group_playback_desc">محرك المشغل، اللغات، الترجمة، السرعة، الأبعاد، تخطي العلامات، والتخزين المؤقت</string>
+    <string name="group_services">الخدمات</string>
+    <string name="group_services_desc">خدمات Debrid وسيرفرات الميديا الخاصة (بدون روابط أو مفاتيح افتراضية)</string>
+    <string name="group_accounts">الحسابات والمزامنة</string>
+    <string name="group_accounts_desc">TMDB، Trakt، المزامنة السحابية، كود المزامنة، وملفات المستخدمين</string>
+    <string name="group_system">النظام</string>
+    <string name="group_system_desc">التخزين والكاش، التشخيص، قناة التحديث، التراخيص، تقارير الأعطال، وحول التطبيق</string>
+
+    <!-- Section 1: Addons -->
+    <string name="addons_install_btn">إضافة رابط Addon</string>
+    <string name="addons_url_placeholder">اضغط OK لإدخال رابط الإضافة (https://.../manifest.json)</string>
+    <string name="addons_dialog_title">إضافة رابط Stremio Addon</string>
+    <string name="addons_dialog_tip">الصق رابط manifest.json أو stremio:// أو امسح رمز QR من هاتفك.</string>
+    <string name="addons_check_all">فحص جميع الإضافات</string>
+    <string name="addons_checking">جاري الفحص…</string>
+    <string name="addons_installed_count">الإضافات المثبتة (%1$d)</string>
+    <string name="addons_empty_state">لا توجد إضافات مثبتة. أضف رابط manifest.json أو امسح رمز QR من هاتفك.</string>
+    <string name="addons_health_ok">متاح • صالح • %1$dms</string>
+    <string name="addons_health_fail">غير متاح (%1$s)</string>
+    <string name="addons_health_btn">فحص</string>
+    <string name="addons_catalogs_label">إظهار كتالوجات الرئيسية</string>
+    <string name="addons_catalogs_help">اختر الكتالوجات التي تظهر من هذه الإضافة في الشاشة الرئيسية.</string>
+    <string name="addons_move_up">للأعلى</string>
+    <string name="addons_move_down">للأسفل</string>
+    <string name="addons_remove">حذف</string>
+    <string name="addons_qr_title">امسح QR لإضافة الإضافات</string>
+    <string name="addons_qr_desc">افتح هذه الصفحة من هاتفك أو حاسبتك (نفس الواي فاي) للصق روابط الإضافات مباشرة للشاشة.</string>
+
+    <!-- Section 2: Appearance -->
+    <string name="appearance_theme_title">جو الثيم</string>
+    <string name="appearance_amoled_label">أسود AMOLED نقي</string>
+    <string name="appearance_amoled_help">يستخدم الأسود النقي لشاشات OLED لرفع التباين وتقليل استهلاك الطاقة.</string>
+    <string name="appearance_accent_title">اللون المميز (Accent)</string>
+    <string name="appearance_accent_help">تغيير لون التحديد والتركيز بشكل مستقل عن الثيم.</string>
+    <string name="appearance_nav_title">نمط شريط التنقل</string>
+    <string name="appearance_nav_help">اختر بين شريط جانبي دائم أو مخفي تلقائياً أو شريط علوي.</string>
+    <string name="appearance_font_title">الخط وحجم النص</string>
+    <string name="appearance_font_help">تعديل نوع الخط وحجمه للوضوح على التلفاز والهاتف.</string>
+    <string name="appearance_lang_title">اللغة</string>
+    <string name="appearance_lang_help">تتبع لغة الجهاز تلقائياً مع دعم كامل للغة العربية (RTL).</string>
+    <string name="appearance_icon_title">أيقونة التطبيق وبانر التلفاز</string>
+    <string name="appearance_icon_help">تغيير الأيقونة الخارجية للتطبيق وبانر شاشة Android TV.</string>
+    <string name="icon_confirm_title">تغيير أيقونة التطبيق؟</string>
+    <string name="icon_confirm_body">تغيير الأيقونة أو بانر التلفاز يحدّث اختصار التطبيق وقد يؤدي إلى إغلاق Quern أو إعادة تشغيل الشاشة الرئيسية لحظياً.</string>
+    <string name="icon_confirm_apply">تغيير الأيقونة</string>
+
+    <!-- Section 3: Home & Layout -->
+    <string name="home_hero_label">إظهار البانر المميز (Hero)</string>
+    <string name="home_hero_help">يعرض معاينة الفيلم أو المسلسل المثبتة في أعلى الرئيسية.</string>
+    <string name="home_poster_labels_label">إظهار عناوين وسنوات البوسترات</string>
+    <string name="home_poster_labels_help">أوقفها للحصول على شبكة بوسترات فقط بمظهر أنظف.</string>
+    <string name="home_hide_unreleased_label">إخفاء المحتوى غير الصادر بعد</string>
+    <string name="home_hide_unreleased_help">يخفي الأعمال باستخدام تاريخ الإصدار الكامل (YYYY-MM-DD) عند توفره من TMDB أو الإضافات، ويعود للسنة فقط عند عدم توفر التاريخ الكامل.</string>
+    <string name="home_card_style_title">شكل وحجم بطاقات البوسترات</string>
+    <string name="home_row_order_title">ترتيب صفوف الكتالوج</string>
+    <string name="home_row_order_help">اختر طريقة ترتيب صفوف الأفلام والمسلسلات في الرئيسية.</string>
+    <string name="home_cw_title">متابعة المشاهدة</string>
+    <string name="home_cw_show">إظهار صف متابعة المشاهدة</string>
+    <string name="home_cw_sort">ترتيب العناصر</string>
+    <string name="home_cw_action">الإجراء عند الاختيار</string>
+    <string name="home_interface_mode">وضع الواجهة (تلقائي / TV / هاتف)</string>
+
+    <!-- Section 4: Playback -->
+    <string name="playback_engine_title">محرك المشغل</string>
+    <string name="playback_engine_help">يدعم Media3 ExoPlayer فك تشفير FFmpeg لـ DTS-HD و TrueHD. الخيار الخارجي يفتح VLC/Nova/mpv.</string>
+    <string name="playback_defaults_title">السرعة الافتراضية وأبعاد الشاشة</string>
+    <string name="playback_buffer_title">ملف التخزين المؤقت والشبكة</string>
+    <string name="playback_buffer_help">المنخفض يوفر الذاكرة للأجهزة الضعيفة، والعالي يجهّز تخزيناً أكبر لبث 4K.</string>
+    <string name="playback_sub_lang_title">لغة الترجمة الافتراضية</string>
+    <string name="playback_audio_lang_title">لغة الصوت الافتراضية</string>
+    <string name="playback_sub_style_title">مظهر الترجمة</string>
+    <string name="playback_automation_title">الحلقة التالية وتخطي الفصول</string>
+    <string name="playback_skip_intro_label">تخطي المقدمة (من علامات البث أو الإضافات فقط)</string>
+    <string name="playback_skip_intro_help">يظهر فقط عندما يوفّر البث أو إضافاتك علامات مقدمة/فصول حقيقية، ويختفي تلقائياً عند عدم توفرها.</string>
+    <string name="playback_skip_outro_label">تخطي الخاتمة / الحلقة التالية (من العلامات فقط)</string>
+    <string name="playback_skip_outro_help">يظهر فقط عند توفر علامات خاتمة أو شارة نهاية حقيقية من الفصول أو البث، ويختفي عند عدم توفرها.</string>
+    <string name="playback_autoplay_label">تشغيل الحلقة التالية تلقائياً</string>
+    <string name="playback_countdown_label">عداد التشغيل التلقائي</string>
+    <string name="playback_external_label">تفضيل المشغل الخارجي دائماً</string>
+    <string name="playback_external_app_title">المشغل الخارجي المثبت</string>
+    <string name="playback_external_app_help">تظهر المشغلات المثبتة على جهازك فقط، مع تمرير الرابط والعنوان والترجمة وموضع الاستئناف.</string>
+    <string name="playback_external_chooser">اختيار النظام (سؤال دائماً)</string>
+    <string name="playback_external_none_installed">لم يتم العثور على مشغلات خارجية مدعومة (VLC أو MX Player أو Just Player أو mpv) على هذا الجهاز.</string>
+    <string name="playback_audio_boost_label">تعزيز مستوى الصوت (+6 dB)</string>
+    <string name="playback_audio_boost_help">يرفع مستوى الصوت المنخفض بمقدار +6 dB عبر Android LoudnessEnhancer (رفع للصوت وليس موازنة ديناميكية). معطّل افتراضياً.</string>
+
+    <!-- Section 5: Services -->
+    <string name="services_notice">لا يحتوي Quern على أي خدمات أو مفاتيح أو روابط مدمجة. جميع المفاتيح مشفّرة داخل Android Keystore.</string>
+    <string name="services_debrid_title">خدمات Debrid</string>
+    <string name="services_debrid_desc">TorBox و Real-Debrid و AllDebrid و Premiumize (بمفاتيحك الخاصة)</string>
+    <string name="services_media_servers_title">سيرفرات الميديا الخاصة</string>
+    <string name="services_media_servers_desc">Jellyfin و Emby و Plex و WebDAV (بعناوين سيرفراتك الخاصة)</string>
+
+    <!-- Section 6: Accounts & Sync -->
+    <string name="accounts_tracking_title">البيانات والتتبع (TMDB و Trakt)</string>
+    <string name="accounts_tracking_desc">ربط اختياري مناسب للريموت مع حفظ الرموز في Keystore</string>
+    <string name="accounts_cloud_title">المزامنة السحابية والكود المحمول</string>
+    <string name="accounts_profiles_title">ملفات المستخدمين وقفل PIN</string>
+    <string name="accounts_external_import_title">الاستيراد من نسخة احتياطية أو حساب Stremio</string>
+
+    <!-- Section 7: System -->
+    <string name="system_storage_title">التخزين والكاش</string>
+    <string name="system_cache_size">حجم الكاش: %1$s</string>
+    <string name="system_clear_cache">مسح كاش الصور والملفات المؤقتة</string>
+    <string name="system_diagnostics_title">التشخيص ومعلومات الجهاز</string>
+    <string name="system_diagnostics_help">معلومات الجهاز والنظام ومفكك FFmpeg وعنوان خادم الويب المحلي.</string>
+    <string name="system_update_channel_title">قناة التحديثات</string>
+    <string name="system_update_channel_help">اختر مسار الإصدارات المفضل عند التحقق من التحديثات.</string>
+    <string name="system_crash_reporting_label">إرسال تقارير الأعطال (اختياري)</string>
+    <string name="system_crash_reporting_help">معطّل افتراضياً ولا يجمع أبداً أي مفاتيح أو رموز أو سجل مشاهدة.</string>
+    <string name="system_about_title">حول التطبيق والتراخيص مفتوحة المصدر</string>
+    <string name="system_licenses_btn">عرض التراخيص مفتوحة المصدر</string>
+    <string name="system_debug_title">أدوات المطور (نسخة Debug فقط)</string>
+
+    <!-- Companion QR Sign-In Card (Original Quern Design) -->
+    <string name="companion_card_title">الاقتران عبر الهاتف أو الحاسوب</string>
+    <string name="companion_status_waiting">بانتظار الاتصال • %1$s</string>
+    <string name="companion_status_connected">متصل</string>
+    <string name="companion_status_expired">انتهت صلاحية الرمز</string>
+    <string name="companion_short_code_label">الرمز القصير</string>
+    <string name="companion_url_label">افتح الرابط</string>
+    <string name="companion_step_1">صِل هاتفك أو حاسوبك بنفس شبكة الـ Wi-Fi.</string>
+    <string name="companion_step_2">امسح رمز QR أو افتح العنوان الظاهر أدناه في المتصفح.</string>
+    <string name="companion_step_3">تأكد من تطابق الرمز القصير واحفظ — سيتحدّث Quern تلقائياً.</string>
+    <string name="companion_refresh_btn">تحديث الرمز</string>
+
+    <!-- ServersScreen, Account & Profiles String Resources -->
+    <string name="servers_hub_eyebrow">مركز الاتصالات</string>
+    <string name="servers_hub_title">السيرفرات والخدمات السحابية</string>
+    <string name="servers_stat_debrid">ديبريد</string>
+    <string name="servers_stat_active">%1$d نشط</string>
+    <string name="servers_stat_servers">السيرفرات</string>
+    <string name="servers_stat_linked">%1$d متصل</string>
+    <string name="servers_stat_sync">المزامنة</string>
+    <string name="servers_tab_debrid">سحابة Debrid</string>
+    <string name="servers_tab_media">سيرفرات الميديا</string>
+    <string name="servers_tab_sync">المزامنة والواجهة</string>
+    <string name="servers_desc_jellyfin">سجّل الدخول بعنوان سيرفر Jellyfin وحسابك.</string>
+    <string name="servers_desc_emby">سجّل الدخول بعنوان سيرفر Emby وحسابك.</string>
+    <string name="servers_desc_plex">سجّل الدخول بسيرفر Plex ورمز X-Plex-Token.</string>
+    <string name="servers_desc_webdav">اربط أي مجلد وسائط WebDAV أو NAS أو HTTP.</string>
+    <string name="servers_connected_count">%1$d متصل</string>
+    <string name="servers_connected_header">سيرفرات الميديا المتصلة</string>
+    <string name="servers_display_mode_title">وضع عرض الواجهة</string>
+    <string name="servers_display_mode_desc">التبديل بسلاسة بين واجهة شاشة Android TV وواجهة اللمس للهاتف.</string>
+    <string name="servers_signed_in_as">متصل باسم %1$s</string>
+    <string name="servers_verify_save">تحقق وحفظ</string>
+    <string name="servers_update_key">تحديث مفتاح API</string>
+    <string name="servers_connect_name">ربط %1$s</string>
+    <string name="servers_disconnect">قطع الاتصال</string>
+    <string name="servers_tmdb_title">بيانات TMDB</string>
+    <string name="servers_tmdb_desc">بوسترات عربية وإنجليزية، طاقم العمل وربط IMDb</string>
+    <string name="servers_tmdb_connected">متصل</string>
+    <string name="servers_tmdb_key_label">مفتاح TMDB API أو Read Access Token</string>
+    <string name="servers_tmdb_save">حفظ TMDB</string>
+    <string name="servers_tmdb_configure">إعداد TMDB (%1$s)</string>
+    <string name="servers_tmdb_connect">ربط TMDB</string>
+    <string name="servers_trakt_title">مزامنة Trakt.tv</string>
+    <string name="servers_trakt_desc">تسجيل دخول مناسب للتلفاز برمز الجهاز وتتبع المشاهدة تلقائياً</string>
+    <string name="servers_trakt_visit">افتح الرابط %1$s</string>
+    <string name="servers_trakt_complete">إكمال التفعيل</string>
+    <string name="servers_trakt_client_id">معرّف Trakt Client ID</string>
+    <string name="servers_trakt_client_secret">سرّ Trakt Client Secret</string>
+    <string name="servers_trakt_generate">إنشاء رمز دخول للتلفاز</string>
+    <string name="servers_trakt_manage">إدارة Trakt</string>
+    <string name="servers_trakt_connect">ربط Trakt</string>
+    <string name="servers_add_dialog_title">ربط سيرفر ميديا شخصي</string>
+    <string name="servers_field_name">الاسم الظاهر (مثل: سيرفر المنزل)</string>
+    <string name="servers_field_url">عنوان السيرفر (%1$s)</string>
+    <string name="servers_field_plex_token">رمز X-Plex-Token</string>
+    <string name="servers_field_bearer_token">رمز Bearer Token (اختياري)</string>
+    <string name="servers_field_api_key">مفتاح API (أو سجّل أدناه)</string>
+    <string name="servers_field_username">اسم المستخدم (اختياري)</string>
+    <string name="servers_field_password">كلمة المرور (اختياري)</string>
+    <string name="servers_test_connect">اختبار واتصال</string>
+
+    <string name="account_stremio_nuvio_title">الاستيراد من نسخة احتياطية أو حساب Stremio</string>
+    <string name="account_stremio_nuvio_desc">استورد إضافاتك ومكتبتك وسجل المشاهدة من حساب Stremio أو نسخة JSON احتياطية (تُقبل النسخ الاحتياطية بصيغة JSON من التطبيقات المتوافقة مع Stremio؛ متاح أيضاً عبر %1$s/#import).</string>
+    <string name="account_sync_stremio_btn">مزامنة من Stremio</string>
+    <string name="account_import_nuvio_btn">استيراد نسخة JSON</string>
+    <string name="account_stremio_dialog_title">مزامنة حساب Stremio</string>
+    <string name="account_stremio_dialog_desc">يسحب جميع إضافات Stremio ومكتبتك وسجل المشاهدة.</string>
+    <string name="account_stremio_email">بريد Stremio الإلكتروني</string>
+    <string name="account_stremio_password">كلمة مرور Stremio</string>
+    <string name="account_sync_now">مزامنة الآن</string>
+    <string name="account_nuvio_dialog_desc">الصق نسخة JSON احتياطية أو رابط النسخة أو روابط الإضافات (أسهل عبر الحاسوب/الهاتف على %1$s/#import).</string>
+    <string name="account_nuvio_field">بيانات JSON أو رابط النسخة أو روابط الإضافات</string>
+    <string name="account_import_btn">استيراد</string>
+    <string name="account_sync_active">المزامنة متعددة الشاشات مفعّلة • %1$s</string>
+    <string name="account_ready">جاهز</string>
+    <string name="account_email_label">البريد الإلكتروني</string>
+    <string name="account_password_label">كلمة المرور (6 أحرف فأكثر)</string>
+    <string name="account_custom_server_label">سيرفر مزامنة خاص (Supabase URL &amp; Key)</string>
+    <string name="account_supabase_url">رابط سيرفر المزامنة / Supabase</string>
+    <string name="account_supabase_key">مفتاح المزامنة / Anon Key</string>
+
+    <string name="profile_unlock_title">فتح قفل %1$s</string>
+    <string name="profile_unlock_subtitle">أدخل الرمز السري المكون من 4 أرقام</string>
+    <string name="profile_set_pin_title">تعيين رمز قفل لـ %1$s</string>
+    <string name="profile_set_pin_subtitle">اختر 4 أرقام لقفل هذا البروفايل</string>
+    <string name="profile_create_title">إنشاء بروفايل جديد</string>
+    <string name="profile_name_label">اسم البروفايل</string>
+    <string name="profile_avatar_color">لون الصورة الرمزية</string>
+    <string name="profile_pin_optional">رمز قفل 4 أرقام (اختياري)</string>
+    <string name="profile_create_btn">إنشاء</string>
+    <string name="profile_lock_btn">قفل</string>
+    <string name="profile_unlock_btn">فك</string>
+    <string name="profile_pin_wrong">الرمز غير صحيح، حاول مجدداً</string>
+    <string name="profile_pin_locked_out">محاولات كثيرة خاطئة — انتظر %1$d ثانية</string>
+</resources>

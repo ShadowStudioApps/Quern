@@ -1,0 +1,256 @@
+<resources>
+    <string name="app_name">Quern</string>
+
+    <!-- First-Run Empty Home State (Client-Only) -->
+    <string name="first_run_title">Add an Addon to Get Started</string>
+    <string name="first_run_subtitle">Quern is a client-only player and includes no bundled sources or catalogs. Add your own Stremio-compatible addon by URL or scan the QR code from your phone.</string>
+    <string name="first_run_add_addon">Add Addon (URL / QR)</string>
+    <string name="first_run_open_settings">Open Settings</string>
+    <string name="first_run_scan_qr_hint">Scan with phone on the same Wi-Fi:</string>
+
+    <!-- Settings Shell & Quern Additions -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_search_placeholder">Search settings…</string>
+    <string name="settings_search_tv_hint">Press OK to search any setting</string>
+    <string name="settings_search_no_results">No matching settings found.</string>
+    <string name="settings_changed_badge">Modified</string>
+    <string name="settings_reset_section">Reset Section</string>
+    <string name="settings_reset_done">Section reset to defaults</string>
+    <string name="settings_reset_confirm_title">Reset %1$s?</string>
+    <string name="settings_reset_confirm_body">Only preferences in this section will return to defaults. Your accounts, profiles, PINs, addons, server credentials, and API keys will not be touched.</string>
+    <string name="settings_presets_title">Quick Presets</string>
+    <string name="settings_presets_help">Apply a curated bundle of settings in one step.</string>
+    <string name="preset_tv">TV</string>
+    <string name="preset_phone">Phone</string>
+    <string name="preset_low_end">Low-end Device</string>
+    <string name="preset_applied">Applied preset: %1$s</string>
+    <string name="settings_advanced_toggle">Advanced Options</string>
+    <string name="settings_advanced_help">Rarely changed options kept collapsed by default.</string>
+    <string name="settings_export_import_title">Settings Backup (No Secrets)</string>
+    <string name="settings_export_import_help">Export or restore all Quern preferences as a portable code. Tokens and API keys are never included.</string>
+    <string name="settings_export_btn">Show Export Code</string>
+    <string name="settings_import_btn">Import Settings Code</string>
+    <string name="common_back">Back</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_save">Save</string>
+    <string name="common_close">Close</string>
+    <string name="common_done">Done</string>
+
+    <!-- 7 Top-Level Settings Groups -->
+    <string name="group_addons">Addons</string>
+    <string name="group_addons_desc">Install by URL or QR, health checks, order, and catalog visibility</string>
+    <string name="group_appearance">Appearance</string>
+    <string name="group_appearance_desc">Theme, AMOLED black, accent color, navigation, font, language, and app icon</string>
+    <string name="group_home">Home &amp; Layout</string>
+    <string name="group_home_desc">Hero spotlight, poster cards, labels, row order, and Continue Watching</string>
+    <string name="group_playback">Playback</string>
+    <string name="group_playback_desc">Player engine, languages, subtitles, speed, aspect, skip markers, and buffer</string>
+    <string name="group_services">Services</string>
+    <string name="group_services_desc">Optional Debrid services and personal Media Servers (no defaults bundled)</string>
+    <string name="group_accounts">Accounts &amp; Sync</string>
+    <string name="group_accounts_desc">TMDB, Trakt, Cloud Sync, portable sync code, and user profiles</string>
+    <string name="group_system">System</string>
+    <string name="group_system_desc">Storage &amp; cache, diagnostics, updates, licenses, crash reporting, and About</string>
+
+    <!-- Section 1: Addons -->
+    <string name="addons_install_btn">Add Addon URL</string>
+    <string name="addons_url_placeholder">Press OK to enter Addon Manifest URL (https://.../manifest.json)</string>
+    <string name="addons_dialog_title">Add Stremio Addon URL</string>
+    <string name="addons_dialog_tip">Paste a Stremio v3 manifest.json or stremio:// URL, or scan the QR code from your phone.</string>
+    <string name="addons_check_all">Check All Health</string>
+    <string name="addons_checking">Checking…</string>
+    <string name="addons_installed_count">Installed Addons (%1$d)</string>
+    <string name="addons_empty_state">No addons installed. Add a manifest.json URL or scan the QR code from your phone.</string>
+    <string name="addons_health_ok">Reachable • Valid • %1$dms</string>
+    <string name="addons_health_fail">Unreachable (%1$s)</string>
+    <string name="addons_health_btn">Health</string>
+    <string name="addons_catalogs_label">Home Catalog Visibility</string>
+    <string name="addons_catalogs_help">Toggle which catalogs from this addon appear on Home.</string>
+    <string name="addons_move_up">Move Up</string>
+    <string name="addons_move_down">Move Down</string>
+    <string name="addons_remove">Remove</string>
+    <string name="addons_qr_title">Scan QR to Add Addons</string>
+    <string name="addons_qr_desc">Open this page on your phone or PC (same Wi-Fi) to paste addon URLs directly to your TV.</string>
+
+    <!-- Section 2: Appearance -->
+    <string name="appearance_theme_title">Theme Atmosphere</string>
+    <string name="appearance_amoled_label">True AMOLED Pure Black</string>
+    <string name="appearance_amoled_help">Uses pure black pixels for OLED displays to maximize contrast and save power.</string>
+    <string name="appearance_accent_title">Accent Color</string>
+    <string name="appearance_accent_help">Override the highlight &amp; focus ring color independently of the theme.</string>
+    <string name="appearance_nav_title">Navigation Style</string>
+    <string name="appearance_nav_help">Choose between persistent sidebar, auto-hiding overlay rail, or top bar.</string>
+    <string name="appearance_font_title">Font &amp; Text Scale</string>
+    <string name="appearance_font_help">Adjust text family and readability scale across TV and phone screens.</string>
+    <string name="appearance_lang_title">Language</string>
+    <string name="appearance_lang_help">Follows device language by default; supports full Arabic RTL.</string>
+    <string name="appearance_icon_title">App Icon &amp; TV Banner</string>
+    <string name="appearance_icon_help">Changes the launcher icon and Android TV home channel banner.</string>
+    <string name="icon_confirm_title">Change App Icon?</string>
+    <string name="icon_confirm_body">Switching the launcher icon or TV banner updates the app alias and may briefly close or restart Quern while your home screen refreshes.</string>
+    <string name="icon_confirm_apply">Change Icon</string>
+
+    <!-- Section 3: Home & Layout -->
+    <string name="home_hero_label">Show Hero Spotlight</string>
+    <string name="home_hero_help">Displays the featured backdrop preview pinned at the top of Home.</string>
+    <string name="home_poster_labels_label">Show Poster Titles &amp; Years</string>
+    <string name="home_poster_labels_help">Turn off for a minimal poster-only grid.</string>
+    <string name="home_hide_unreleased_label">Hide Unreleased Content</string>
+    <string name="home_hide_unreleased_help">Filters titles using full YYYY-MM-DD release dates when provided by TMDB/addons; falls back to year-only otherwise.</string>
+    <string name="home_card_style_title">Poster Card Style</string>
+    <string name="home_row_order_title">Catalog Row Order</string>
+    <string name="home_row_order_help">Choose how movie, series, and server rows are ordered on Home.</string>
+    <string name="home_cw_title">Continue Watching</string>
+    <string name="home_cw_show">Show Continue Watching Row</string>
+    <string name="home_cw_sort">Sort Order</string>
+    <string name="home_cw_action">Action on Select</string>
+    <string name="home_interface_mode">Interface Mode (Auto / TV / Phone)</string>
+
+    <!-- Section 4: Playback -->
+    <string name="playback_engine_title">Player Engine</string>
+    <string name="playback_engine_help">Media3 ExoPlayer includes built-in FFmpeg DTS-HD/TrueHD decoding. External opens VLC/Nova/mpv.</string>
+    <string name="playback_defaults_title">Default Speed &amp; Aspect Ratio</string>
+    <string name="playback_buffer_title">Buffer &amp; Network Profile</string>
+    <string name="playback_buffer_help">Low uses less RAM on low-end sticks; High pre-buffers more for 4K remuxes.</string>
+    <string name="playback_sub_lang_title">Default Subtitle Language</string>
+    <string name="playback_audio_lang_title">Default Audio Language</string>
+    <string name="playback_sub_style_title">Subtitle Appearance</string>
+    <string name="playback_automation_title">Up Next &amp; Chapter Skip</string>
+    <string name="playback_skip_intro_label">Skip Intro (From Stream/Addon Markers)</string>
+    <string name="playback_skip_intro_help">Only activates when the stream or your addons provide real intro/chapter markers; hidden otherwise.</string>
+    <string name="playback_skip_outro_label">Skip Outro / Up Next (From Markers Only)</string>
+    <string name="playback_skip_outro_help">Shows the Up Next prompt only when real outro/credits chapter or stream markers exist; hidden otherwise.</string>
+    <string name="playback_autoplay_label">Auto-Play Next Episode</string>
+    <string name="playback_countdown_label">Auto-Play Countdown</string>
+    <string name="playback_external_label">Always Prefer External Player</string>
+    <string name="playback_external_app_title">Installed External Player</string>
+    <string name="playback_external_app_help">Only players detected on this device are shown. Passes URL, title, subtitles, and resume position.</string>
+    <string name="playback_external_chooser">System Chooser (Ask)</string>
+    <string name="playback_external_none_installed">No supported external players (VLC, MX Player, Just Player, mpv) detected on this device.</string>
+    <string name="playback_audio_boost_label">Volume Boost (+6 dB)</string>
+    <string name="playback_audio_boost_help">Raises quiet audio tracks by +6 dB using Android LoudnessEnhancer (volume boost, not dynamic range normalization). Off by default.</string>
+
+    <!-- Section 5: Services -->
+    <string name="services_notice">Quern ships with zero preconfigured services, keys, or URLs. All credentials are encrypted in Android Keystore.</string>
+    <string name="services_debrid_title">Debrid Services</string>
+    <string name="services_debrid_desc">TorBox, Real-Debrid, AllDebrid &amp; Premiumize (user-provided API keys)</string>
+    <string name="services_media_servers_title">Personal Media Servers</string>
+    <string name="services_media_servers_desc">Jellyfin, Emby, Plex &amp; WebDAV (user-provided server addresses)</string>
+
+    <!-- Section 6: Accounts & Sync -->
+    <string name="accounts_tracking_title">Metadata &amp; Tracking (TMDB &amp; Trakt)</string>
+    <string name="accounts_tracking_desc">Optional TV-friendly sign-in; tokens stored in Keystore</string>
+    <string name="accounts_cloud_title">Cloud Sync &amp; Portable Code</string>
+    <string name="accounts_profiles_title">User Profiles &amp; PIN Lock</string>
+    <string name="accounts_external_import_title">Import from Backup or Stremio Account</string>
+
+    <!-- Section 7: System -->
+    <string name="system_storage_title">Storage &amp; Cache</string>
+    <string name="system_cache_size">Cache Size: %1$s</string>
+    <string name="system_clear_cache">Clear Image &amp; Temp Cache</string>
+    <string name="system_diagnostics_title">Diagnostics</string>
+    <string name="system_diagnostics_help">Device, OS, Media3/FFmpeg decoder, and local companion server details.</string>
+    <string name="system_update_channel_title">Update Channel</string>
+    <string name="system_update_channel_help">Choose which release track to check when checking for updates.</string>
+    <string name="system_crash_reporting_label">Opt-in Crash Reporting</string>
+    <string name="system_crash_reporting_help">Disabled by default. Never includes tokens, keys, or viewing history.</string>
+    <string name="system_about_title">About &amp; Open-Source Licenses</string>
+    <string name="system_licenses_btn">View Open-Source Licenses</string>
+    <string name="system_debug_title">Developer Debug (Debug Build Only)</string>
+
+    <!-- Companion QR Sign-In Card (Original Quern Design) -->
+    <string name="companion_card_title">Pair With Phone or PC</string>
+    <string name="companion_status_waiting">Waiting for connection • %1$s</string>
+    <string name="companion_status_connected">Connected</string>
+    <string name="companion_status_expired">Code expired</string>
+    <string name="companion_short_code_label">Short Code</string>
+    <string name="companion_url_label">Open Address</string>
+    <string name="companion_step_1">Connect your phone or computer to the same Wi-Fi network.</string>
+    <string name="companion_step_2">Scan the QR code or type the address below into your browser.</string>
+    <string name="companion_step_3">Match the short code and save — Quern updates automatically.</string>
+    <string name="companion_refresh_btn">Refresh Code</string>
+
+    <!-- ServersScreen, Account & Profiles String Resources -->
+    <string name="servers_hub_eyebrow">CONNECTIONS HUB</string>
+    <string name="servers_hub_title">Servers &amp; Cloud Services</string>
+    <string name="servers_stat_debrid">Debrid</string>
+    <string name="servers_stat_active">%1$d Active</string>
+    <string name="servers_stat_servers">Servers</string>
+    <string name="servers_stat_linked">%1$d Linked</string>
+    <string name="servers_stat_sync">Sync</string>
+    <string name="servers_tab_debrid">Debrid Cloud</string>
+    <string name="servers_tab_media">Media Servers</string>
+    <string name="servers_tab_sync">Sync &amp; UI</string>
+    <string name="servers_desc_jellyfin">Sign in with your server address and Jellyfin user.</string>
+    <string name="servers_desc_emby">Sign in with your server address and Emby user.</string>
+    <string name="servers_desc_plex">Sign in with your Plex server and X-Plex-Token.</string>
+    <string name="servers_desc_webdav">Connect any WebDAV, NAS, or HTTP media directory.</string>
+    <string name="servers_connected_count">%1$d Connected</string>
+    <string name="servers_connected_header">CONNECTED MEDIA SERVERS</string>
+    <string name="servers_display_mode_title">Display Layout Mode</string>
+    <string name="servers_display_mode_desc">Switch seamlessly between Android TV Navigation Rail and Phone Touch Layout.</string>
+    <string name="servers_signed_in_as">Signed in as %1$s</string>
+    <string name="servers_verify_save">Verify &amp; Save</string>
+    <string name="servers_update_key">Update API Key</string>
+    <string name="servers_connect_name">Connect %1$s</string>
+    <string name="servers_disconnect">Disconnect</string>
+    <string name="servers_tmdb_title">TMDB Metadata</string>
+    <string name="servers_tmdb_desc">Arabic &amp; English posters, cast &amp; IMDb bridging</string>
+    <string name="servers_tmdb_connected">Connected</string>
+    <string name="servers_tmdb_key_label">TMDB API Key or Read Access Token</string>
+    <string name="servers_tmdb_save">Save TMDB</string>
+    <string name="servers_tmdb_configure">Configure TMDB (%1$s)</string>
+    <string name="servers_tmdb_connect">Connect TMDB</string>
+    <string name="servers_trakt_title">Trakt.tv Sync</string>
+    <string name="servers_trakt_desc">TV-friendly Device Code login &amp; auto scrobbling</string>
+    <string name="servers_trakt_visit">Visit %1$s</string>
+    <string name="servers_trakt_complete">Complete Activation</string>
+    <string name="servers_trakt_client_id">Trakt Client ID</string>
+    <string name="servers_trakt_client_secret">Trakt Client Secret</string>
+    <string name="servers_trakt_generate">Generate TV Login Code</string>
+    <string name="servers_trakt_manage">Manage Trakt</string>
+    <string name="servers_trakt_connect">Connect Trakt</string>
+    <string name="servers_add_dialog_title">Link Personal Media Server</string>
+    <string name="servers_field_name">Display Name (e.g. Home Server)</string>
+    <string name="servers_field_url">Server URL (%1$s)</string>
+    <string name="servers_field_plex_token">X-Plex-Token</string>
+    <string name="servers_field_bearer_token">Bearer Token (optional)</string>
+    <string name="servers_field_api_key">API Key (or login below)</string>
+    <string name="servers_field_username">Username (optional)</string>
+    <string name="servers_field_password">Password (optional)</string>
+    <string name="servers_test_connect">Test &amp; Connect</string>
+
+    <string name="account_stremio_nuvio_title">Import from Backup or Stremio Account</string>
+    <string name="account_stremio_nuvio_desc">Import your addons, library, and watch progress from a Stremio account or JSON backup (JSON backups from other Stremio-compatible apps are accepted; also available at %1$s/#import).</string>
+    <string name="account_sync_stremio_btn">Sync from Stremio</string>
+    <string name="account_import_nuvio_btn">Import JSON Backup</string>
+    <string name="account_stremio_dialog_title">Sync from Stremio Account</string>
+    <string name="account_stremio_dialog_desc">Pulls all your Stremio Addons, Library &amp; Watch Progress.</string>
+    <string name="account_stremio_email">Stremio Email</string>
+    <string name="account_stremio_password">Stremio Password</string>
+    <string name="account_sync_now">Sync Now</string>
+    <string name="account_nuvio_dialog_desc">Paste an exported JSON backup, backup URL, or addon manifest links (easier from PC/Phone at %1$s/#import).</string>
+    <string name="account_nuvio_field">Backup JSON, URL, or Manifest Links</string>
+    <string name="account_import_btn">Import</string>
+    <string name="account_sync_active">Multi-Screen Sync Active • %1$s</string>
+    <string name="account_ready">Ready</string>
+    <string name="account_email_label">Email Address</string>
+    <string name="account_password_label">Password (6+ chars)</string>
+    <string name="account_custom_server_label">Custom Sync Server (Supabase URL &amp; Key)</string>
+    <string name="account_supabase_url">Sync Server / Supabase URL</string>
+    <string name="account_supabase_key">Sync API / Anon Key</string>
+
+    <string name="profile_unlock_title">Unlock %1$s</string>
+    <string name="profile_unlock_subtitle">Enter 4-digit PIN code</string>
+    <string name="profile_set_pin_title">Set PIN for %1$s</string>
+    <string name="profile_set_pin_subtitle">Choose a 4-digit PIN to lock this profile</string>
+    <string name="profile_create_title">Create New Profile</string>
+    <string name="profile_name_label">Profile Name</string>
+    <string name="profile_avatar_color">Avatar Color</string>
+    <string name="profile_pin_optional">4-Digit Lock PIN (Optional)</string>
+    <string name="profile_create_btn">Create</string>
+    <string name="profile_lock_btn">Lock</string>
+    <string name="profile_unlock_btn">Unlock</string>
+    <string name="profile_pin_wrong">Incorrect PIN, try again</string>
+    <string name="profile_pin_locked_out">Too many wrong PINs — wait %1$ds</string>
+</resources>
