@@ -89,6 +89,7 @@ class AppContainer(context: Context) {
         traktClient = traktClient,
         historyDao = database.watchHistoryDao(),
         favoriteDao = database.favoriteDao(),
+        tombstoneDao = database.tombstoneDao(),
         activeProfileId = settingsStore.settings.map { it.activeProfileId },
         currentProfileId = { settingsStore.settings.value.activeProfileId }
     )
@@ -111,6 +112,9 @@ class AppContainer(context: Context) {
         serverManager = serverManager,
         tmdbClient = tmdbClient,
         traktClient = traktClient,
+        favoriteDao = database.favoriteDao(),
+        historyDao = database.watchHistoryDao(),
+        tombstoneDao = database.tombstoneDao(),
         vault = vault,
         json = json
     )

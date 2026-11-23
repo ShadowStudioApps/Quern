@@ -4,6 +4,8 @@ import com.quern.app.data.addons.AddonRepository
 import com.quern.app.data.debrid.DebridManager
 import com.quern.app.data.local.FavoriteDao
 import com.quern.app.data.local.FavoriteEntity
+import com.quern.app.data.local.TombstoneDao
+import com.quern.app.data.local.TombstoneEntity
 import com.quern.app.data.local.WatchHistoryDao
 import com.quern.app.data.local.WatchHistoryEntity
 import com.quern.app.data.metadata.TmdbClient
@@ -30,6 +32,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
+/** Tombstone kinds shared with the sync engine. */
+const val KIND_FAVORITE = "favorite"
+const val KIND_PROGRESS = "progress"
+
 class QuernRepository(
     val addonRepository: AddonRepository,
     val debridManager: DebridManager,
@@ -38,6 +44,7 @@ class QuernRepository(
     val traktClient: TraktClient,
     private val historyDao: WatchHistoryDao,
     private val favoriteDao: FavoriteDao,
+    private val tombstoneDao: TombstoneDao,
     /** Active profile id; history and favorites are kept per profile. */
     activeProfileId: Flow<String>,
     /** Current active profile id, read at write time. */
@@ -89,7 +96,10 @@ class QuernRepository(
         val pid = currentProfileId()
         if (currentlyFavorite) {
             favoriteDao.delete(pid, item.id)
+            // Lets account sync remove it on the other devices too.
+            tombstoneDao.upsert(TombstoneEntity(KIND_FAVORITE, pid, item.id, System.currentTimeMillis()))
         } else {
+            tombstoneDao.delete(KIND_FAVORITE, pid, item.id)
             favoriteDao.upsert(
                 FavoriteEntity(
                     profileId = pid,

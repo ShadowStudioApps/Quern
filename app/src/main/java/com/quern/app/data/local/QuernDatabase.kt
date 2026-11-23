@@ -58,6 +58,18 @@ data class FavoriteEntity(
     val addedAt: Long
 )
 
+/**
+ * Remembers deletions for account sync so they reach other devices (schema v3).
+ * [kind] is "favorite" or "progress".
+ */
+@Entity(tableName = "sync_tombstones", primaryKeys = ["kind", "profileId", "contentId"])
+data class TombstoneEntity(
+    val kind: String,
+    val profileId: String,
+    val contentId: String,
+    val deletedAt: Long
+)
+
 @Entity(tableName = "media_servers")
 data class MediaServerEntity(
     @PrimaryKey val id: String,
@@ -106,6 +118,13 @@ interface WatchHistoryDao {
 
     @Query("DELETE FROM watch_history WHERE profileId = :profileId")
     suspend fun deleteAllForProfile(profileId: String)
+
+    /** Every profile's rows, for account sync. */
+    @Query("SELECT * FROM watch_history")
+    suspend fun getAllRows(): List<WatchHistoryEntity>
+
+    @Query("SELECT * FROM watch_history")
+    fun observeAllRows(): Flow<List<WatchHistoryEntity>>
 }
 
 @Dao
@@ -124,6 +143,31 @@ interface FavoriteDao {
 
     @Query("DELETE FROM favorites WHERE profileId = :profileId")
     suspend fun deleteAllForProfile(profileId: String)
+
+    /** Every profile's rows, for account sync. */
+    @Query("SELECT * FROM favorites")
+    suspend fun getAllRows(): List<FavoriteEntity>
+
+    @Query("SELECT * FROM favorites")
+    fun observeAllRows(): Flow<List<FavoriteEntity>>
+}
+
+@Dao
+interface TombstoneDao {
+    @Query("SELECT * FROM sync_tombstones WHERE kind = :kind")
+    suspend fun getAll(kind: String): List<TombstoneEntity>
+
+    @Query("SELECT * FROM sync_tombstones")
+    fun observeAll(): Flow<List<TombstoneEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: TombstoneEntity)
+
+    @Query("DELETE FROM sync_tombstones WHERE kind = :kind AND profileId = :profileId AND contentId = :contentId")
+    suspend fun delete(kind: String, profileId: String, contentId: String)
+
+    @Query("DELETE FROM sync_tombstones WHERE deletedAt < :before")
+    suspend fun pruneOlderThan(before: Long)
 }
 
 @Dao
@@ -146,9 +190,10 @@ interface MediaServerDao {
         AddonEntity::class,
         WatchHistoryEntity::class,
         FavoriteEntity::class,
-        MediaServerEntity::class
+        MediaServerEntity::class,
+        TombstoneEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class QuernDatabase : RoomDatabase() {
@@ -156,6 +201,7 @@ abstract class QuernDatabase : RoomDatabase() {
     abstract fun watchHistoryDao(): WatchHistoryDao
     abstract fun favoriteDao(): FavoriteDao
     abstract fun mediaServerDao(): MediaServerDao
+    abstract fun tombstoneDao(): TombstoneDao
 
     companion object {
         /**
@@ -164,8 +210,19 @@ abstract class QuernDatabase : RoomDatabase() {
          */
         fun build(context: Context, legacyProfileId: String): QuernDatabase =
             Room.databaseBuilder(context.applicationContext, QuernDatabase::class.java, "quern.db")
-                .addMigrations(migration1To2(legacyProfileId))
+                .addMigrations(migration1To2(legacyProfileId), MIGRATION_2_3)
                 .build()
+
+        /** v2 -> v3: adds sync_tombstones for account sync. Existing tables are untouched. */
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `sync_tombstones` (" +
+                        "`kind` TEXT NOT NULL, `profileId` TEXT NOT NULL, `contentId` TEXT NOT NULL, " +
+                        "`deletedAt` INTEGER NOT NULL, PRIMARY KEY(`kind`, `profileId`, `contentId`))"
+                )
+            }
+        }
 
         /** v1 -> v2: watch_history and favorites become per-profile. Keeps every existing row. */
         internal fun migration1To2(legacyProfileId: String) = object : Migration(1, 2) {

@@ -9,7 +9,15 @@ import android.util.Log
 import com.quern.app.BuildConfig
 import com.quern.app.data.addons.AddonRepository
 import com.quern.app.data.debrid.DebridManager
+import com.quern.app.data.KIND_FAVORITE
+import com.quern.app.data.KIND_PROGRESS
 import com.quern.app.data.local.AddonDao
+import com.quern.app.data.local.FavoriteDao
+import com.quern.app.data.local.FavoriteEntity
+import com.quern.app.data.local.TombstoneDao
+import com.quern.app.data.local.TombstoneEntity
+import com.quern.app.data.local.WatchHistoryDao
+import com.quern.app.data.local.WatchHistoryEntity
 import com.quern.app.data.local.PinHasher
 import com.quern.app.data.local.SecureVault
 import com.quern.app.data.local.SettingsStore
@@ -97,6 +105,9 @@ class QuernSyncEngine(
     private val serverManager: MediaServerManager,
     private val tmdbClient: TmdbClient,
     private val traktClient: TraktClient,
+    private val favoriteDao: FavoriteDao,
+    private val historyDao: WatchHistoryDao,
+    private val tombstoneDao: TombstoneDao,
     private val vault: SecureVault,
     private val json: Json
 ) {
@@ -105,7 +116,12 @@ class QuernSyncEngine(
         ADDONS("addons", true),
         SETTINGS("settings", false),
         PROFILES("profiles", false),
-        SECRETS("secrets", true)
+        SECRETS("secrets", true),
+        // Merged per item (newest updatedAt wins), not whole-section last writer wins.
+        FAVORITES("favorites", false),
+        PROGRESS("progress", true);
+
+        val perItem: Boolean get() = this == FAVORITES || this == PROGRESS
     }
 
     private class RemoteRow(
@@ -158,10 +174,19 @@ class QuernSyncEngine(
                                 settingsStore.settings.map { Unit },
                                 addonDao.observeAll().map { Unit },
                                 // Debrid keys, servers, TMDB and Trakt live in the vault.
-                                vault.changes.filter { key -> SECRET_KEY_PREFIXES.any(key::startsWith) }.map { Unit }
+                                vault.changes.filter { key -> SECRET_KEY_PREFIXES.any(key::startsWith) }.map { Unit },
+                                favoriteDao.observeAllRows().map { Unit },
+                                tombstoneDao.observeAll().map { Unit }
                             )
                                 .drop(1)
                                 .debounce(PUSH_DEBOUNCE_MS)
+                                .collect { pushChangesNow() }
+                        }
+                        launch {
+                            // Progress is saved every few seconds while playing: upload once it settles.
+                            historyDao.observeAllRows()
+                                .drop(1)
+                                .debounce(PROGRESS_DEBOUNCE_MS)
                                 .collect { pushChangesNow() }
                         }
                     }
@@ -263,6 +288,8 @@ class QuernSyncEngine(
         val obj = runCatching { json.parseToJsonElement(plain).jsonObject }.getOrNull() ?: return
         // First time this device meets the account: keep what it already has next to the server copy.
         val firstLink = lastRevision(s) == 0L && localHash(s).isBlank()
+        // True when this device holds something newer than the server copy and must upload after applying.
+        var needsUpload = firstLink && s != Section.SETTINGS
         runCatching {
             when (s) {
                 Section.ADDONS -> {
@@ -272,15 +299,97 @@ class QuernSyncEngine(
                 Section.SETTINGS -> obj["values"]?.jsonObject?.let(settingsStore::applySyncSettingsValues)
                 Section.PROFILES -> applyProfiles(obj, union = firstLink)
                 Section.SECRETS -> applySecrets(obj, union = firstLink)
+                Section.FAVORITES, Section.PROGRESS -> needsUpload = mergeItems(s, obj)
             }
         }.onFailure { Log.w(TAG, "Could not apply ${s.key}: ${it.javaClass.simpleName}") }
 
         setLastRevision(s, row.revision)
         Log.i(TAG, "Applied ${s.key} revision ${row.revision}")
-        // After a first-link union the local copy may hold extra items: leave the hash empty so they upload.
-        val unioned = firstLink && s != Section.SETTINGS
-        setLocalHash(s, if (unioned) "" else hash(buildLocal(s)))
+        // An empty hash makes the next push upload this device's (merged) copy.
+        setLocalHash(s, if (needsUpload) "" else hash(buildLocal(s)))
     }
+
+    /**
+     * Per-item merge for favorites and progress: for each (profileId, contentId) the newest
+     * `updatedAt` wins, deletions included. Remote winners are written to Room (deletions become
+     * local tombstones so they keep spreading). Returns true when the local copy has items that are
+     * newer than, or missing from, the server copy.
+     */
+    private suspend fun mergeItems(s: Section, remoteObj: JsonObject): Boolean {
+        val remote = itemsByKey(remoteObj)
+        val local = itemsByKey(buildLocal(s))
+        val kind = if (s == Section.FAVORITES) KIND_FAVORITE else KIND_PROGRESS
+        var localWins = local.keys.any { it !in remote }
+
+        for ((key, r) in remote) {
+            val l = local[key]
+            val rTime = r.updatedAt()
+            val lTime = l?.updatedAt() ?: Long.MIN_VALUE
+            if (l != null && lTime > rTime) {
+                localWins = true
+                continue
+            }
+            if (l != null && lTime == rTime && l.isDeleted() == r.isDeleted()) continue
+            val (profileId, contentId) = key
+            if (r.isDeleted()) {
+                if (s == Section.FAVORITES) favoriteDao.delete(profileId, contentId) else historyDao.delete(profileId, contentId)
+                tombstoneDao.upsert(TombstoneEntity(kind, profileId, contentId, rTime))
+            } else {
+                tombstoneDao.delete(kind, profileId, contentId)
+                if (s == Section.FAVORITES) {
+                    favoriteDao.upsert(
+                        FavoriteEntity(
+                            profileId = profileId,
+                            contentId = contentId,
+                            title = r.str("title"),
+                            mediaType = r.str("mediaType").ifBlank { "movie" },
+                            posterUrl = r.strOrNull("posterUrl"),
+                            backdropUrl = r.strOrNull("backdropUrl"),
+                            year = r.strOrNull("year"),
+                            rating = r.strOrNull("rating"),
+                            origin = r.str("origin").ifBlank { "ADDON" },
+                            sourceId = r.strOrNull("sourceId"),
+                            addedAt = rTime
+                        )
+                    )
+                } else {
+                    // The stream URL is never synced (it may hold tokens): keep this device's own.
+                    val existing = historyDao.getById(profileId, contentId)
+                    historyDao.upsert(
+                        WatchHistoryEntity(
+                            profileId = profileId,
+                            contentId = contentId,
+                            title = r.str("title"),
+                            mediaType = r.str("mediaType").ifBlank { "movie" },
+                            posterUrl = r.strOrNull("posterUrl"),
+                            backdropUrl = r.strOrNull("backdropUrl"),
+                            positionMs = r["positionMs"]?.jsonPrimitive?.longOrNull ?: 0L,
+                            durationMs = r["durationMs"]?.jsonPrimitive?.longOrNull ?: 0L,
+                            episodeId = r.strOrNull("episodeId"),
+                            episodeLabel = r.strOrNull("episodeLabel"),
+                            lastStreamUrl = existing?.lastStreamUrl,
+                            updatedAt = rTime
+                        )
+                    )
+                }
+            }
+        }
+        return localWins
+    }
+
+    private fun itemsByKey(obj: JsonObject): Map<Pair<String, String>, JsonObject> =
+        obj["items"]?.jsonArray.orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .mapNotNull { o ->
+                val pid = o.str("profileId").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val cid = o.str("contentId").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                (pid to cid) to o
+            }
+            .toMap()
+
+    private fun JsonObject.updatedAt(): Long = this["updatedAt"]?.jsonPrimitive?.longOrNull ?: 0L
+    private fun JsonObject.isDeleted(): Boolean = this["deleted"]?.jsonPrimitive?.booleanOrNull == true
+    private fun JsonObject.strOrNull(name: String): String? = this[name]?.jsonPrimitive?.contentOrNull
 
     /**
      * An encrypted row this device can't read was written with another password's key.
@@ -569,6 +678,70 @@ class QuernSyncEngine(
             })
         }
         Section.SECRETS -> buildSecrets()
+        Section.FAVORITES, Section.PROGRESS -> buildItems(s)
+    }
+
+    /** Live rows plus tombstones; for each item only the newer of the two. Sorted so the hash is stable. */
+    private suspend fun buildItems(s: Section): JsonObject {
+        tombstoneDao.pruneOlderThan(System.currentTimeMillis() - TOMBSTONE_TTL_MS)
+        val kind = if (s == Section.FAVORITES) KIND_FAVORITE else KIND_PROGRESS
+        val items = HashMap<Pair<String, String>, JsonObject>()
+        if (s == Section.FAVORITES) {
+            favoriteDao.getAllRows().forEach { f ->
+                items[f.profileId to f.contentId] = buildJsonObject {
+                    put("profileId", f.profileId)
+                    put("contentId", f.contentId)
+                    put("title", f.title)
+                    put("mediaType", f.mediaType)
+                    putOrNull("posterUrl", f.posterUrl)
+                    putOrNull("backdropUrl", f.backdropUrl)
+                    putOrNull("year", f.year)
+                    putOrNull("rating", f.rating)
+                    put("origin", f.origin)
+                    putOrNull("sourceId", f.sourceId)
+                    put("updatedAt", f.addedAt)
+                    put("deleted", false)
+                }
+            }
+        } else {
+            historyDao.getAllRows().forEach { h ->
+                items[h.profileId to h.contentId] = buildJsonObject {
+                    put("profileId", h.profileId)
+                    put("contentId", h.contentId)
+                    put("title", h.title)
+                    put("mediaType", h.mediaType)
+                    putOrNull("posterUrl", h.posterUrl)
+                    putOrNull("backdropUrl", h.backdropUrl)
+                    put("positionMs", h.positionMs)
+                    put("durationMs", h.durationMs)
+                    putOrNull("episodeId", h.episodeId)
+                    putOrNull("episodeLabel", h.episodeLabel)
+                    put("updatedAt", h.updatedAt)
+                    put("deleted", false)
+                }
+            }
+        }
+        tombstoneDao.getAll(kind).forEach { t ->
+            val key = t.profileId to t.contentId
+            val live = items[key]
+            if (live == null || live.updatedAt() < t.deletedAt) {
+                items[key] = buildJsonObject {
+                    put("profileId", t.profileId)
+                    put("contentId", t.contentId)
+                    put("updatedAt", t.deletedAt)
+                    put("deleted", true)
+                }
+            }
+        }
+        val sorted = items.entries.sortedWith(compareBy({ it.key.first }, { it.key.second })).map { it.value }
+        return buildJsonObject {
+            put("formatVersion", 1)
+            put("items", JsonArray(sorted))
+        }
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putOrNull(name: String, value: String?) {
+        put(name, value?.let { JsonPrimitive(it) } ?: JsonNull)
     }
 
     private suspend fun buildSecrets(): JsonObject {
@@ -692,6 +865,9 @@ class QuernSyncEngine(
         private val JSON_MEDIA = "application/json".toMediaType()
         private const val PERIODIC_PULL_MS = 10 * 60 * 1000L
         private const val PUSH_DEBOUNCE_MS = 4_000L
+        private const val PROGRESS_DEBOUNCE_MS = 30_000L
+        /** Deletions older than this have reached every active device; forget them to keep sections small. */
+        private const val TOMBSTONE_TTL_MS = 60L * 24 * 60 * 60 * 1000
         /** Vault keys owned by the `secrets` section (see DebridManager, MediaServerManager, TmdbClient, TraktClient). */
         private val SECRET_KEY_PREFIXES = listOf("debrid_key_", "srv_token_", "srv_pass_", "tmdb_", "trakt_")
 
