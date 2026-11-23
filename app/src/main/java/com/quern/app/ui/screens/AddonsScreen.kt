@@ -68,12 +68,14 @@ import com.quern.app.data.companion.CompanionSessionState
 import com.quern.app.domain.model.InstalledAddon
 import com.quern.app.ui.components.LumaBadgeChip
 import com.quern.app.ui.components.QuernCompanionSignInCard
+import com.quern.app.ui.components.quernSwitchColors
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaRed
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.glossySheen
 import com.quern.app.ui.theme.qString
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -101,91 +103,95 @@ fun AddonsScreen(
     val palette = LocalQuernPalette.current
     var manifestUrlInput by remember { mutableStateOf("") }
     var isInstalling by remember { mutableStateOf(false) }
+    var showQrDialog by remember { mutableStateOf(false) }
 
     if (isTv) {
-        Row(
+        // Spacious full-width TV workspace (no cramped 3rd column — QR setup opens cleanly in a modal!)
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(palette.background)
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Fixed Left Companion QR Card (Large QR, Short Code, URL, Steps 1-2-3, Live Status, Refresh)
-            QuernCompanionSignInCard(
-                url = addonsQrUrl,
-                session = companionSession,
-                onRefreshSession = onRefreshCompanionSession,
-                onBindServer = onBindCompanionServer,
-                onUnbindServer = onUnbindCompanionServer,
-                compactVertical = true,
-                modifier = Modifier
-                    .width(262.dp)
-                    .fillMaxHeight()
-                    .padding(bottom = 8.dp)
+            AddonUrlInstallerCard(
+                manifestUrlInput = manifestUrlInput,
+                isTv = true,
+                hasAddons = addons.isNotEmpty(),
+                isCheckingAny = checkingUrls.isNotEmpty(),
+                onUrlChange = { manifestUrlInput = it },
+                isInstalling = isInstalling,
+                onInstallUrl = { url ->
+                    if (url.isNotBlank() && !isInstalling) {
+                        isInstalling = true
+                        onInstallAddon(url) {
+                            isInstalling = false
+                            if (url == manifestUrlInput) manifestUrlInput = ""
+                        }
+                    }
+                },
+                onCheckAllHealth = onCheckAllHealth,
+                onOpenQrSetup = { showQrDialog = true }
             )
 
-            // Right Column: Fixed URL Installer + Scrollable Installed Addons List
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                AddonUrlInstallerCard(
-                    manifestUrlInput = manifestUrlInput,
-                    isTv = true,
-                    hasAddons = addons.isNotEmpty(),
-                    isCheckingAny = checkingUrls.isNotEmpty(),
-                    onUrlChange = { manifestUrlInput = it },
-                    isInstalling = isInstalling,
-                    onInstallUrl = { url ->
-                        if (url.isNotBlank() && !isInstalling) {
-                            isInstalling = true
-                            onInstallAddon(url) {
-                                isInstalling = false
-                                if (url == manifestUrlInput) manifestUrlInput = ""
-                            }
-                        }
-                    },
-                    onCheckAllHealth = onCheckAllHealth
-                )
+            Text(
+                text = qString(R.string.addons_installed_count, addons.size),
+                color = LumaTextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
 
-                Text(
-                    text = qString(R.string.addons_installed_count, addons.size),
-                    color = LumaTextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                if (addons.isEmpty()) {
-                    EmptyAddonsBanner()
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentPadding = PaddingValues(bottom = 28.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        itemsIndexed(addons, key = { _, a -> a.manifestUrl }) { idx, addon ->
-                            InstalledAddonCard(
-                                addon = addon,
-                                canMoveUp = idx > 0,
-                                canMoveDown = idx < addons.lastIndex,
-                                health = healthMap[addon.manifestUrl],
-                                isCheckingHealth = addon.manifestUrl in checkingUrls,
-                                hiddenCatalogKeys = hiddenCatalogKeys,
-                                onToggleEnabled = { onToggleEnabled(addon.manifestUrl, !addon.enabled) },
-                                onMoveUp = { onMoveUp(addon.manifestUrl) },
-                                onMoveDown = { onMoveDown(addon.manifestUrl) },
-                                onRemove = { onRemove(addon.manifestUrl) },
-                                onCheckHealth = { onCheckHealth(addon.manifestUrl) },
-                                onToggleCatalogVisibility = onToggleCatalogVisibility
-                            )
-                        }
+            if (addons.isEmpty()) {
+                EmptyAddonsBanner()
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 36.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    itemsIndexed(addons, key = { _, a -> a.manifestUrl }) { idx, addon ->
+                        InstalledAddonCard(
+                            addon = addon,
+                            canMoveUp = idx > 0,
+                            canMoveDown = idx < addons.lastIndex,
+                            health = healthMap[addon.manifestUrl],
+                            isCheckingHealth = addon.manifestUrl in checkingUrls,
+                            hiddenCatalogKeys = hiddenCatalogKeys,
+                            onToggleEnabled = { onToggleEnabled(addon.manifestUrl, !addon.enabled) },
+                            onMoveUp = { onMoveUp(addon.manifestUrl) },
+                            onMoveDown = { onMoveDown(addon.manifestUrl) },
+                            onRemove = { onRemove(addon.manifestUrl) },
+                            onCheckHealth = { onCheckHealth(addon.manifestUrl) },
+                            onToggleCatalogVisibility = onToggleCatalogVisibility
+                        )
                     }
                 }
             }
+        }
+
+        if (showQrDialog) {
+            AlertDialog(
+                onDismissRequest = { showQrDialog = false },
+                containerColor = palette.surfaceElevated,
+                text = {
+                    QuernCompanionSignInCard(
+                        url = addonsQrUrl,
+                        session = companionSession,
+                        onRefreshSession = onRefreshCompanionSession,
+                        onBindServer = onBindCompanionServer,
+                        onUnbindServer = onUnbindCompanionServer,
+                        compactVertical = false,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { showQrDialog = false }) {
+                        Text(qString(R.string.common_close), color = palette.focusRing, fontWeight = FontWeight.Bold)
+                    }
+                }
+            )
         }
     } else {
         Column(
@@ -270,21 +276,22 @@ private fun EmptyAddonsBanner() {
     val palette = LocalQuernPalette.current
     Surface(
         color = palette.surface,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, palette.border),
-        modifier = Modifier.fillMaxWidth()
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .glossySheen(palette.isGlossy, cornerRadius = 18.dp)
     ) {
         Row(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(22.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Icon(Icons.Default.Extension, contentDescription = null, tint = palette.focusRing, modifier = Modifier.size(26.dp))
+            Icon(Icons.Default.Extension, contentDescription = null, tint = palette.focusRing, modifier = Modifier.size(28.dp))
             Text(
                 text = qString(R.string.addons_empty_state),
                 color = LumaTextSecondary,
-                fontSize = 13.sp,
-                lineHeight = 18.sp
+                fontSize = 13.5.sp,
+                lineHeight = 20.sp
             )
         }
     }
@@ -300,53 +307,52 @@ private fun AddonUrlInstallerCard(
     onUrlChange: (String) -> Unit,
     isInstalling: Boolean,
     onInstallUrl: (String) -> Unit,
-    onCheckAllHealth: () -> Unit
+    onCheckAllHealth: () -> Unit,
+    onOpenQrSetup: (() -> Unit)? = null
 ) {
     val palette = LocalQuernPalette.current
     var showUrlDialog by remember { mutableStateOf(false) }
 
     Surface(
         color = palette.surface,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.5.dp, palette.border),
-        modifier = Modifier.fillMaxWidth()
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .glossySheen(palette.isGlossy, cornerRadius = 18.dp)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (isTv) {
                 var urlBoxFocused by remember { mutableStateOf(false) }
                 Surface(
-                    color = if (urlBoxFocused) palette.accent.copy(alpha = 0.22f) else palette.surfaceElevated,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(
-                        width = if (urlBoxFocused) 2.5.dp else 1.dp,
-                        color = if (urlBoxFocused) palette.focusRing else palette.border
-                    ),
+                    color = if (urlBoxFocused) palette.accent.copy(alpha = 0.25f) else palette.surfaceElevated,
+                    shape = RoundedCornerShape(14.dp),
+                    border = if (urlBoxFocused) BorderStroke(2.dp, palette.focusRing) else null,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(14.dp))
                         .tvClickable(
                             onFocusChangedState = { urlBoxFocused = it },
                             onClick = { showUrlDialog = true }
                         )
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
                             Icons.Default.Link,
                             contentDescription = null,
                             tint = if (urlBoxFocused) palette.focusRing else LumaTextSecondary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                         Text(
                             text = manifestUrlInput.ifBlank { qString(R.string.addons_url_placeholder) },
                             color = if (manifestUrlInput.isNotBlank() || urlBoxFocused) Color.White else LumaTextSecondary,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
@@ -362,7 +368,9 @@ private fun AddonUrlInstallerCard(
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = palette.focusRing,
-                        unfocusedBorderColor = palette.border,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = palette.surfaceElevated,
+                        unfocusedContainerColor = palette.surfaceElevated,
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
                     ),
@@ -371,7 +379,7 @@ private fun AddonUrlInstallerCard(
             }
 
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 AddonActionPill(
@@ -389,6 +397,17 @@ private fun AddonUrlInstallerCard(
                         }
                     }
                 )
+                if (onOpenQrSetup != null) {
+                    AddonActionPill(
+                        label = qString(R.string.addons_phone_qr_btn),
+                        icon = Icons.Default.QrCode2,
+                        isPrimary = false,
+                        isLoading = false,
+                        accent = palette.focusRing,
+                        enabled = true,
+                        onClick = onOpenQrSetup
+                    )
+                }
                 if (hasAddons) {
                     AddonActionPill(
                         label = if (isCheckingAny) qString(R.string.addons_checking) else qString(R.string.addons_check_all),
@@ -484,10 +503,7 @@ private fun AddonActionPill(
     Surface(
         color = bg,
         shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(
-            width = if (focused) 2.5.dp else 1.dp,
-            color = if (focused) palette.focusRing else accent.copy(alpha = if (enabled) 0.7f else 0.25f)
-        ),
+        border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .tvClickable(
@@ -536,14 +552,13 @@ private fun InstalledAddonCard(
 
     Surface(
         color = palette.surface,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(
-            width = if (toggleFocused) 2.dp else 1.dp,
-            color = if (toggleFocused) palette.focusRing else if (addon.enabled) palette.border else palette.border.copy(alpha = 0.4f)
-        ),
-        modifier = Modifier.fillMaxWidth()
+        shape = RoundedCornerShape(18.dp),
+        border = if (toggleFocused) BorderStroke(2.dp, palette.focusRing) else null,
+        modifier = Modifier
+            .fillMaxWidth()
+            .glossySheen(palette.isGlossy, cornerRadius = 18.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -581,7 +596,7 @@ private fun InstalledAddonCard(
                 Switch(
                     checked = addon.enabled,
                     onCheckedChange = null,
-                    colors = SwitchDefaults.colors(checkedTrackColor = palette.accent),
+                    colors = quernSwitchColors(onAccentSurface = false),
                     modifier = Modifier.focusProperties { canFocus = false }
                 )
             }
@@ -666,9 +681,7 @@ private fun InstalledAddonCard(
 
             // Expandable per-addon Home Catalog Visibility controls
             if (homeCatalogs.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider(color = palette.border.copy(alpha = 0.55f))
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(10.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -716,12 +729,11 @@ private fun InstalledAddonCard(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(if (catFocused) palette.accent.copy(alpha = 0.25f) else palette.surfaceElevated)
-                                    .border(
-                                        width = if (catFocused) 1.5.dp else 0.5.dp,
-                                        color = if (catFocused) palette.focusRing else palette.border,
-                                        shape = RoundedCornerShape(8.dp)
+                                    .then(
+                                        if (catFocused) Modifier.border(1.5.dp, palette.focusRing, RoundedCornerShape(10.dp))
+                                        else Modifier
                                     )
                                     .tvClickable(
                                         onFocusChangedState = { catFocused = it },
@@ -753,7 +765,7 @@ private fun InstalledAddonCard(
                                 Switch(
                                     checked = isVisible,
                                     onCheckedChange = null,
-                                    colors = SwitchDefaults.colors(checkedTrackColor = palette.accent),
+                                    colors = quernSwitchColors(onAccentSurface = false),
                                     modifier = Modifier.focusProperties { canFocus = false }
                                 )
                             }
@@ -786,10 +798,9 @@ private fun AddonIconAction(
                     else -> palette.surfaceElevated
                 }
             )
-            .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) palette.focusRing else palette.border.copy(alpha = if (enabled) 1f else 0.4f),
-                shape = RoundedCornerShape(10.dp)
+            .then(
+                if (focused) Modifier.border(2.dp, palette.focusRing, RoundedCornerShape(10.dp))
+                else Modifier
             )
             .tvClickable(
                 enabled = enabled,

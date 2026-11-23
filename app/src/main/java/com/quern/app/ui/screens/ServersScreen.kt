@@ -347,13 +347,7 @@ fun ServersScreen(
                                     )
                                 }
                                 if (idx < providers.lastIndex) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 20.dp)
-                                            .height(1.dp)
-                                            .background(palette.border)
-                                    )
+                                    Spacer(Modifier.height(4.dp))
                                 }
                             }
                         }

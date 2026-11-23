@@ -33,6 +33,7 @@ import com.quern.app.domain.model.TraktAuthState
 import com.quern.app.domain.model.TraktDeviceCode
 import com.quern.app.domain.model.WatchProgress
 import com.quern.app.player.PlaybackRequest
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -49,7 +50,9 @@ data class DetailUiState(
     val streams: List<StreamSource> = emptyList(),
     val subtitles: List<SubtitleTrack> = emptyList(),
     val resolvingStreamId: String? = null,
-    val statusMessage: String? = null
+    val statusMessage: String? = null,
+    val savedPositionMs: Long = 0L,
+    val savedDurationMs: Long = 0L
 )
 
 class QuernViewModel(
@@ -167,6 +170,14 @@ class QuernViewModel(
     private val _checkingHealthUrls = MutableStateFlow<Set<String>>(emptySet())
     val checkingHealthUrls: StateFlow<Set<String>> = _checkingHealthUrls.asStateFlow()
 
+    private var homeJob: Job? = null
+    private var searchJob: Job? = null
+    private var detailJob: Job? = null
+    private var streamsJob: Job? = null
+
+    private var lastScrobbleContentId: String? = null
+    private var lastScrobbleAction: String? = null
+
     init {
         refreshHome()
         viewModelScope.launch {
@@ -211,7 +222,8 @@ class QuernViewModel(
     }
 
     fun refreshHome() {
-        viewModelScope.launch {
+        homeJob?.cancel()
+        homeJob = viewModelScope.launch {
             _isLoadingHome.value = true
             _homeRows.value = runCatching {
                 repository.loadHomeCatalogs(appSettings.value.hiddenCatalogKeys)
@@ -226,11 +238,13 @@ class QuernViewModel(
 
     fun performSearch() {
         val q = _searchQuery.value.trim()
+        searchJob?.cancel()
         if (q.isBlank()) {
             _searchResults.value = emptyList()
+            _isSearching.value = false
             return
         }
-        viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             _isSearching.value = true
             _searchResults.value = runCatching { repository.searchEverywhere(q) }.getOrDefault(emptyList())
             _isSearching.value = false
@@ -238,23 +252,84 @@ class QuernViewModel(
     }
 
     fun openDetail(item: MediaItem) {
-        viewModelScope.launch {
-            _detailState.value = DetailUiState(isLoading = true, detail = MediaDetail(item))
+        detailJob?.cancel()
+        streamsJob?.cancel()
+        detailJob = viewModelScope.launch {
+            val initialProgress = runCatching { repository.getSavedWatchProgress(item.id) }.getOrNull()
+            _detailState.value = DetailUiState(
+                isLoading = true,
+                detail = MediaDetail(item),
+                isLoadingStreams = true,
+                savedPositionMs = initialProgress?.positionMs ?: 0L,
+                savedDurationMs = initialProgress?.durationMs ?: 0L
+            )
+
+            // For movies whose ID is already known, kick off stream loading immediately in parallel with metadata
+            val canPreloadMovieStreams = item.type == MediaType.MOVIE && (
+                !item.imdbId.isNullOrBlank() ||
+                    item.id.startsWith("tt") ||
+                    !item.sourceId.isNullOrBlank()
+                )
+            if (canPreloadMovieStreams) {
+                streamsJob = viewModelScope.launch {
+                    fetchStreamsForCurrentDetail(MediaDetail(item), null)
+                }
+            }
+
             val detail = runCatching { repository.loadDetail(item) }.getOrDefault(MediaDetail(item))
-            val firstSeason = detail.seasons.firstOrNull() ?: 1
-            val firstEpisode = if (detail.item.type == MediaType.SERIES) {
-                detail.episodesForSeason(firstSeason).firstOrNull()
+            val historyList = continueWatching.value
+            val resumedEpisode = if (detail.item.type == MediaType.SERIES) {
+                // If the user previously watched an episode of this series, pre-select that episode for Resume!
+                val seriesPrefix = detail.item.imdbId ?: detail.item.id
+                val matchingHistory = historyList.firstOrNull { hp ->
+                    hp.episodeId != null && (
+                        hp.contentId == detail.item.id ||
+                            hp.contentId.startsWith("$seriesPrefix:") ||
+                            hp.episodeId.startsWith("$seriesPrefix:")
+                        )
+                }
+                matchingHistory?.episodeId?.let { epId ->
+                    detail.episodes.firstOrNull { it.id == epId }
+                }
+            } else null
+
+            val selectedSeason = resumedEpisode?.seasonNumber ?: detail.seasons.firstOrNull() ?: 1
+            val selectedEpisode = resumedEpisode ?: if (detail.item.type == MediaType.SERIES) {
+                detail.episodesForSeason(selectedSeason).firstOrNull()
             } else {
                 null
             }
-            _detailState.value = DetailUiState(
+            val contentKey = selectedEpisode?.id ?: detail.item.id
+            val saved = runCatching { repository.getSavedWatchProgress(contentKey) }.getOrNull()
+                ?: if (detail.item.imdbId != null && detail.item.imdbId != contentKey) {
+                    runCatching { repository.getSavedWatchProgress(detail.item.imdbId) }.getOrNull()
+                } else null
+
+            val currentStreams = _detailState.value.streams
+            val currentSubs = _detailState.value.subtitles
+            _detailState.value = _detailState.value.copy(
                 isLoading = false,
                 detail = detail,
-                selectedSeason = firstSeason,
-                selectedEpisode = firstEpisode,
-                isLoadingStreams = true
+                selectedSeason = selectedSeason,
+                selectedEpisode = selectedEpisode,
+                savedPositionMs = saved?.positionMs ?: 0L,
+                savedDurationMs = saved?.durationMs ?: 0L
             )
-            fetchStreamsForCurrentDetail(detail, firstEpisode)
+
+            val needStreamReload = !canPreloadMovieStreams ||
+                selectedEpisode != null ||
+                (detail.item.imdbId != null && detail.item.imdbId != item.imdbId && currentStreams.isEmpty())
+            if (needStreamReload) {
+                streamsJob?.cancel()
+                _detailState.value = _detailState.value.copy(
+                    isLoadingStreams = true,
+                    streams = if (selectedEpisode != null) emptyList() else currentStreams,
+                    subtitles = if (selectedEpisode != null) emptyList() else currentSubs
+                )
+                streamsJob = viewModelScope.launch {
+                    fetchStreamsForCurrentDetail(detail, selectedEpisode)
+                }
+            }
         }
     }
 
@@ -262,26 +337,58 @@ class QuernViewModel(
         val current = _detailState.value
         val detail = current.detail ?: return
         val ep = detail.episodesForSeason(season).firstOrNull()
-        _detailState.value = current.copy(selectedSeason = season, selectedEpisode = ep, isLoadingStreams = true)
-        viewModelScope.launch { fetchStreamsForCurrentDetail(detail, ep) }
+        streamsJob?.cancel()
+        streamsJob = viewModelScope.launch {
+            val saved = ep?.let { runCatching { repository.getSavedWatchProgress(it.id) }.getOrNull() }
+            _detailState.value = current.copy(
+                selectedSeason = season,
+                selectedEpisode = ep,
+                isLoadingStreams = true,
+                streams = emptyList(),
+                savedPositionMs = saved?.positionMs ?: 0L,
+                savedDurationMs = saved?.durationMs ?: 0L
+            )
+            fetchStreamsForCurrentDetail(detail, ep)
+        }
     }
 
     fun selectEpisode(episode: Episode) {
         val current = _detailState.value
         val detail = current.detail ?: return
-        _detailState.value = current.copy(selectedEpisode = episode, isLoadingStreams = true)
-        viewModelScope.launch { fetchStreamsForCurrentDetail(detail, episode) }
+        streamsJob?.cancel()
+        streamsJob = viewModelScope.launch {
+            val saved = runCatching { repository.getSavedWatchProgress(episode.id) }.getOrNull()
+            _detailState.value = current.copy(
+                selectedEpisode = episode,
+                isLoadingStreams = true,
+                streams = emptyList(),
+                savedPositionMs = saved?.positionMs ?: 0L,
+                savedDurationMs = saved?.durationMs ?: 0L
+            )
+            fetchStreamsForCurrentDetail(detail, episode)
+        }
     }
 
     private suspend fun fetchStreamsForCurrentDetail(detail: MediaDetail, episode: Episode?) {
-        val (streams, subs) = runCatching {
-            repository.loadStreamsAndSubtitles(detail, episode?.id)
-        }.getOrDefault(emptyList<StreamSource>() to emptyList())
+        runCatching {
+            repository.loadStreamsAndSubtitlesProgressive(
+                detail = detail,
+                episodeId = episode?.id,
+                onStreamsUpdated = { latestStreams ->
+                    _detailState.value = _detailState.value.copy(
+                        streams = latestStreams,
+                        statusMessage = if (latestStreams.isNotEmpty()) null else _detailState.value.statusMessage
+                    )
+                },
+                onSubtitlesUpdated = { latestSubs ->
+                    _detailState.value = _detailState.value.copy(subtitles = latestSubs)
+                }
+            )
+        }
+        val finalStreams = _detailState.value.streams
         _detailState.value = _detailState.value.copy(
             isLoadingStreams = false,
-            streams = streams,
-            subtitles = subs,
-            statusMessage = if (streams.isEmpty()) {
+            statusMessage = if (finalStreams.isEmpty()) {
                 "No streams found yet. Add a stream Addon or link TorBox/Server in Settings → Services."
             } else {
                 null
@@ -410,6 +517,13 @@ class QuernViewModel(
 
     fun onPlaybackProgress(positionMs: Long, durationMs: Long, isPlaying: Boolean) {
         val req = _activePlayback.value ?: return
+        val action = if (isPlaying) "start" else "pause"
+        val shouldScrobble = durationMs > 0L && !req.imdbId.isNullOrBlank() &&
+            (lastScrobbleContentId != req.contentId || lastScrobbleAction != action)
+        if (shouldScrobble) {
+            lastScrobbleContentId = req.contentId
+            lastScrobbleAction = action
+        }
         viewModelScope.launch {
             repository.saveWatchProgress(
                 WatchProgress(
@@ -425,20 +539,56 @@ class QuernViewModel(
                     lastStreamUrl = req.stream.url
                 )
             )
-            if (durationMs > 0 && !req.imdbId.isNullOrBlank()) {
+            if (shouldScrobble) {
                 val pct = (positionMs.toFloat() / durationMs.toFloat()) * 100f
-                val action = if (isPlaying) "start" else "pause"
                 repository.traktClient.scrobble(action, req.imdbId, req.mediaType, pct)
             }
         }
     }
 
+    fun onPlaybackStopped(positionMs: Long, durationMs: Long) {
+        val req = _activePlayback.value ?: return
+        if (durationMs <= 0L || req.imdbId.isNullOrBlank()) return
+        if (lastScrobbleContentId == req.contentId && lastScrobbleAction == "stop") return
+        lastScrobbleContentId = req.contentId
+        lastScrobbleAction = "stop"
+        val pct = (positionMs.toFloat() / durationMs.toFloat()) * 100f
+        viewModelScope.launch {
+            repository.traktClient.scrobble("stop", req.imdbId, req.mediaType, pct)
+        }
+    }
+
     fun closePlayer() {
+        val finishedContentId = _activePlayback.value?.contentId
+        lastScrobbleContentId = null
+        lastScrobbleAction = null
         _activePlayback.value = null
+        // Immediately refresh Resume button state on the Detail screen underneath
+        val detail = _detailState.value.detail
+        val targetId = _detailState.value.selectedEpisode?.id ?: detail?.item?.id ?: finishedContentId
+        if (targetId != null) {
+            viewModelScope.launch {
+                val saved = runCatching { repository.getSavedWatchProgress(targetId) }.getOrNull()
+                if (saved != null) {
+                    _detailState.value = _detailState.value.copy(
+                        savedPositionMs = saved.positionMs,
+                        savedDurationMs = saved.durationMs
+                    )
+                }
+            }
+        }
     }
 
     fun resumeWatchProgress(progress: WatchProgress): Boolean {
         val streamUrl = progress.lastStreamUrl?.takeIf { it.isNotBlank() } ?: return false
+        val isWebDav = progress.contentId.startsWith("dav:")
+        val webDavHeaders = if (isWebDav) {
+            val serverId = progress.contentId.split(":").getOrNull(1)
+            val server = mediaServers.value.firstOrNull { it.id == serverId } ?: return false
+            repository.serverManager.getWebDavAuthHeaders(server)
+        } else {
+            emptyMap()
+        }
         _activePlayback.value = PlaybackRequest(
             contentId = progress.contentId,
             title = progress.title,
@@ -452,8 +602,9 @@ class QuernViewModel(
                 id = "resume_${progress.contentId}",
                 title = progress.title,
                 url = streamUrl,
-                providerName = "Resume",
-                origin = SourceOrigin.ADDON,
+                headers = webDavHeaders,
+                providerName = if (isWebDav) "WebDAV" else "Resume",
+                origin = if (isWebDav) SourceOrigin.WEBDAV else SourceOrigin.ADDON,
                 isCached = true
             ),
             startPositionMs = progress.positionMs
@@ -681,13 +832,13 @@ class QuernViewModel(
 
     fun importFromNuvio(rawData: String) {
         viewModelScope.launch {
-            _toastMessage.value = "Importing from Nuvio..."
+            _toastMessage.value = "Importing backup..."
             cloudSyncManager.importFromNuvio(rawData)
                 .onSuccess {
                     _toastMessage.value = it
                     refreshHome()
                 }
-                .onFailure { _toastMessage.value = it.message ?: "Nuvio import failed" }
+                .onFailure { _toastMessage.value = it.message ?: "Backup import failed" }
         }
     }
 

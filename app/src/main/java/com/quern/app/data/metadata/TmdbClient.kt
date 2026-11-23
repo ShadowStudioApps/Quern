@@ -22,6 +22,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
+import java.util.Locale
 
 /**
  * TMDB v3 API Client.
@@ -187,7 +188,7 @@ class TmdbClient(
         val date = obj["release_date"]?.jsonPrimitive?.contentOrNull
             ?: obj["first_air_date"]?.jsonPrimitive?.contentOrNull
         val vote = obj["vote_average"]?.jsonPrimitive?.doubleOrNull?.takeIf { it > 0 }
-            ?.let { String.format("%.1f", it) }
+            ?.let { String.format(Locale.US, "%.1f", it) }
 
         return MediaItem(
             id = "tmdb:${type.stremioValue}:$id",

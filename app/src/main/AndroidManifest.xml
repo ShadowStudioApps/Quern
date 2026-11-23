@@ -33,7 +33,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Quern"
-        android:usesCleartextTraffic="true">
+        android:networkSecurityConfig="@xml/network_security_config">
 
         <!-- Base Activity (exported for deep links & explicit launches) -->
         <activity
@@ -41,7 +41,6 @@
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode|locale|layoutDirection"
             android:exported="true"
             android:launchMode="singleTop"
-            android:supportsPictureInPicture="true"
             android:windowSoftInputMode="adjustNothing|stateHidden"
             android:theme="@style/Theme.Quern">
             <intent-filter>
@@ -120,6 +119,46 @@
             android:banner="@drawable/tv_banner_ocean"
             android:icon="@mipmap/ic_launcher_ocean"
             android:roundIcon="@mipmap/ic_launcher_ocean"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Dynamic Launcher Icon 5: Aurora Gradient (Cyan -> Emerald -> Violet) -->
+        <activity-alias
+            android:name=".IconAuroraGradient"
+            android:enabled="false"
+            android:exported="true"
+            android:banner="@drawable/tv_banner_aurora"
+            android:icon="@mipmap/ic_launcher_aurora"
+            android:roundIcon="@mipmap/ic_launcher_aurora"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Dynamic Launcher Icon 6: Sunset Gradient (Rose -> Ember -> Gold) -->
+        <activity-alias
+            android:name=".IconSunsetGradient"
+            android:enabled="false"
+            android:exported="true"
+            android:banner="@drawable/tv_banner_sunset"
+            android:icon="@mipmap/ic_launcher_sunset"
+            android:roundIcon="@mipmap/ic_launcher_sunset"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>

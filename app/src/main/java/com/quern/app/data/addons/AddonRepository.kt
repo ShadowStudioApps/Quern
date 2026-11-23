@@ -17,6 +17,10 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 
 data class AddonHealthResult(
@@ -209,16 +213,51 @@ class AddonRepository(
     suspend fun fetchAggregatedStreams(type: MediaType, id: String): List<StreamSource> = coroutineScope {
         val enabled = getEnabledAddons()
         val rawStreams = enabled.map { addon ->
-            async { client.fetchStreams(addon, type, id) }
+            async { withTimeoutOrNull(7_000L) { client.fetchStreams(addon, type, id) }.orEmpty() }
         }.awaitAll().flatten()
 
-        debridManager.enrichAddonStreams(rawStreams)
+        withTimeoutOrNull(3_500L) { debridManager.enrichAddonStreams(rawStreams) } ?: rawStreams
+    }
+
+    /**
+     * Streams addon results progressively as each addon responds (capped at 7s per addon),
+     * then enriches with Debrid cache status without blocking initial display.
+     */
+    suspend fun fetchStreamsProgressive(
+        type: MediaType,
+        id: String,
+        onStreamsUpdated: suspend (List<StreamSource>) -> Unit
+    ): List<StreamSource> = coroutineScope {
+        val enabled = getEnabledAddons()
+        if (enabled.isEmpty()) return@coroutineScope emptyList()
+        val mutex = Mutex()
+        val collected = mutableListOf<StreamSource>()
+
+        val jobs = enabled.map { addon ->
+            launch {
+                val batch = withTimeoutOrNull(7_000L) { client.fetchStreams(addon, type, id) }.orEmpty()
+                if (batch.isNotEmpty()) {
+                    val snapshot = mutex.withLock {
+                        collected.addAll(batch)
+                        collected.toList()
+                    }
+                    onStreamsUpdated(snapshot)
+                }
+            }
+        }
+        jobs.forEach { it.join() }
+
+        val raw = mutex.withLock { collected.toList() }
+        if (raw.isEmpty()) return@coroutineScope emptyList()
+        val enriched = withTimeoutOrNull(3_500L) { debridManager.enrichAddonStreams(raw) } ?: raw
+        onStreamsUpdated(enriched)
+        enriched
     }
 
     suspend fun fetchAggregatedSubtitles(type: MediaType, id: String): List<SubtitleTrack> = coroutineScope {
         val enabled = getEnabledAddons()
         enabled.map { addon ->
-            async { client.fetchSubtitles(addon, type, id) }
+            async { withTimeoutOrNull(6_000L) { client.fetchSubtitles(addon, type, id) }.orEmpty() }
         }.awaitAll().flatten().distinctBy { it.url }
     }
 

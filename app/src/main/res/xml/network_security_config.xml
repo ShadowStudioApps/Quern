@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow HTTP for user-hosted LAN media servers (Jellyfin/Emby/Plex/WebDAV), LAN Web Companion, and user addons -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Enforce strict HTTPS for all built-in official metadata, tracking, debrid, and cloud sync endpoints -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">themoviedb.org</domain>
+        <domain includeSubdomains="true">tmdb.org</domain>
+        <domain includeSubdomains="true">trakt.tv</domain>
+        <domain includeSubdomains="true">strem.io</domain>
+        <domain includeSubdomains="true">real-debrid.com</domain>
+        <domain includeSubdomains="true">alldebrid.com</domain>
+        <domain includeSubdomains="true">torbox.app</domain>
+        <domain includeSubdomains="true">premiumize.me</domain>
+        <domain includeSubdomains="true">supabase.co</domain>
+    </domain-config>
+</network-security-config>

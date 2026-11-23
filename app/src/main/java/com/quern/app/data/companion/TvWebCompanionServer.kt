@@ -525,10 +525,10 @@ class TvWebCompanionServer(
         val nowFormatted = SimpleDateFormat("MM/dd/yyyy, h:mm:ss a", Locale.US).format(Date())
 
         val activeProfile = settings.activeProfile
-        val activeAvatarColor = String.format("#%06X", activeProfile.avatarColorHex and 0xFFFFFF)
+        val activeAvatarColor = String.format(Locale.US, "#%06X", activeProfile.avatarColorHex and 0xFFFFFF)
 
         val profilesOverviewHtml = settings.profiles.mapIndexed { idx, p ->
-            val hex = String.format("#%06X", p.avatarColorHex and 0xFFFFFF)
+            val hex = String.format(Locale.US, "#%06X", p.avatarColorHex and 0xFFFFFF)
             val isAct = p.id == settings.activeProfileId
             val lockIcon = if (p.isLocked) " 🔒" else ""
             """<div class="profile-card">
@@ -541,7 +541,7 @@ class TvWebCompanionServer(
         }.joinToString("")
 
         val profilesManageHtml = settings.profiles.joinToString("") { p ->
-            val hex = String.format("#%06X", p.avatarColorHex and 0xFFFFFF)
+            val hex = String.format(Locale.US, "#%06X", p.avatarColorHex and 0xFFFFFF)
             val isAct = p.id == settings.activeProfileId
             """<div class="list-row">
                 <div style="display:flex;align-items:center;gap:12px">
@@ -899,7 +899,7 @@ class TvWebCompanionServer(
 
             <div class="nav-section">
               <div class="nav-label">Sync Data</div>
-              <button class="nav-item" data-tab="import" onclick="openTab('import')"><span>Stremio / Nuvio Sync</span></button>
+              <button class="nav-item" data-tab="import" onclick="openTab('import')"><span>Stremio / Backup Sync</span></button>
               <button class="nav-item" data-tab="debrid" onclick="openTab('debrid')"><span>Debrid &amp; API Keys</span><span class="nav-count">$connectedDebrid</span></button>
               <button class="nav-item" data-tab="addons" onclick="openTab('addons')"><span>Addons &amp; Plugins</span><span class="nav-count">${installedAddons.size}</span></button>
               <button class="nav-item" data-tab="servers" onclick="openTab('servers')"><span>Media Servers</span><span class="nav-count">${servers.size}</span></button>
@@ -955,10 +955,10 @@ class TvWebCompanionServer(
               <div class="profiles-row">$profilesOverviewHtml</div>
             </section>
 
-            <!-- STREMIO / NUVIO SYNC -->
+            <!-- STREMIO / BACKUP SYNC -->
             <section id="panel-import" class="panel">
-              <h1>Stremio &amp; Nuvio Sync</h1>
-              <div class="page-sub">Import your installed Addons, Library, and Watch Progress directly from Stremio or Nuvio.</div>
+              <h1>Stremio &amp; Backup Sync</h1>
+              <div class="page-sub">Import your installed Addons, Library, and Watch Progress from Stremio or a JSON backup.</div>
 
               <div class="card">
                 <div class="card-head">

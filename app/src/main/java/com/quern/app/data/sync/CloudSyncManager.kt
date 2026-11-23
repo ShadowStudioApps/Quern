@@ -86,6 +86,7 @@ class CloudSyncManager(
 
     fun signOut() {
         vault.remove(KEY_TOKEN)
+        vault.remove(KEY_REFRESH_TOKEN)
         vault.remove(KEY_USER_ID)
         vault.remove(KEY_EMAIL)
         _accountState.value = loadState()
@@ -131,11 +132,13 @@ class CloudSyncManager(
                 }
                 val root = json.parseToJsonElement(body).jsonObject
                 val token = root["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val refreshToken = root["refresh_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
                 val userId = root["user"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull.orEmpty()
                 vault.putString(KEY_SERVER_URL, cleanUrl)
                 vault.putString(KEY_ANON_KEY, cleanKey)
                 vault.putString(KEY_EMAIL, email.trim())
                 if (token.isNotBlank()) vault.putString(KEY_TOKEN, token)
+                if (refreshToken.isNotBlank()) vault.putString(KEY_REFRESH_TOKEN, refreshToken)
                 if (userId.isNotBlank()) vault.putString(KEY_USER_ID, userId)
                 _accountState.value = loadState()
 
@@ -173,52 +176,92 @@ class CloudSyncManager(
         "Synced ${bundle.addonUrls.size} addons & settings!"
     }
 
-    suspend fun pushToCloud(): Result<String> = withContext(Dispatchers.IO) {
+    private fun refreshAccessToken(): Boolean {
         val st = _accountState.value
-        if (!st.isSignedIn) return@withContext Result.failure(IllegalStateException("Sign in first to sync."))
-        runCatching {
-            val syncCode = exportSyncCode()
+        val refreshToken = vault.getString(KEY_REFRESH_TOKEN)
+        if (st.serverUrl.isBlank() || st.anonKey.isBlank() || refreshToken.isBlank()) return false
+        return runCatching {
             val payload = buildJsonObject {
-                put("user_id", st.userId)
-                put("payload", syncCode)
+                put("refresh_token", refreshToken)
             }.toString().toRequestBody(JSON_MEDIA)
-
             val req = Request.Builder()
-                .url("${st.serverUrl}/rest/v1/quern_sync?on_conflict=user_id")
+                .url("${st.serverUrl}/auth/v1/token?grant_type=refresh_token")
                 .header("apikey", st.anonKey)
-                .header("Authorization", "Bearer ${st.accessToken}")
                 .header("Content-Type", "application/json")
-                .header("Prefer", "resolution=merge-duplicates")
                 .post(payload)
                 .build()
-
             httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) error("Cloud push failed (HTTP ${resp.code})")
-                _accountState.value = _accountState.value.copy(lastSyncedAt = "Just now")
-                "Synced to Cloud successfully!"
+                if (!resp.isSuccessful) return@use false
+                val root = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
+                val newToken = root["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val newRefresh = root["refresh_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (newToken.isBlank()) return@use false
+                vault.putString(KEY_TOKEN, newToken)
+                if (newRefresh.isNotBlank()) vault.putString(KEY_REFRESH_TOKEN, newRefresh)
+                _accountState.value = loadState()
+                true
             }
+        }.getOrDefault(false)
+    }
+
+    suspend fun pushToCloud(): Result<String> = withContext(Dispatchers.IO) {
+        val initial = _accountState.value
+        if (!initial.isSignedIn) return@withContext Result.failure(IllegalStateException("Sign in first to sync."))
+        runCatching {
+            val syncCode = exportSyncCode()
+            fun executePush(st: CloudAccountState): Int {
+                val payload = buildJsonObject {
+                    put("user_id", st.userId)
+                    put("payload", syncCode)
+                }.toString().toRequestBody(JSON_MEDIA)
+                val req = Request.Builder()
+                    .url("${st.serverUrl}/rest/v1/quern_sync?on_conflict=user_id")
+                    .header("apikey", st.anonKey)
+                    .header("Authorization", "Bearer ${st.accessToken}")
+                    .header("Content-Type", "application/json")
+                    .header("Prefer", "resolution=merge-duplicates")
+                    .post(payload)
+                    .build()
+                return httpClient.newCall(req).execute().use { it.code }
+            }
+            var code = executePush(_accountState.value)
+            if (code == 401 && refreshAccessToken()) {
+                code = executePush(_accountState.value)
+            }
+            if (code !in 200..299) error("Cloud push failed (HTTP $code)")
+            _accountState.value = _accountState.value.copy(lastSyncedAt = "Just now")
+            "Synced to Cloud successfully!"
         }
     }
 
     suspend fun pullFromCloud(): Result<String> = withContext(Dispatchers.IO) {
-        val st = _accountState.value
-        if (!st.isSignedIn) return@withContext Result.failure(IllegalStateException("Sign in first to sync."))
+        val initial = _accountState.value
+        if (!initial.isSignedIn) return@withContext Result.failure(IllegalStateException("Sign in first to sync."))
         runCatching {
-            val req = Request.Builder()
-                .url("${st.serverUrl}/rest/v1/quern_sync?user_id=eq.${st.userId}&select=payload")
-                .header("apikey", st.anonKey)
-                .header("Authorization", "Bearer ${st.accessToken}")
-                .build()
-            httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) error("Cloud pull failed (HTTP ${resp.code})")
-                val arr = json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonArray
-                val code = arr?.firstOrNull()?.jsonObject?.get("payload")?.jsonPrimitive?.contentOrNull
-                if (!code.isNullOrBlank()) {
-                    importSyncCode(code).getOrThrow()
+            fun executePull(st: CloudAccountState): Pair<Int, String> {
+                val req = Request.Builder()
+                    .url("${st.serverUrl}/rest/v1/quern_sync?user_id=eq.${st.userId}&select=payload")
+                    .header("apikey", st.anonKey)
+                    .header("Authorization", "Bearer ${st.accessToken}")
+                    .build()
+                return httpClient.newCall(req).execute().use { resp ->
+                    resp.code to resp.body?.string().orEmpty()
                 }
-                _accountState.value = _accountState.value.copy(lastSyncedAt = "Just now")
-                "Synced from Cloud!"
             }
+            var (code, body) = executePull(_accountState.value)
+            if (code == 401 && refreshAccessToken()) {
+                val retry = executePull(_accountState.value)
+                code = retry.first
+                body = retry.second
+            }
+            if (code !in 200..299) error("Cloud pull failed (HTTP $code)")
+            val arr = json.parseToJsonElement(body) as? JsonArray
+            val syncCode = arr?.firstOrNull()?.jsonObject?.get("payload")?.jsonPrimitive?.contentOrNull
+            if (!syncCode.isNullOrBlank()) {
+                importSyncCode(syncCode).getOrThrow()
+            }
+            _accountState.value = _accountState.value.copy(lastSyncedAt = "Just now")
+            "Synced from Cloud!"
         }
     }
 
@@ -404,9 +447,9 @@ class CloudSyncManager(
     suspend fun importFromNuvio(rawInput: String): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val trimmed = rawInput.trim()
-            if (trimmed.isBlank()) error("Paste your Nuvio backup JSON, backup URL, or addon links.")
+            if (trimmed.isBlank()) error("Paste your backup JSON, backup URL, or addon manifest links.")
 
-            // If user pasted a direct URL to a Nuvio JSON backup (not a manifest.json), fetch it
+            // If user pasted a direct URL to a JSON backup (not a manifest.json), fetch it
             val payloadText = if (
                 (trimmed.startsWith("http://") || trimmed.startsWith("https://")) &&
                 !trimmed.contains("manifest.json", ignoreCase = true) &&
@@ -414,7 +457,7 @@ class CloudSyncManager(
             ) {
                 val req = Request.Builder().url(trimmed).build()
                 httpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) error("Failed to fetch Nuvio backup URL (HTTP ${resp.code})")
+                    if (!resp.isSuccessful) error("Failed to fetch backup URL (HTTP ${resp.code})")
                     resp.body?.string().orEmpty()
                 }
             } else {
@@ -525,11 +568,11 @@ class CloudSyncManager(
             }
 
             if (addonsImported == 0 && libraryImported == 0 && progressImported == 0) {
-                error("No addons or library items found in the pasted Nuvio data.")
+                error("No addons or library items found in the pasted backup data.")
             }
 
-            _accountState.value = _accountState.value.copy(lastSyncedAt = "Nuvio imported just now")
-            "Nuvio Imported! $addonsImported addons • $libraryImported library items • $progressImported progress items."
+            _accountState.value = _accountState.value.copy(lastSyncedAt = "Backup imported just now")
+            "Backup Imported! $addonsImported addons • $libraryImported library items • $progressImported progress items."
         }
     }
 
@@ -548,6 +591,7 @@ class CloudSyncManager(
         private const val KEY_EMAIL = "sync_email"
         private const val KEY_USER_ID = "sync_user_id"
         private const val KEY_TOKEN = "sync_access_token"
+        private const val KEY_REFRESH_TOKEN = "sync_refresh_token"
         private const val KEY_STREMIO_AUTH = "stremio_auth_key"
         private const val KEY_STREMIO_EMAIL = "stremio_email"
     }

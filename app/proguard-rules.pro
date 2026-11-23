@@ -17,6 +17,14 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
+-keep,includedescriptorclasses class com.quern.app.data.sync.**$$serializer { *; }
+-keepclassmembers class com.quern.app.data.sync.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.quern.app.data.sync.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
 # OkHttp / Media3 / Room safe rules
 -dontwarn okhttp3.**
 -dontwarn okio.**

@@ -9,8 +9,13 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -21,7 +26,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.quern.app.domain.model.AppLanguage
 import com.quern.app.domain.model.AppThemePreset
@@ -32,14 +39,14 @@ val LumaSurface = Color(0xFF0A121B)
 val LumaSurfaceElevated = Color(0xFF132131)
 val LumaSurfaceHighlight = Color(0xFF1E3249)
 
-val LumaGlassFill = Color(0x16FFFFFF)
-val LumaGlassFillStrong = Color(0x26FFFFFF)
-val LumaGlassBorder = Color(0x28FFFFFF)
-val LumaGlassBorderSubtle = Color(0x14FFFFFF)
+val LumaGlassFill = Color(0x18FFFFFF)
+val LumaGlassFillStrong = Color(0x24FFFFFF)
+val LumaGlassBorder = Color.Transparent
+val LumaGlassBorderSubtle = Color.Transparent
 
-val LumaAccent = Color(0xFF345372)
-val LumaAccentSoft = Color(0xFF70A4D6)
-val LumaCyan = Color(0xFFD3D3D3)
+val LumaAccent = Color(0xFF3B5F85)
+val LumaAccentSoft = Color(0xFF8EC3F0)
+val LumaCyan = Color(0xFFD8DCE3)
 val LumaTeal = Color(0xFF2DD4BF)
 val LumaGreen = Color(0xFF10B981)
 val LumaAmber = Color(0xFFFBBF24)
@@ -49,7 +56,7 @@ val LumaRed = Color(0xFFEF4444)
 val LumaTextPrimary = Color(0xFFF8FAFC)
 val LumaTextSecondary = Color(0xFFA1A8B6)
 val LumaTextMuted = Color(0xFF64748B)
-val LumaBorder = Color(0xFF28425C)
+val LumaBorder = Color.Transparent
 
 val QuernPrimaryGradient = Brush.horizontalGradient(
     colors = listOf(Color(0xFF345372), Color(0xFF70A4D6))
@@ -59,6 +66,7 @@ val QuernGlassBorderBrush = Brush.linearGradient(
     colors = listOf(Color(0x30FFFFFF), Color(0x0AFFFFFF))
 )
 
+@Immutable
 data class QuernPalette(
     val background: Color,
     val surface: Color,
@@ -66,18 +74,54 @@ data class QuernPalette(
     val accent: Color,
     val focusRing: Color,
     val onAccent: Color,
-    val border: Color
+    val border: Color,
+    val ambientGlow: Color = Color(0xFF294E7A),
+    val isGlossy: Boolean = false
 )
+
+/**
+ * Lightweight GPU-only piano-black specular sheen for Glossy Black surfaces.
+ * Uses a seamless full-height falloff with zero stroke/border lines.
+ */
+fun Modifier.glossySheen(
+    enabled: Boolean,
+    cornerRadius: Dp = 18.dp,
+    intensity: Float = 1f
+): Modifier {
+    if (!enabled) return this
+    return this.drawWithCache {
+        val radiusPx = cornerRadius.toPx()
+        val cr = CornerRadius(radiusPx, radiusPx)
+        val topSheen = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.0f to Color.White.copy(alpha = (0.095f * intensity).coerceIn(0f, 0.18f)),
+                0.28f to Color.White.copy(alpha = (0.04f * intensity).coerceIn(0f, 0.08f)),
+                0.65f to Color.White.copy(alpha = (0.01f * intensity).coerceIn(0f, 0.03f)),
+                1.0f to Color.Transparent
+            ),
+            startY = 0f,
+            endY = size.height
+        )
+        onDrawWithContent {
+            drawContent()
+            drawRoundRect(
+                brush = topSheen,
+                cornerRadius = cr,
+                size = Size(size.width, size.height)
+            )
+        }
+    }
+}
 
 val LocalQuernPalette = staticCompositionLocalOf {
     QuernPalette(
         background = Color(0xFF000000),
-        surface = Color(0xFF0A121B),
-        surfaceElevated = Color(0xFF132131),
-        accent = Color(0xFF345372),
-        focusRing = Color(0xFF70A4D6),
+        surface = Color(0xFF0B111A),
+        surfaceElevated = Color(0xFF141F2E),
+        accent = Color(0xFF3B5F85),
+        focusRing = Color(0xFF8EC3F0),
         onAccent = Color.White,
-        border = Color(0xFF28425C)
+        border = Color.Transparent
     )
 }
 
@@ -174,7 +218,8 @@ fun QuernTheme(
         themePreset.focusRingColor
     }
 
-    val bg = if (amoledPureBlack) Color(0xFF000000) else themePreset.surfaceTint
+    val isGlossy = themePreset == AppThemePreset.GLOSSY_BLACK
+    val bg = if (isGlossy || amoledPureBlack) Color(0xFF000000) else themePreset.backgroundColor
     val surf = themePreset.surfaceTint
     val elev = themePreset.surfaceElevatedTint
     val border = themePreset.borderTint
@@ -186,7 +231,9 @@ fun QuernTheme(
         accent = resolvedAccent,
         focusRing = resolvedFocusRing,
         onAccent = resolvedOnAccent,
-        border = border
+        border = border,
+        ambientGlow = themePreset.ambientGlowColor,
+        isGlossy = isGlossy
     )
 
     val scaledTypography = remember(fontScaleMultiplier, fontFamilyChoice) {

@@ -95,6 +95,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -220,10 +223,12 @@ fun QuernPlayerScreen(
     settings: AppSettings,
     okHttpClient: OkHttpClient,
     onProgressUpdate: (positionMs: Long, durationMs: Long, isPlaying: Boolean) -> Unit,
+    onPlaybackStop: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     onPlayNextEpisode: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val accent = LocalQuernAccent.current
     val palette = LocalQuernPalette.current
     val isAr = settings.effectiveLanguage == AppLanguage.ARABIC
@@ -410,7 +415,8 @@ fun QuernPlayerScreen(
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
             .setSubtitleParserFactory(subtitleParserFactory)
 
-        val renderersFactory = DefaultRenderersFactory(context)
+        // QuernRenderersFactory = DefaultRenderersFactory + Dolby Vision profile 7 -> HEVC base-layer fallback
+        val renderersFactory = QuernRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             .setEnableDecoderFallback(true)
 
@@ -516,6 +522,23 @@ fun QuernPlayerScreen(
         }
     }
 
+    // Pause playback cleanly when app moves to background (Home button on TV / app switch on phone)
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                val dur = exoPlayer.duration.coerceAtLeast(0L)
+                exoPlayer.playWhenReady = false
+                exoPlayer.pause()
+                onProgressUpdate(pos, dur, false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
@@ -527,14 +550,17 @@ fun QuernPlayerScreen(
                 isBuffering = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_READY) {
                     durationMs = exoPlayer.duration.coerceAtLeast(0L)
-                } else if (playbackState == Player.STATE_ENDED &&
-                    settings.autoPlayNext &&
-                    !request.nextEpisodeTitle.isNullOrBlank() &&
-                    !nextEpisodeCancelled &&
-                    !nextEpisodeTriggered
-                ) {
-                    nextEpisodeTriggered = true
-                    onPlayNextEpisode()
+                } else if (playbackState == Player.STATE_ENDED) {
+                    val dur = exoPlayer.duration.coerceAtLeast(0L)
+                    onPlaybackStop(dur, dur)
+                    if (settings.autoPlayNext &&
+                        !request.nextEpisodeTitle.isNullOrBlank() &&
+                        !nextEpisodeCancelled &&
+                        !nextEpisodeTriggered
+                    ) {
+                        nextEpisodeTriggered = true
+                        onPlayNextEpisode()
+                    }
                 }
             }
 
@@ -578,7 +604,13 @@ fun QuernPlayerScreen(
         }
         exoPlayer.addListener(listener)
         onDispose {
-            onProgressUpdate(exoPlayer.currentPosition, exoPlayer.duration.coerceAtLeast(0L), false)
+            val finalPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+            val finalDur = exoPlayer.duration.coerceAtLeast(0L)
+            onProgressUpdate(finalPos, finalDur, false)
+            onPlaybackStop(finalPos, finalDur)
+            exoPlayer.playWhenReady = false
+            exoPlayer.pause()
+            exoPlayer.stop()
             exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
@@ -723,7 +755,13 @@ fun QuernPlayerScreen(
                 }
             },
             update = { view ->
+                if (view.player !== exoPlayer) {
+                    view.player = exoPlayer
+                }
                 view.resizeMode = resizeMode
+            },
+            onRelease = { view ->
+                view.player = null
             }
         )
 

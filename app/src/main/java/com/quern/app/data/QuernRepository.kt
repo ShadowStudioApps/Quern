@@ -22,6 +22,10 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 class QuernRepository(
     val addonRepository: AddonRepository,
@@ -110,6 +114,23 @@ class QuernRepository(
 
     suspend fun getSavedPositionMs(contentId: String): Long =
         historyDao.getById(contentId)?.positionMs ?: 0L
+
+    suspend fun getSavedWatchProgress(contentId: String): WatchProgress? =
+        historyDao.getById(contentId)?.let {
+            WatchProgress(
+                contentId = it.contentId,
+                title = it.title,
+                type = MediaType.fromStremio(it.mediaType),
+                posterUrl = it.posterUrl,
+                backdropUrl = it.backdropUrl,
+                positionMs = it.positionMs,
+                durationMs = it.durationMs,
+                episodeId = it.episodeId,
+                episodeLabel = it.episodeLabel,
+                lastStreamUrl = it.lastStreamUrl,
+                updatedAt = it.updatedAt
+            )
+        }
 
     suspend fun loadHomeCatalogs(hiddenCatalogKeys: Set<String> = emptySet()): List<CatalogRow> = coroutineScope {
         val tmdbDeferred = async { tmdbClient.getHomeCatalogRows() }
@@ -200,5 +221,82 @@ class QuernRepository(
         val allSubtitles = (subtitlesTask.await() + embeddedSubs).distinctBy { it.url }
 
         allStreams to allSubtitles
+    }
+
+    /**
+     * Loads streams progressively as each server/addon responds without blocking on subtitles
+     * or the slowest addon.
+     */
+    suspend fun loadStreamsAndSubtitlesProgressive(
+        detail: MediaDetail,
+        episodeId: String? = null,
+        onStreamsUpdated: (List<StreamSource>) -> Unit,
+        onSubtitlesUpdated: (List<SubtitleTrack>) -> Unit
+    ) = coroutineScope {
+        val item = detail.item
+        val mutex = Mutex()
+        var serverStreams: List<StreamSource> = emptyList()
+        var addonStreams: List<StreamSource> = emptyList()
+        var externalSubs: List<SubtitleTrack> = emptyList()
+
+        suspend fun emitMergedStreams() {
+            val merged = mutex.withLock { serverStreams + addonStreams }
+            onStreamsUpdated(merged)
+            val embeddedSubs = merged.flatMap { it.subtitles }
+            if (embeddedSubs.isNotEmpty()) {
+                val mergedSubs = mutex.withLock { (externalSubs + embeddedSubs).distinctBy { it.url } }
+                onSubtitlesUpdated(mergedSubs)
+            }
+        }
+
+        val addonLookupId = when {
+            episodeId != null && !episodeId.startsWith("srv:") -> episodeId
+            !item.imdbId.isNullOrBlank() -> item.imdbId
+            !item.id.startsWith("srv:") && !item.id.startsWith("dav:") -> item.id
+            else -> null
+        }
+
+        val serverJob = launch {
+            if (!item.sourceId.isNullOrBlank() && item.origin in setOf(
+                    SourceOrigin.JELLYFIN, SourceOrigin.EMBY, SourceOrigin.PLEX, SourceOrigin.WEBDAV
+                )
+            ) {
+                val res = withTimeoutOrNull(6_000L) {
+                    runCatching { serverManager.getStreams(item.sourceId, episodeId ?: item.id) }.getOrDefault(emptyList())
+                }.orEmpty()
+                if (res.isNotEmpty()) {
+                    mutex.withLock { serverStreams = res }
+                    emitMergedStreams()
+                }
+            }
+        }
+
+        val addonJob = launch {
+            if (addonLookupId != null) {
+                addonRepository.fetchStreamsProgressive(item.type, addonLookupId) { latest ->
+                    mutex.withLock { addonStreams = latest }
+                    emitMergedStreams()
+                }
+            }
+        }
+
+        val subsJob = launch {
+            if (addonLookupId != null) {
+                val subs = runCatching { addonRepository.fetchAggregatedSubtitles(item.type, addonLookupId) }
+                    .getOrDefault(emptyList())
+                if (subs.isNotEmpty()) {
+                    val mergedSubs = mutex.withLock {
+                        externalSubs = subs
+                        (externalSubs + (serverStreams + addonStreams).flatMap { it.subtitles }).distinctBy { it.url }
+                    }
+                    onSubtitlesUpdated(mergedSubs)
+                }
+            }
+        }
+
+        serverJob.join()
+        addonJob.join()
+        // Wait briefly for subtitles only if already finishing; streams are already shown
+        subsJob.join()
     }
 }

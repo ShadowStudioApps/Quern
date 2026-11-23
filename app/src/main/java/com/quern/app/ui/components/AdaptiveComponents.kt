@@ -3,6 +3,7 @@ package com.quern.app.ui.components
 import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,6 +38,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwitchColors
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -96,12 +100,48 @@ import com.quern.app.ui.theme.LumaGlassFillStrong
 import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.glossySheen
 import kotlin.math.abs
+
+private val PillShape = RoundedCornerShape(999.dp)
+
+/**
+ * High-contrast, theme-aware Switch colors for both ON and OFF states.
+ * Explicitly sets unchecked thumb, track, and subtle border so OFF switches never disappear
+ * when the theme's Material3 outline color is transparent, and stays crisp across light and dark accents.
+ */
+@Composable
+fun quernSwitchColors(onAccentSurface: Boolean = false): SwitchColors {
+    val palette = LocalQuernPalette.current
+    val isLightAccent = palette.onAccent != Color.White
+    return SwitchDefaults.colors(
+        checkedThumbColor = when {
+            onAccentSurface && isLightAccent -> Color.White
+            onAccentSurface -> palette.accent
+            else -> palette.onAccent
+        },
+        checkedTrackColor = when {
+            onAccentSurface && isLightAccent -> LumaGreen
+            onAccentSurface -> Color.White
+            else -> palette.accent
+        },
+        checkedBorderColor = Color.Transparent,
+        uncheckedThumbColor = Color(0xFFCBD5E1),
+        uncheckedTrackColor = if (onAccentSurface) Color(0xFF0F131A).copy(alpha = 0.78f) else Color(0xFF1D232E),
+        uncheckedBorderColor = if (onAccentSurface && isLightAccent) {
+            Color(0xFF0F131A).copy(alpha = 0.45f)
+        } else {
+            Color(0xFF4B5568)
+        }
+    )
+}
 
 /**
  * TV-safe single-node focus + click modifier.
  * IMPORTANT: Never combine .focusable() with .clickable() in Jetpack Compose —
  * clickable() already registers a focus target that handles both D-Pad focus and OK/Enter!
+ * Uses indication = null so Material3's default rectangular focus overlay/ripple node
+ * isn't allocated or drawn behind custom TV focus cards.
  */
 fun Modifier.tvClickable(
     enabled: Boolean = true,
@@ -115,7 +155,12 @@ fun Modifier.tvClickable(
         if (focused) onFocused()
     }
     .then(RememberLastFocusedElement)
-    .clickable(enabled = enabled, onClick = onClick)
+    .clickable(
+        interactionSource = null,
+        indication = null,
+        enabled = enabled,
+        onClick = onClick
+    )
 
 /**
  * Remembers the last focused tvClickable inside a content area so focus coming back
@@ -227,7 +272,6 @@ fun LumaBadgeChip(
     Surface(
         color = accentColor.copy(alpha = 0.22f),
         shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.55f)),
         modifier = modifier
     ) {
         Text(
@@ -260,7 +304,7 @@ fun LumaHeroBanner(
     val context = LocalContext.current
     val palette = LocalQuernPalette.current
     val strings = LocalQuernStrings.current
-    val heroHeight = if (isTv) 262.dp else 252.dp
+    val heroHeight = if (isTv) 248.dp else 252.dp
     val viewDetailsFocus = remember { FocusRequester() }
     val isAr = strings.watchNow == "شاهد الآن"
     val viewDetailsLabel = if (isAr) "عرض التفاصيل" else "View Details"
@@ -270,16 +314,15 @@ fun LumaHeroBanner(
         else -> item.type.name.lowercase().replaceFirstChar { it.uppercase() }
     }
 
-    val categories = listOf(
-        "All" to strings.all,
-        "Movies" to strings.movies,
-        "Series" to strings.series,
-        "Servers" to strings.servers
-    )
+    val categories = remember(strings) {
+        listOf(
+            "All" to strings.all,
+            "Movies" to strings.movies,
+            "Series" to strings.series,
+            "Servers" to strings.servers
+        )
+    }
 
-    // Memory-cache key of the backdrop currently on screen. The next request uses it as its
-    // placeholder, so Coil's single crossfade goes old image -> new image (no blank frame, no
-    // second Compose Crossfade layer). Plain holder: updating it must not recompose.
     val shownBackdropKey = remember { arrayOfNulls<MemoryCache.Key>(1) }
     val imageModel = remember(item.backdropUrl, item.posterUrl) {
         val url = item.backdropUrl ?: item.posterUrl
@@ -288,21 +331,18 @@ fun LumaHeroBanner(
                 .data(url)
                 .size(960, 540)
                 .placeholderMemoryCacheKey(shownBackdropKey[0])
-                .crossfade(260)
+                .crossfade(240)
                 .build()
         }
     }
 
+    // Full-bleed edge-to-edge hero: zero box borders, bottom edge dissolves 100% into palette.background
+    // so content rows below sit seamlessly with zero GPU overdraw behind LazyColumn.
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(heroHeight)
-            .clip(RoundedCornerShape(if (isTv) 20.dp else 0.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(palette.accent.copy(alpha = 0.24f), palette.surface, palette.background)
-                )
-            )
+            .background(palette.background)
     ) {
         if (imageModel != null) {
             AsyncImage(
@@ -314,30 +354,40 @@ fun LumaHeroBanner(
             )
         }
 
-        // One scrim layer: both gradients built once per size, drawn in a single pass
+        // Single-pass scrim dissolving seamlessly into palette.background on the left and bottom
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .drawWithCache {
                     val vertical = Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.0f to palette.background.copy(alpha = 0.42f),
-                            0.30f to Color.Transparent,
-                            0.72f to palette.background.copy(alpha = 0.65f),
+                            0.0f to palette.background.copy(alpha = 0.36f),
+                            0.24f to Color.Transparent,
+                            0.58f to palette.background.copy(alpha = 0.48f),
+                            0.82f to palette.background.copy(alpha = 0.90f),
                             1.0f to palette.background
                         )
                     )
                     val horizontal = Brush.horizontalGradient(
                         colorStops = arrayOf(
-                            0.0f to palette.background.copy(alpha = 0.88f),
-                            0.38f to palette.background.copy(alpha = 0.48f),
-                            0.68f to Color.Transparent,
+                            0.0f to palette.background.copy(alpha = 0.92f),
+                            0.34f to palette.background.copy(alpha = 0.52f),
+                            0.64f to palette.background.copy(alpha = 0.08f),
                             1.0f to Color.Transparent
                         )
                     )
+                    val ambientWash = if (!palette.isGlossy) {
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.0f to palette.ambientGlow.copy(alpha = 0.14f),
+                                0.65f to Color.Transparent
+                            )
+                        )
+                    } else null
                     onDrawBehind {
                         drawRect(vertical)
                         drawRect(horizontal)
+                        if (ambientWash != null) drawRect(ambientWash)
                     }
                 }
         )
@@ -615,10 +665,7 @@ private fun GlassCategoryPill(
     Surface(
         color = bg,
         shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(
-            width = if (focused) 2.5.dp else 1.dp,
-            color = if (focused) palette.focusRing else if (selected) Color.White else LumaGlassBorder
-        ),
+        border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .tvClickable(
@@ -645,7 +692,7 @@ fun LumaMediaCarouselRow(
     cardCorner: CardCornerPreset = CardCornerPreset.ROUNDED,
     showPosterLabels: Boolean = true,
     onItemClick: (MediaItem) -> Unit,
-    onItemFocused: ((MediaItem) -> Unit)? = null,
+    onItemFocused: ((MediaItem, Int) -> Unit)? = null,
     firstItemFocusRequester: FocusRequester? = null,
     onFirstItemAttachedChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -686,16 +733,17 @@ fun LumaMediaCarouselRow(
             )
         }
 
+        val uniqueItems = remember(row.items) { row.items.distinctBy { "${it.type}_${it.id}" } }
         LazyRow(
-            contentPadding = PaddingValues(horizontal = if (isTv) 14.dp else 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp)
+            contentPadding = PaddingValues(horizontal = if (isTv) 16.dp else 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 8.dp)
         ) {
-            items(
-                items = row.items,
-                key = { "${row.id}_${it.id}" },
-                contentType = { "poster" }
-            ) { item ->
-                val isFirst = item.id == row.items.firstOrNull()?.id
+            itemsIndexed(
+                items = uniqueItems,
+                key = { _, item -> "${row.id}_${item.type}_${item.id}" },
+                contentType = { _, _ -> "poster" }
+            ) { index, item ->
+                val isFirst = index == 0
                 if (isFirst && firstItemFocusRequester != null && onFirstItemAttachedChanged != null) {
                     DisposableEffect(row.id, item.id) {
                         onDispose { onFirstItemAttachedChanged(false) }
@@ -709,7 +757,9 @@ fun LumaMediaCarouselRow(
                     cardCorner = cardCorner,
                     showPosterLabels = showPosterLabels,
                     onClick = { onItemClick(item) },
-                    onFocused = { onItemFocused?.invoke(item) },
+                    onFocused = if (onItemFocused != null) {
+                        { onItemFocused(item, index) }
+                    } else null,
                     modifier = if (isFirst && firstItemFocusRequester != null) {
                         Modifier
                             .focusRequester(firstItemFocusRequester)
@@ -739,17 +789,18 @@ fun LumaPosterCard(
     val palette = LocalQuernPalette.current
     var isFocused by remember { mutableStateOf(false) }
 
-    // One short tween drives both scale and border. Read only inside graphicsLayer/draw lambdas,
-    // so the animation re-draws the card without recomposing it on every frame.
+    // One smooth critically-eased tween drives scale, sheen, and border inside graphicsLayer/draw only
+    // (no recomposition on animation frames, and a calm 6% lift avoids row wobble/jitter).
     val focusProgress = animateFloatAsState(
         targetValue = if (isFocused) 1f else 0f,
-        animationSpec = tween(120),
+        animationSpec = tween(150, easing = FastOutSlowInEasing),
         label = "posterFocus"
     )
-    val idleBorder = palette.border
+    val focusBorderColor = if (palette.isGlossy) palette.focusRing else Color.White
+    val isGlossy = palette.isGlossy
     val baseWidth = if (isTv) cardSize.tvWidthDp else cardSize.phoneWidthDp
     val cardWidth = if (cardShape == CardShapePreset.LANDSCAPE) (baseWidth * 1.45f).toInt().dp else baseWidth.dp
-    val cornerShape = RoundedCornerShape(cardCorner.radiusDp.dp)
+    val cornerShape = remember(cardCorner) { RoundedCornerShape(cardCorner.radiusDp.dp) }
 
     val imageModel = remember(item.posterUrl, item.backdropUrl, cardShape) {
         val url = if (cardShape == CardShapePreset.LANDSCAPE) (item.backdropUrl ?: item.posterUrl) else item.posterUrl
@@ -774,7 +825,7 @@ fun LumaPosterCard(
             .width(cardWidth)
             .zIndex(if (isFocused) 10f else 0f)
             .graphicsLayer {
-                val s = 1f + 0.13f * focusProgress.value
+                val s = 1f + 0.06f * focusProgress.value
                 scaleX = s
                 scaleY = s
             }
@@ -792,18 +843,31 @@ fun LumaPosterCard(
                 .background(fallbackBg)
                 .drawWithCache {
                     val outline = cornerShape.createOutline(size, layoutDirection, this)
-                    val thin = 1.dp.toPx()
-                    val thick = 3.dp.toPx()
+                    val thick = 2.5.dp.toPx()
+                    val glossBrush = if (isGlossy) {
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.0f to Color.White.copy(alpha = 0.11f),
+                                0.30f to Color.White.copy(alpha = 0.04f),
+                                0.70f to Color.White.copy(alpha = 0.01f),
+                                1.0f to Color.Transparent
+                            )
+                        )
+                    } else null
                     onDrawWithContent {
                         drawContent()
                         val p = focusProgress.value
-                        // Stroke is centred on the edge and the shape clip hides the outer half,
-                        // so double the width to keep the same inside border as Modifier.border.
-                        drawOutline(
-                            outline = outline,
-                            color = lerp(idleBorder, Color.White, p),
-                            style = Stroke(width = 2f * (thin + (thick - thin) * p))
-                        )
+                        // Draw specular gloss and crisp focus ring only while focused (zero extra GPU work on idle cards)
+                        if (p > 0.01f) {
+                            if (glossBrush != null) {
+                                drawRect(brush = glossBrush, alpha = 0.85f * p)
+                            }
+                            drawOutline(
+                                outline = outline,
+                                color = focusBorderColor.copy(alpha = p),
+                                style = Stroke(width = 2f * thick * p)
+                            )
+                        }
                     }
                 }
         ) {
@@ -841,7 +905,7 @@ fun LumaPosterCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(4.dp)
-                        .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(999.dp))
+                        .background(Color.Black.copy(alpha = 0.78f), PillShape)
                         .padding(horizontal = 4.dp, vertical = 1.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -864,7 +928,7 @@ fun LumaPosterCard(
                     color = if (isFocused) palette.focusRing else LumaTextPrimary,
                     fontSize = 10.sp,
                     lineHeight = 13.sp,
-                    fontWeight = if (isFocused) FontWeight.Bold else FontWeight.SemiBold,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

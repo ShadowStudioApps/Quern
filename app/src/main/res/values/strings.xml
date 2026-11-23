@@ -253,4 +253,59 @@
     <string name="profile_unlock_btn">Unlock</string>
     <string name="profile_pin_wrong">Incorrect PIN, try again</string>
     <string name="profile_pin_locked_out">Too many wrong PINs — wait %1$ds</string>
+
+    <!-- Search Screen -->
+    <string name="search_title">Search Everywhere</string>
+    <string name="search_subtitle">Searches across Stremio Addons, TMDB, Jellyfin, Emby, Plex &amp; WebDAV</string>
+    <string name="search_placeholder">Search movies, series, servers…</string>
+    <string name="search_button">Search</string>
+    <string name="search_no_results">No results found for "%1$s".</string>
+    <string name="search_prompt">Type a title and press Search.</string>
+
+    <!-- Library Screen -->
+    <string name="library_title">Library &amp; Cloud</string>
+    <string name="library_refresh_cloud">Refresh Cloud</string>
+    <string name="library_tab_favorites">Favorites (%1$d)</string>
+    <string name="library_tab_debrid">Debrid Cloud</string>
+    <string name="library_tab_webdav">WebDAV Files</string>
+    <string name="library_empty_favorites">No favorites saved yet.</string>
+    <string name="library_empty_cloud">No cloud files found. Connect TorBox, Real-Debrid, AllDebrid, or Premiumize in Settings → Services.</string>
+    <string name="library_empty_webdav">No WebDAV servers configured. Add one in Settings → Services.</string>
+
+    <!-- Detail Screen -->
+    <string name="detail_back">Back</string>
+    <string name="detail_favorite">Favorite</string>
+    <string name="detail_all_sources">All Sources</string>
+    <string name="detail_play">Play</string>
+    <string name="detail_play_count">Play (%1$d)</string>
+    <string name="detail_resume">Resume</string>
+    <string name="detail_resume_time">Resume • %1$s</string>
+    <string name="addons_phone_qr_btn">Phone QR Setup</string>
+    <string name="detail_movie_origin">Movie • %1$s</string>
+    <string name="detail_series_origin">Series • %1$s</string>
+    <string name="detail_episodes">Episodes</string>
+    <string name="detail_season_n">Season %1$d</string>
+    <string name="detail_cast">Cast</string>
+    <string name="detail_trailers">Trailers</string>
+    <string name="detail_trailer_chip">Trailer</string>
+    <string name="detail_official_trailer">OFFICIAL TRAILER</string>
+    <string name="detail_series_details">Series Details</string>
+    <string name="detail_movie_details">Movie Details</string>
+    <string name="detail_release_info">Release Info</string>
+    <string name="detail_runtime">Runtime</string>
+    <string name="detail_genres">Genres</string>
+    <string name="detail_director">Director</string>
+    <string name="detail_available_sources">Available Sources</string>
+    <string name="detail_resolving">Resolving…</string>
+    <string name="detail_streams_count">%1$d Streams</string>
+    <string name="detail_subtitles">Subtitles</string>
+    <string name="detail_subtitles_languages">%1$d Languages</string>
+    <string name="detail_filter_all">All</string>
+    <string name="detail_filter_cached">⚡ Cached</string>
+    <string name="detail_active_sources_count">Active sources • %1$d streams</string>
+    <string name="detail_filtered_sources_count">%1$s • %2$d streams</string>
+    <string name="detail_subtitles_ready">%1$d Subtitles ready</string>
+    <string name="detail_fetching_streams">Fetching streams across Addons, Debrid &amp; Servers…</string>
+    <string name="detail_no_matching_streams">No matching streams for this filter.</string>
+    <string name="detail_resolve_via_debrid">Resolve via Debrid</string>
 </resources>

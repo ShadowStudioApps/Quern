@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.quern.app.R
 import com.quern.app.domain.model.Episode
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.domain.model.MediaType
@@ -81,6 +83,11 @@ import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaRose
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.qString
+
+private const val FILTER_ALL = "__ALL__"
+private const val FILTER_4K = "__4K__"
+private const val FILTER_CACHED = "__CACHED__"
 
 @Composable
 fun DetailScreen(
@@ -105,7 +112,7 @@ fun DetailScreen(
 
     val item = detail.item
     var showStreamsOverlay by remember(item.id) { mutableStateOf(false) }
-    var streamFilter by remember(item.id) { mutableStateOf("All") }
+    var streamFilter by remember(item.id) { mutableStateOf(FILTER_ALL) }
 
     BackHandler(enabled = showStreamsOverlay) {
         showStreamsOverlay = false
@@ -114,20 +121,20 @@ fun DetailScreen(
     val providerTabs = remember(state.streams) {
         val providers = state.streams.map { it.providerName.trim() }.filter { it.isNotBlank() }.distinct()
         buildList {
-            add("All")
+            add(FILTER_ALL)
             addAll(providers)
-            if (state.streams.any { it.title.contains("4K", true) || it.title.contains("2160", true) }) add("4K")
-            if (state.streams.any { it.isCached }) add("⚡ Cached")
+            if (state.streams.any { it.title.contains("4K", true) || it.title.contains("2160", true) }) add(FILTER_4K)
+            if (state.streams.any { it.isCached }) add(FILTER_CACHED)
         }
     }
 
     val filteredStreams = remember(state.streams, streamFilter) {
         when (streamFilter) {
-            "All" -> state.streams
-            "4K" -> state.streams.filter { s ->
+            FILTER_ALL -> state.streams
+            FILTER_4K -> state.streams.filter { s ->
                 s.qualityBadges.any { it.contains("4K", true) } || s.title.contains("4K", true) || s.title.contains("2160", true)
             }
-            "⚡ Cached" -> state.streams.filter { it.isCached }
+            FILTER_CACHED -> state.streams.filter { it.isCached }
             else -> state.streams.filter { it.providerName.equals(streamFilter, ignoreCase = true) }
         }
     }
@@ -161,7 +168,7 @@ fun DetailScreen(
         ) { inStreamsStage ->
             if (inStreamsStage) {
                 // =========================================================================
-                // STAGE 2: SPLIT-SCREEN CINEMA STREAM SELECTOR (All • Comet • AIOStreams...)
+                // STAGE 2: SPLIT-SCREEN CINEMA STREAM SELECTOR (All • one tab per installed addon)
                 // =========================================================================
                 val firstStreamFocus = remember { FocusRequester() }
                 val allFilterFocus = remember { FocusRequester() }
@@ -207,12 +214,12 @@ fun DetailScreen(
                                 ) {
                                     DetailCircleButton(
                                         icon = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back",
+                                        contentDescription = qString(R.string.detail_back),
                                         onClick = { showStreamsOverlay = false }
                                     )
                                     DetailCircleButton(
                                         icon = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Favorite",
+                                        contentDescription = qString(R.string.detail_favorite),
                                         tintOverride = if (isFavorite) LumaRose else null,
                                         onClick = { onToggleFavorite(item) }
                                     )
@@ -279,7 +286,10 @@ fun DetailScreen(
                                             }
                                         }
                                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            items(detail.episodesForSeason(state.selectedSeason), key = { it.id }) { ep ->
+                                            itemsIndexed(
+                                                detail.episodesForSeason(state.selectedSeason),
+                                                key = { idx, ep -> "${ep.id}_$idx" }
+                                            ) { _, ep ->
                                                 DetailFilterPill(
                                                     label = "E${ep.episodeNumber}",
                                                     selected = ep.id == state.selectedEpisode?.id,
@@ -319,7 +329,7 @@ fun DetailScreen(
                                 .padding(horizontal = 14.dp, vertical = 14.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                DetailCircleButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = { showStreamsOverlay = false })
+                                DetailCircleButton(Icons.AutoMirrored.Filled.ArrowBack, qString(R.string.detail_back), onClick = { showStreamsOverlay = false })
                                 Text(item.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             Spacer(Modifier.height(10.dp))
@@ -398,10 +408,10 @@ fun DetailScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                DetailCircleButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = onBack)
+                                DetailCircleButton(Icons.AutoMirrored.Filled.ArrowBack, qString(R.string.detail_back), onClick = onBack)
                                 DetailCircleButton(
                                     icon = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                    contentDescription = "Favorite",
+                                    contentDescription = qString(R.string.detail_favorite),
                                     tintOverride = if (isFavorite) LumaRose else null,
                                     onClick = { onToggleFavorite(item) }
                                 )
@@ -444,7 +454,11 @@ fun DetailScreen(
                                 val genreLine = if (item.genres.isNotEmpty()) {
                                     item.genres.take(4).joinToString(" • ")
                                 } else {
-                                    if (item.type == MediaType.SERIES) "Series • ${item.origin.displayName}" else "Movie • ${item.origin.displayName}"
+                                    if (item.type == MediaType.SERIES) {
+                                        qString(R.string.detail_series_origin, item.origin.displayName)
+                                    } else {
+                                        qString(R.string.detail_movie_origin, item.origin.displayName)
+                                    }
                                 }
                                 Spacer(Modifier.height(6.dp))
                                 Text(
@@ -474,12 +488,22 @@ fun DetailScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     var playFocused by remember { mutableStateOf(false) }
+                                    val hasResume = state.savedPositionMs > 5_000L &&
+                                        (state.savedDurationMs <= 0L || state.savedPositionMs < (state.savedDurationMs * 0.95).toLong())
+                                    val resumeFraction = if (hasResume && state.savedDurationMs > 0L) {
+                                        (state.savedPositionMs.toFloat() / state.savedDurationMs.toFloat()).coerceIn(0.04f, 0.96f)
+                                    } else 0f
+                                    val ctaText = when {
+                                        hasResume -> qString(R.string.detail_resume_time, formatTimeShort(state.savedPositionMs))
+                                        state.streams.isNotEmpty() -> qString(R.string.detail_play_count, state.streams.size)
+                                        else -> qString(R.string.detail_play)
+                                    }
                                     Surface(
                                         color = if (playFocused) palette.accent else Color.White,
                                         shape = RoundedCornerShape(999.dp),
-                                        border = if (playFocused) BorderStroke(2.5.dp, Color.White) else null,
+                                        border = if (playFocused) BorderStroke(2.5.dp, palette.focusRing) else null,
                                         modifier = Modifier
-                                            .width(if (isTv) 256.dp else 210.dp)
+                                            .width(if (isTv) 268.dp else 220.dp)
                                             .height(46.dp)
                                             .focusRequester(playCtaFocus)
                                             .clip(RoundedCornerShape(999.dp))
@@ -488,31 +512,54 @@ fun DetailScreen(
                                                 onClick = { showStreamsOverlay = true }
                                             )
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxSize(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = if (playFocused) palette.onAccent else Color.Black,
-                                                modifier = Modifier.size(22.dp)
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                text = if (state.streams.isNotEmpty()) "Play  (${state.streams.size})" else "Play",
-                                                color = if (playFocused) palette.onAccent else Color.Black,
-                                                fontSize = 14.5.sp,
-                                                fontWeight = FontWeight.ExtraBold
-                                            )
+                                        Box(modifier = Modifier.fillMaxSize()) {
+                                            Row(
+                                                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    tint = if (playFocused) palette.onAccent else Color.Black,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    text = ctaText,
+                                                    color = if (playFocused) palette.onAccent else Color.Black,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            if (resumeFraction > 0f) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomStart)
+                                                        .fillMaxWidth()
+                                                        .height(3.dp)
+                                                        .background(
+                                                            if (playFocused) palette.onAccent.copy(alpha = 0.2f)
+                                                            else Color.Black.copy(alpha = 0.14f)
+                                                        )
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth(resumeFraction)
+                                                            .fillMaxHeight()
+                                                            .background(if (playFocused) palette.focusRing else palette.accent)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
 
                                     // Circular "More / Sources" button matching Image #3
                                     DetailCircleButton(
                                         icon = Icons.Default.MoreHoriz,
-                                        contentDescription = "All Sources",
+                                        contentDescription = qString(R.string.detail_all_sources),
                                         onClick = { showStreamsOverlay = true }
                                     )
                                 }
@@ -527,11 +574,11 @@ fun DetailScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Text("Episodes", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                        Text(qString(R.string.detail_episodes), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             items(detail.seasons) { season ->
                                                 DetailFilterPill(
-                                                    label = "Season $season",
+                                                    label = qString(R.string.detail_season_n, season),
                                                     selected = season == state.selectedSeason,
                                                     onClick = { onSelectSeason(season) }
                                                 )
@@ -540,7 +587,10 @@ fun DetailScreen(
                                     }
 
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        items(detail.episodesForSeason(state.selectedSeason), key = { it.id }) { ep ->
+                                        itemsIndexed(
+                                            detail.episodesForSeason(state.selectedSeason),
+                                            key = { idx, ep -> "${ep.id}_$idx" }
+                                        ) { _, ep ->
                                             val selected = ep.id == state.selectedEpisode?.id
                                             var focused by remember { mutableStateOf(false) }
                                             Column(
@@ -608,7 +658,7 @@ fun DetailScreen(
                             item(key = "cast_section") {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Text(
-                                        text = "Cast",
+                                        text = qString(R.string.detail_cast),
                                         color = Color.White,
                                         fontSize = 18.sp,
                                         fontWeight = FontWeight.Bold
@@ -674,13 +724,13 @@ fun DetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text("Trailers", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    Text(qString(R.string.detail_trailers), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     Surface(
                                         color = Color.White.copy(alpha = 0.14f),
                                         shape = RoundedCornerShape(999.dp)
                                     ) {
                                         Text(
-                                            text = "Trailer",
+                                            text = qString(R.string.detail_trailer_chip),
                                             color = Color.White.copy(alpha = 0.9f),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
@@ -723,7 +773,7 @@ fun DetailScreen(
                                         if (backdropReq != null) {
                                             AsyncImage(
                                                 model = backdropReq,
-                                                contentDescription = "Official Trailer",
+                                                contentDescription = qString(R.string.detail_official_trailer),
                                                 contentScale = ContentScale.Crop,
                                                 modifier = Modifier.fillMaxSize()
                                             )
@@ -747,7 +797,7 @@ fun DetailScreen(
                                             }
                                         }
                                         Text(
-                                            text = "OFFICIAL TRAILER",
+                                            text = qString(R.string.detail_official_trailer),
                                             color = Color.White,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Black,
@@ -759,7 +809,7 @@ fun DetailScreen(
                                     }
                                     Spacer(Modifier.height(6.dp))
                                     Text(
-                                        text = "Trailer",
+                                        text = qString(R.string.detail_trailer_chip),
                                         color = if (trailerFocused) Color.White else Color.White.copy(alpha = 0.85f),
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold
@@ -775,20 +825,33 @@ fun DetailScreen(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = if (item.type == MediaType.SERIES) "Series Details" else "Movie Details",
+                                    text = if (item.type == MediaType.SERIES) qString(R.string.detail_series_details) else qString(R.string.detail_movie_details),
                                     color = Color.White,
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(Modifier.height(6.dp))
 
+                                val labelRelease = qString(R.string.detail_release_info)
+                                val labelRuntime = qString(R.string.detail_runtime)
+                                val labelGenres = qString(R.string.detail_genres)
+                                val labelDirector = qString(R.string.detail_director)
+                                val labelSources = qString(R.string.detail_available_sources)
+                                val labelSubtitles = qString(R.string.detail_subtitles)
+                                val valSources = if (state.isLoadingStreams) {
+                                    qString(R.string.detail_resolving)
+                                } else {
+                                    qString(R.string.detail_streams_count, state.streams.size)
+                                }
+                                val valSubtitles = qString(R.string.detail_subtitles_languages, state.subtitles.size)
+
                                 val rows = buildList {
-                                    item.year?.takeIf { it.isNotBlank() }?.let { add("Release Info" to it) }
-                                    formattedRuntime?.let { add("Runtime" to it) }
-                                    if (item.genres.isNotEmpty()) add("Genres" to item.genres.joinToString(", "))
-                                    if (detail.director.isNotEmpty()) add("Director" to detail.director.joinToString(", "))
-                                    add("Available Sources" to if (state.isLoadingStreams) "Resolving..." else "${state.streams.size} Streams")
-                                    if (state.subtitles.isNotEmpty()) add("Subtitles" to "${state.subtitles.size} Languages")
+                                    item.year?.takeIf { it.isNotBlank() }?.let { add(labelRelease to it) }
+                                    formattedRuntime?.let { add(labelRuntime to it) }
+                                    if (item.genres.isNotEmpty()) add(labelGenres to item.genres.joinToString(", "))
+                                    if (detail.director.isNotEmpty()) add(labelDirector to detail.director.joinToString(", "))
+                                    add(labelSources to valSources)
+                                    if (state.subtitles.isNotEmpty()) add(labelSubtitles to valSubtitles)
                                 }
 
                                 rows.forEachIndexed { idx, (label, value) ->
@@ -812,9 +875,6 @@ fun DetailScreen(
                                             fontWeight = FontWeight.SemiBold,
                                             modifier = Modifier.weight(1f)
                                         )
-                                    }
-                                    if (idx < rows.lastIndex) {
-                                        HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
                                     }
                                 }
                             }
@@ -872,7 +932,6 @@ private fun StreamsPanelCard(
     Surface(
         color = Color(0xDF0A0C10),
         shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
         modifier = modifier
     ) {
         Column(
@@ -880,15 +939,24 @@ private fun StreamsPanelCard(
                 .fillMaxSize()
                 .padding(horizontal = 18.dp, vertical = 16.dp)
         ) {
+            val labelAll = qString(R.string.detail_filter_all)
+            val labelCached = qString(R.string.detail_filter_cached)
+            fun filterDisplayLabel(tab: String): String = when (tab) {
+                FILTER_ALL -> labelAll
+                FILTER_4K -> "4K"
+                FILTER_CACHED -> labelCached
+                else -> tab
+            }
+
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 items(providerTabs) { tab ->
                     DetailFilterPill(
-                        label = tab,
+                        label = filterDisplayLabel(tab),
                         selected = tab == streamFilter,
-                        modifier = if (tab == "All") Modifier.focusRequester(allFilterFocus) else Modifier,
+                        modifier = if (tab == FILTER_ALL) Modifier.focusRequester(allFilterFocus) else Modifier,
                         onClick = { onFilterSelected(tab) }
                     )
                 }
@@ -900,19 +968,31 @@ private fun StreamsPanelCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = if (streamFilter == "All") {
-                        "Active sources • ${filteredStreams.size} streams"
-                    } else {
-                        "$streamFilter • ${filteredStreams.size} streams"
-                    },
-                    color = Color(0xFF94A3B8),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (streamFilter == FILTER_ALL) {
+                            qString(R.string.detail_active_sources_count, filteredStreams.size)
+                        } else {
+                            qString(R.string.detail_filtered_sources_count, filterDisplayLabel(streamFilter), filteredStreams.size)
+                        },
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (isLoadingStreams && filteredStreams.isNotEmpty()) {
+                        CircularProgressIndicator(
+                            color = palette.focusRing,
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 1.8.dp
+                        )
+                    }
+                }
                 if (subtitlesCount > 0) {
                     Text(
-                        text = "$subtitlesCount Subtitles ready",
+                        text = qString(R.string.detail_subtitles_ready, subtitlesCount),
                         color = LumaGreen,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -922,14 +1002,14 @@ private fun StreamsPanelCard(
 
             Spacer(Modifier.height(12.dp))
 
-            if (isLoadingStreams) {
+            if (isLoadingStreams && filteredStreams.isEmpty()) {
                 Box(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         CircularProgressIndicator(color = palette.focusRing, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
-                        Text("Fetching streams across Addons, Debrid & Servers...", color = LumaTextSecondary, fontSize = 13.sp)
+                        Text(qString(R.string.detail_fetching_streams), color = LumaTextSecondary, fontSize = 13.sp)
                     }
                 }
             } else if (filteredStreams.isEmpty()) {
@@ -938,7 +1018,7 @@ private fun StreamsPanelCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = statusMessage ?: "No matching streams for this filter.",
+                        text = statusMessage ?: qString(R.string.detail_no_matching_streams),
                         color = LumaTextSecondary,
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center
@@ -950,12 +1030,11 @@ private fun StreamsPanelCard(
                     contentPadding = PaddingValues(bottom = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(filteredStreams, key = { it.id }) { stream ->
-                        val isFirst = stream.id == filteredStreams.firstOrNull()?.id
-                        NuvioStreamCard(
+                    itemsIndexed(filteredStreams, key = { idx, s -> "${s.id}_$idx" }) { index, stream ->
+                        StreamSourceCard(
                             stream = stream,
                             isResolving = resolvingStreamId == stream.id,
-                            modifier = if (isFirst) Modifier.focusRequester(firstStreamFocus) else Modifier,
+                            modifier = if (index == 0) Modifier.focusRequester(firstStreamFocus) else Modifier,
                             onClick = { onPlayStream(stream) }
                         )
                     }
@@ -1008,18 +1087,15 @@ private fun DetailFilterPill(
     var focused by remember { mutableStateOf(false) }
     val bg = when {
         focused -> palette.accent
-        selected -> Color(0xFF2F80ED)
+        selected -> palette.accent.copy(alpha = 0.78f)
         else -> Color(0xFF191D26)
     }
-    val fg = if (focused) palette.onAccent else Color.White
+    val fg = if (focused || selected) palette.onAccent else Color.White
 
     Surface(
         color = bg,
         shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(
-            width = if (focused) 2.5.dp else 1.dp,
-            color = if (focused) palette.focusRing else if (selected) Color(0xFF60A5FA) else Color.White.copy(alpha = 0.12f)
-        ),
+        border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .tvClickable(
@@ -1039,7 +1115,7 @@ private fun DetailFilterPill(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NuvioStreamCard(
+private fun StreamSourceCard(
     stream: StreamSource,
     isResolving: Boolean,
     modifier: Modifier = Modifier,
@@ -1051,10 +1127,7 @@ private fun NuvioStreamCard(
     Surface(
         color = if (focused) Color(0xFF1C2330) else Color(0xFF13151B),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(
-            width = if (focused) 2.5.dp else 1.dp,
-            color = if (focused) palette.focusRing else Color.White.copy(alpha = 0.08f)
-        ),
+        border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
@@ -1117,7 +1190,7 @@ private fun NuvioStreamCard(
                             }
                         }
                         if (stream.needsDebridResolution && !stream.isCached) {
-                            LumaBadgeChip("Resolve via Debrid", LumaAmber)
+                            LumaBadgeChip(qString(R.string.detail_resolve_via_debrid), LumaAmber)
                         }
                     }
                 }
@@ -1172,5 +1245,17 @@ private fun formatRuntimeReadable(raw: String?): String? {
         if (m > 0) "${h}h ${m}m" else "${h}h"
     } else {
         "${mins}m"
+    }
+}
+
+private fun formatTimeShort(ms: Long): String {
+    val totalSec = (ms / 1000L).coerceAtLeast(0L)
+    val h = totalSec / 3600L
+    val m = (totalSec % 3600L) / 60L
+    val s = totalSec % 60L
+    return if (h > 0L) {
+        String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, s)
+    } else {
+        String.format(java.util.Locale.US, "%d:%02d", m, s)
     }
 }

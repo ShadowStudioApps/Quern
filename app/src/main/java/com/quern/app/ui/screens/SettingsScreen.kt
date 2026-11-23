@@ -5,13 +5,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -141,6 +139,7 @@ import com.quern.app.domain.model.UserProfile
 import com.quern.app.player.ExternalPlayerHelper
 import com.quern.app.ui.components.QrCodeCard
 import com.quern.app.ui.components.QuernCompanionSignInCard
+import com.quern.app.ui.components.quernSwitchColors
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LocalQuernStrings
@@ -148,6 +147,7 @@ import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaRed
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.glossySheen
 import com.quern.app.ui.theme.qString
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -169,15 +169,9 @@ enum class SettingsSubPage {
     NONE,
     ACCOUNT,
     PROFILES,
-    APPEARANCE,
-    LAYOUT,
-    ADDONS,
-    PLAYBACK,
     MEDIA_SERVERS,
     INTEGRATIONS,
-    TRACKING,
-    ADVANCED,
-    ABOUT
+    TRACKING
 }
 
 private data class SettingsSearchEntry(
@@ -557,7 +551,6 @@ fun SettingsScreen(
                     cloudAccount = cloudAccount,
                     onBack = { activeSubPage = SettingsSubPage.NONE },
                     onUpdateSettings = onUpdateSettings,
-                    onApplyAppIcon = onApplyAppIcon,
                     onCloudSignUp = onCloudSignUp,
                     onCloudSignIn = onCloudSignIn,
                     onCloudSyncNow = onCloudSyncNow,
@@ -565,8 +558,7 @@ fun SettingsScreen(
                     onSyncStremio = onSyncStremio,
                     onImportNuvio = onImportNuvio,
                     onExportSettingsCode = onExportSettingsCode,
-                    onImportSettingsCode = onImportSettingsCode,
-                    onClearCache = onClearCache
+                    onImportSettingsCode = onImportSettingsCode
                 )
             }
         }
@@ -586,14 +578,22 @@ fun SettingsScreen(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .background(palette.background)
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.0f to palette.ambientGlow.copy(alpha = if (palette.isGlossy) 0.08f else 0.20f),
+                            0.45f to palette.background,
+                            1.0f to palette.background
+                        )
+                    )
+                )
         ) {
             LazyColumn(
                 modifier = Modifier
-                    .width(248.dp)
+                    .width(216.dp)
                     .fillMaxHeight()
-                    .background(palette.background)
-                    .padding(horizontal = 14.dp, vertical = 18.dp),
+                    .background(Color.White.copy(alpha = 0.025f))
+                    .padding(horizontal = 14.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 item(key = "title") {
@@ -609,16 +609,13 @@ fun SettingsScreen(
                 item(key = "global_search_btn") {
                     var searchFocused by remember { mutableStateOf(false) }
                     Surface(
-                        color = if (searchFocused) palette.accent else palette.surfaceElevated,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(
-                            width = if (searchFocused) 2.dp else 1.dp,
-                            color = if (searchFocused) palette.focusRing else palette.border
-                        ),
+                        color = if (searchFocused) palette.accent else palette.surfaceElevated.copy(alpha = 0.85f),
+                        shape = RoundedCornerShape(14.dp),
+                        border = if (searchFocused) BorderStroke(2.dp, palette.focusRing) else null,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(14.dp))
                             .tvClickable(
                                 onFocusChangedState = { searchFocused = it },
                                 onClick = { showSearchDialog = true }
@@ -643,7 +640,7 @@ fun SettingsScreen(
                             )
                         }
                     }
-                    HorizontalDivider(color = palette.border, modifier = Modifier.padding(vertical = 6.dp))
+                    Spacer(Modifier.height(8.dp))
                 }
 
                 items(SettingsGroup.entries, key = { it.name }) { grp ->
@@ -661,20 +658,17 @@ fun SettingsScreen(
                 }
             }
 
-            VerticalDivider(color = palette.border, thickness = 1.dp)
-
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(palette.background)
-                    .padding(horizontal = 24.dp, vertical = 18.dp)
+                    .padding(horizontal = 26.dp, vertical = 20.dp)
             ) {
                 AnimatedContent(
                     targetState = Pair(selectedGroup, activeSubPage),
                     transitionSpec = {
-                        (fadeIn(tween(140)) + slideInHorizontally(tween(140)) { it / 28 })
-                            .togetherWith(fadeOut(tween(90)))
+                        fadeIn(tween(140, easing = FastOutSlowInEasing))
+                            .togetherWith(fadeOut(tween(90, easing = FastOutSlowInEasing)))
                     },
                     label = "settings_pane_anim"
                 ) { (targetGroup, targetSubPage) ->
@@ -955,15 +949,21 @@ private fun AppearanceSectionPane(
                                 else -> palette.surfaceElevated
                             },
                             shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(
-                                width = if (focused || selected) 2.5.dp else 1.dp,
-                                color = if (focused || selected) preset.focusRingColor else palette.border
-                            ),
+                            border = if (focused) {
+                                BorderStroke(2.dp, preset.focusRingColor)
+                            } else null,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(14.dp))
                                 .tvClickable(
                                     onFocusChangedState = { focused = it },
-                                    onClick = { onUpdateSettings { it.copy(theme = preset) } }
+                                    onClick = {
+                                        onUpdateSettings {
+                                            it.copy(
+                                                theme = preset,
+                                                amoledPureBlack = (preset == AppThemePreset.GLOSSY_BLACK)
+                                            )
+                                        }
+                                    }
                                 )
                         ) {
                             Row(
@@ -973,10 +973,13 @@ private fun AppearanceSectionPane(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(22.dp)
                                         .clip(CircleShape)
-                                        .background(preset.accentColor)
-                                        .border(1.dp, Color.White.copy(alpha = 0.6f), CircleShape),
+                                        .background(
+                                            Brush.linearGradient(
+                                                listOf(preset.accentColor, preset.backgroundColor)
+                                            )
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (selected) {
@@ -1011,10 +1014,7 @@ private fun AppearanceSectionPane(
                         Surface(
                             color = if (focused) palette.accent else if (selected) palette.surfaceElevated else palette.surface,
                             shape = RoundedCornerShape(999.dp),
-                            border = BorderStroke(
-                                width = if (focused || selected) 2.5.dp else 1.dp,
-                                color = if (focused) palette.focusRing else if (selected) swatchColor else palette.border
-                            ),
+                            border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
                                 .tvClickable(
@@ -1032,7 +1032,6 @@ private fun AppearanceSectionPane(
                                         .size(16.dp)
                                         .clip(CircleShape)
                                         .background(swatchColor)
-                                        .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape)
                                 )
                                 Text(
                                     text = if (isAr) choice.labelAr else choice.labelEn,
@@ -1130,13 +1129,11 @@ private fun AppearanceSectionPane(
                     AppIconOption.entries.forEach { iconOpt ->
                         val selected = settings.appIcon == iconOpt
                         var focused by remember { mutableStateOf(false) }
+                        val gradColors = iconOpt.gradientHexColors?.map { Color(it) }
                         Surface(
                             color = if (focused) palette.accent else if (selected) palette.surfaceElevated else palette.surface,
                             shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(
-                                width = if (focused || selected) 2.5.dp else 1.dp,
-                                color = if (focused || selected) palette.focusRing else palette.border
-                            ),
+                            border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(14.dp))
                                 .tvClickable(
@@ -1155,17 +1152,22 @@ private fun AppearanceSectionPane(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color.Black)
-                                        .border(2.dp, Color(iconOpt.previewColorHex), RoundedCornerShape(8.dp)),
+                                        .size(28.dp)
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .then(
+                                            if (gradColors != null) {
+                                                Modifier.background(Brush.linearGradient(gradColors))
+                                            } else {
+                                                Modifier.background(Color(iconOpt.previewColorHex).copy(alpha = 0.22f))
+                                            }
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         "Q",
-                                        color = Color(iconOpt.previewColorHex),
+                                        color = if (gradColors != null) Color.White else Color(iconOpt.previewColorHex),
                                         fontWeight = FontWeight.Black,
-                                        fontSize = 13.sp
+                                        fontSize = 14.sp
                                     )
                                 }
                                 Text(
@@ -2268,7 +2270,7 @@ private fun SettingsCategoryRailItem(
     )
     val scale by animateFloatAsState(
         targetValue = if (focused) 1.02f else 1f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 500f),
+        animationSpec = tween(140, easing = FastOutSlowInEasing),
         label = "rail_scale"
     )
     val fg = when {
@@ -2283,10 +2285,9 @@ private fun SettingsCategoryRailItem(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(14.dp))
             .background(bg)
-            .border(
-                width = if (focused || selected) 2.dp else 0.dp,
-                color = if (focused) palette.focusRing else if (selected) palette.accent else Color.Transparent,
-                shape = RoundedCornerShape(14.dp)
+            .then(
+                if (focused) Modifier.border(1.75.dp, palette.focusRing, RoundedCornerShape(14.dp))
+                else Modifier
             )
             .tvClickable(
                 onFocusChangedState = { focused = it },
@@ -2310,7 +2311,7 @@ private fun SettingsCategoryRailItem(
             text = label,
             color = if (focused) palette.onAccent else if (selected) LumaTextPrimary else LumaTextSecondary,
             fontSize = 14.sp,
-            fontWeight = if (focused || selected) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f)
         )
         if (isModified) {
@@ -2352,7 +2353,8 @@ private fun SettingsCategoryOverviewPane(
         SettingsGroup.ADDONS,
         SettingsGroup.APPEARANCE,
         SettingsGroup.HOME_LAYOUT,
-        SettingsGroup.PLAYBACK -> emptyList()
+        SettingsGroup.PLAYBACK,
+        SettingsGroup.SYSTEM -> emptyList()
         SettingsGroup.SERVICES -> listOf(
             SettingsGroupRow(
                 Icons.Default.Link,
@@ -2393,10 +2395,6 @@ private fun SettingsCategoryOverviewPane(
                 SettingsSubPage.PROFILES
             )
         )
-        SettingsGroup.SYSTEM -> listOf(
-            SettingsGroupRow(Icons.Default.Build, qString(R.string.system_storage_title), s.advancedSubtitle, SettingsSubPage.ADVANCED),
-            SettingsGroupRow(Icons.Default.Info, qString(R.string.system_about_title), s.aboutSubtitle, SettingsSubPage.ABOUT)
-        )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -2413,10 +2411,14 @@ private fun SettingsCategoryOverviewPane(
         Surface(
             color = palette.surface,
             shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.5.dp, palette.border),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .glossySheen(palette.isGlossy, cornerRadius = 20.dp)
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 rows.forEachIndexed { idx, row ->
                     var focused by remember { mutableStateOf(false) }
                     val rowBg by animateColorAsState(
@@ -2471,12 +2473,6 @@ private fun SettingsCategoryOverviewPane(
                             )
                         }
                     }
-                    if (idx < rows.lastIndex) {
-                        HorizontalDivider(
-                            color = palette.border,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
                 }
             }
         }
@@ -2498,7 +2494,6 @@ private fun SettingsSubPageContent(
     cloudAccount: CloudAccountState,
     onBack: () -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
-    onApplyAppIcon: (AppIconOption) -> Unit,
     onCloudSignUp: (String, String, String, String) -> Unit,
     onCloudSignIn: (String, String, String, String) -> Unit,
     onCloudSyncNow: () -> Unit,
@@ -2506,8 +2501,7 @@ private fun SettingsSubPageContent(
     onSyncStremio: (String, String) -> Unit = { _, _ -> },
     onImportNuvio: (String) -> Unit = {},
     onExportSettingsCode: () -> String = { "" },
-    onImportSettingsCode: (String) -> Unit = {},
-    onClearCache: () -> Unit
+    onImportSettingsCode: (String) -> Unit = {}
 ) {
     val s = LocalQuernStrings.current
     val palette = LocalQuernPalette.current
@@ -2521,11 +2515,6 @@ private fun SettingsSubPageContent(
     val title = when (subPage) {
         SettingsSubPage.ACCOUNT -> s.accountTitle
         SettingsSubPage.PROFILES -> s.switchProfileTitle
-        SettingsSubPage.APPEARANCE -> s.appearanceTitle
-        SettingsSubPage.LAYOUT -> s.layoutTitle
-        SettingsSubPage.PLAYBACK -> s.playbackTitle
-        SettingsSubPage.ADVANCED -> s.advancedTitle
-        SettingsSubPage.ABOUT -> s.aboutTitle
         else -> s.settingsTitle
     }
 
@@ -2895,488 +2884,6 @@ private fun SettingsSubPageContent(
                 }
             }
 
-            SettingsSubPage.APPEARANCE -> {
-                // Multi-language selector with System Auto-Detect!
-                item(key = "app_lang") {
-                    SettingSectionCard(title = s.appLanguageLabel) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            AppLanguage.entries.forEach { lang ->
-                                SelectablePillOption(
-                                    label = lang.displayName,
-                                    selected = settings.language == lang,
-                                    onClick = { onUpdateSettings { it.copy(language = lang) } }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // True AMOLED Toggle
-                item(key = "amoled_toggle") {
-                    SettingSectionCard(title = "AMOLED / OLED Display") {
-                        SettingToggleRow(
-                            label = s.amoledBlackLabel,
-                            checked = settings.amoledPureBlack,
-                            onCheckedChange = { v -> onUpdateSettings { it.copy(amoledPureBlack = v) } }
-                        )
-                    }
-                }
-
-                // Distinct Themes (Light Dark Blue #345372, Light Gray #D3D3D3, etc.)
-                item(key = "themes") {
-                    SettingSectionCard(title = s.themeLabel) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            AppThemePreset.entries.forEach { preset ->
-                                val selected = settings.theme == preset
-                                var focused by remember { mutableStateOf(false) }
-                                Surface(
-                                    color = when {
-                                        focused -> preset.accentColor
-                                        selected -> preset.surfaceElevatedTint
-                                        else -> palette.surfaceElevated
-                                    },
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(
-                                        width = if (focused || selected) 2.5.dp else 1.dp,
-                                        color = if (focused || selected) preset.focusRingColor else palette.border
-                                    ),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .tvClickable(
-                                            onFocusChangedState = { focused = it },
-                                            onClick = { onUpdateSettings { it.copy(theme = preset) } }
-                                        )
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(22.dp)
-                                                .clip(CircleShape)
-                                                .background(preset.accentColor)
-                                                .border(1.dp, Color.White.copy(alpha = 0.6f), CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (selected) {
-                                                Icon(Icons.Default.Check, null, tint = preset.onAccentColor, modifier = Modifier.size(14.dp))
-                                            }
-                                        }
-                                        Text(
-                                            text = if (isAr) preset.displayNameAr else preset.displayNameEn,
-                                            color = if (focused) preset.onAccentColor else LumaTextPrimary,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Change External App Launcher Icon!
-                item(key = "app_icon") {
-                    SettingSectionCard(title = s.appIconLabel) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            AppIconOption.entries.forEach { iconOpt ->
-                                val selected = settings.appIcon == iconOpt
-                                var focused by remember { mutableStateOf(false) }
-                                Surface(
-                                    color = if (focused) palette.accent else if (selected) palette.surfaceElevated else palette.surface,
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(
-                                        width = if (focused || selected) 2.5.dp else 1.dp,
-                                        color = if (focused || selected) palette.focusRing else palette.border
-                                    ),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .tvClickable(
-                                            onFocusChangedState = { focused = it },
-                                            onClick = {
-                                                onUpdateSettings { it.copy(appIcon = iconOpt) }
-                                                onApplyAppIcon(iconOpt)
-                                            }
-                                        )
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.Black)
-                                                .border(2.dp, Color(iconOpt.previewColorHex), RoundedCornerShape(8.dp)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                "Q",
-                                                color = Color(iconOpt.previewColorHex),
-                                                fontWeight = FontWeight.Black,
-                                                fontSize = 14.sp
-                                            )
-                                        }
-                                        Text(
-                                            text = if (isAr) iconOpt.displayNameAr else iconOpt.displayNameEn,
-                                            color = if (focused) palette.onAccent else LumaTextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsSubPage.LAYOUT -> {
-                // Poster Card Style: Width, Shape / Aspect Ratio, Corner Radius + Live Preview
-                item(key = "poster_card_style") {
-                    SettingSectionCard(title = s.posterCardStyleTitle) {
-                        Text(s.posterSizeLabel, color = LumaTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CardSizePreset.entries.forEach { preset ->
-                                SelectablePillOption(
-                                    label = if (isAr) preset.labelAr else preset.labelEn,
-                                    selected = settings.cardSize == preset,
-                                    onClick = { onUpdateSettings { it.copy(cardSize = preset) } }
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(16.dp))
-                        Text(s.posterShapeLabel, color = LumaTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CardShapePreset.entries.forEach { shape ->
-                                SelectablePillOption(
-                                    label = if (isAr) shape.labelAr else shape.labelEn,
-                                    selected = settings.cardShape == shape,
-                                    onClick = { onUpdateSettings { it.copy(cardShape = shape) } }
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(16.dp))
-                        Text(s.posterCornerLabel, color = LumaTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CardCornerPreset.entries.forEach { corner ->
-                                SelectablePillOption(
-                                    label = if (isAr) corner.labelAr else corner.labelEn,
-                                    selected = settings.cardCorner == corner,
-                                    onClick = { onUpdateSettings { it.copy(cardCorner = corner) } }
-                                )
-                            }
-                        }
-
-                        // Live Visual Poster Card Preview
-                        Spacer(Modifier.height(18.dp))
-                        val previewWidth = when (settings.cardSize) {
-                            CardSizePreset.COMPACT -> 84.dp
-                            CardSizePreset.STANDARD -> 104.dp
-                            CardSizePreset.LARGE -> 124.dp
-                            CardSizePreset.XLARGE -> 144.dp
-                        }
-                        val previewShape = RoundedCornerShape(settings.cardCorner.radiusDp.dp)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(palette.background)
-                                .border(1.dp, palette.border, RoundedCornerShape(14.dp))
-                                .padding(14.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(previewWidth)
-                                    .aspectRatio(settings.cardShape.aspectRatio)
-                                    .clip(previewShape)
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(palette.accent, palette.surfaceElevated)
-                                        )
-                                    )
-                                    .border(1.5.dp, palette.focusRing, previewShape),
-                                contentAlignment = Alignment.BottomStart
-                            ) {
-                                Text(
-                                    text = "4K HDR",
-                                    color = palette.onAccent,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(8.dp)
-                                )
-                            }
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    text = if (isAr) "معاينة شكل البطاقة" else "Live Card Preview",
-                                    color = LumaTextPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "${if (isAr) settings.cardSize.labelAr else settings.cardSize.labelEn} • ${if (isAr) settings.cardShape.labelAr else settings.cardShape.labelEn} • ${if (isAr) settings.cardCorner.labelAr else settings.cardCorner.labelEn}",
-                                    color = LumaTextSecondary,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Navigation Bar: Left Sidebar / Auto-Hide Sidebar / Top Bar
-                item(key = "nav_style") {
-                    SettingSectionCard(title = s.navStyleLabel) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            NavigationStyle.entries.forEach { style ->
-                                SelectablePillOption(
-                                    label = if (isAr) style.labelAr else style.labelEn,
-                                    selected = settings.navigationStyle == style,
-                                    onClick = { onUpdateSettings { it.copy(navigationStyle = style) } }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(14.dp))
-                        SettingToggleRow(
-                            label = s.showHeroLabel,
-                            checked = settings.showHeroBanner,
-                            onCheckedChange = { v -> onUpdateSettings { it.copy(showHeroBanner = v) } }
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Text(s.layoutModeLabel, color = LumaTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            UiModeOverride.entries.forEach { mode ->
-                                SelectablePillOption(
-                                    label = mode.label,
-                                    selected = settings.uiModeOverride == mode,
-                                    onClick = { onUpdateSettings { it.copy(uiModeOverride = mode) } }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsSubPage.PLAYBACK -> {
-                // Player Engine Selector: Media3 ExoPlayer • mpv • External Player
-                item(key = "player_engine") {
-                    SettingSectionCard(title = if (isAr) "محرك المشغل (Player Engine)" else "Player Engine") {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            PlayerEngine.entries.forEach { engine ->
-                                SelectablePillOption(
-                                    label = if (isAr) engine.labelAr else engine.labelEn,
-                                    selected = settings.playerEngine == engine,
-                                    onClick = {
-                                        onUpdateSettings {
-                                            it.copy(
-                                                playerEngine = engine,
-                                                preferExternalPlayer = engine == PlayerEngine.EXTERNAL
-                                            )
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = if (isAr) settings.playerEngine.descAr else settings.playerEngine.descEn,
-                            color = LumaTextSecondary,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-
-                item(key = "sub_lang") {
-                    SettingSectionCard(title = s.subtitleLanguageLabel) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            SubtitleLanguage.entries.forEach { sub ->
-                                SelectablePillOption(
-                                    label = if (isAr) sub.displayNameAr else sub.displayNameEn,
-                                    selected = settings.subtitleLanguage == sub,
-                                    onClick = { onUpdateSettings { it.copy(subtitleLanguage = sub) } }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                item(key = "audio_lang") {
-                    SettingSectionCard(title = s.audioLanguageLabel) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            AudioLanguage.entries.forEach { aud ->
-                                SelectablePillOption(
-                                    label = if (isAr) aud.displayNameAr else aud.displayNameEn,
-                                    selected = settings.audioLanguage == aud,
-                                    onClick = { onUpdateSettings { it.copy(audioLanguage = aud) } }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                item(key = "sub_size") {
-                    SettingSectionCard(title = s.subtitleSizeLabel) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            SubtitleSize.entries.forEach { sz ->
-                                SelectablePillOption(
-                                    label = if (isAr) sz.displayNameAr else sz.displayNameEn,
-                                    selected = settings.subtitleSize == sz,
-                                    onClick = { onUpdateSettings { it.copy(subtitleSize = sz) } }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(14.dp))
-                        Text(s.subtitleColorLabel, color = LumaTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            listOf(
-                                0xFFFFFFFFL to "White",
-                                0xFFFDE047L to "Yellow",
-                                0xFFD3D3D3L to "Light Gray"
-                            ).forEach { (hex, label) ->
-                                SelectablePillOption(
-                                    label = label,
-                                    selected = settings.subtitleColorHex == hex,
-                                    onClick = { onUpdateSettings { it.copy(subtitleColorHex = hex) } }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(14.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.Black)
-                                .border(1.dp, palette.border, RoundedCornerShape(14.dp))
-                                .padding(vertical = 18.dp, horizontal = 14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (settings.subtitleLanguage == SubtitleLanguage.ARABIC || isAr) {
-                                    "معاينة الترجمة العربية على الشاشة — Quern 4K"
-                                } else {
-                                    "Live Subtitle Preview — Quern 4K Cinema"
-                                },
-                                color = Color(settings.subtitleColorHex),
-                                fontSize = settings.subtitleSize.spValue.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-
-                item(key = "playback_toggles") {
-                    SettingSectionCard(title = if (isAr) "تخطي المقدمة والنهاية والحلقة التالية" else "Skip Intro, Outro & Auto-Play") {
-                        SettingToggleRow(
-                            label = s.skipIntroLabel,
-                            checked = settings.skipIntroEnabled,
-                            onCheckedChange = { v -> onUpdateSettings { it.copy(skipIntroEnabled = v) } }
-                        )
-                        HorizontalDivider(color = palette.border, modifier = Modifier.padding(vertical = 8.dp))
-                        SettingToggleRow(
-                            label = s.skipOutroLabel,
-                            checked = settings.skipOutroEnabled,
-                            onCheckedChange = { v -> onUpdateSettings { it.copy(skipOutroEnabled = v) } }
-                        )
-                        HorizontalDivider(color = palette.border, modifier = Modifier.padding(vertical = 8.dp))
-                        SettingToggleRow(
-                            label = s.autoPlayNextLabel,
-                            checked = settings.autoPlayNext,
-                            onCheckedChange = { v -> onUpdateSettings { it.copy(autoPlayNext = v) } }
-                        )
-                        if (settings.autoPlayNext) {
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                text = s.nextCountdownLabel,
-                                color = LumaTextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                listOf(5, 10, 15, 20).forEach { sec ->
-                                    SelectablePillOption(
-                                        label = if (isAr) "$sec ثواني" else "${sec}s",
-                                        selected = settings.nextEpisodeCountdownSec == sec,
-                                        onClick = { onUpdateSettings { it.copy(nextEpisodeCountdownSec = sec) } }
-                                    )
-                                }
-                            }
-                        }
-                        HorizontalDivider(color = palette.border, modifier = Modifier.padding(vertical = 10.dp))
-                        SettingToggleRow(
-                            label = s.externalPlayerLabel,
-                            checked = settings.preferExternalPlayer,
-                            onCheckedChange = { v -> onUpdateSettings { it.copy(preferExternalPlayer = v) } }
-                        )
-                    }
-                }
-            }
-
-            SettingsSubPage.ADVANCED -> {
-                item(key = "phone_setup") {
-                    SettingSectionCard(title = s.phoneWebSetupTitle) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            QrCodeCard(content = companionUrl, size = 124.dp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(s.phoneWebSetupDesc, color = LumaTextSecondary, fontSize = 13.sp)
-                                Spacer(Modifier.height(8.dp))
-                                Text(companionUrl, color = palette.focusRing, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-                item(key = "cache_clear") {
-                    SettingSectionCard(title = s.advancedTitle) {
-                        SelectablePillOption(label = s.clearCacheLabel, selected = true, onClick = onClearCache)
-                    }
-                }
-            }
-
             SettingsSubPage.PROFILES -> {
                 item(key = "profiles_manager") {
                     ProfilesManagerSection(
@@ -3386,64 +2893,6 @@ private fun SettingsSubPageContent(
                         isAr = isAr,
                         onUpdateSettings = onUpdateSettings
                     )
-                }
-            }
-
-            SettingsSubPage.ABOUT -> {
-                item(key = "shadow_studio_card") {
-                    Surface(
-                        color = palette.surface,
-                        shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.5.dp, palette.border),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(20.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.shadow_studio_logo),
-                                contentDescription = "SHADOW STUDIO",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(64.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .border(1.5.dp, palette.focusRing.copy(alpha = 0.65f), RoundedCornerShape(16.dp))
-                            )
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    text = "By SHADOW STUDIO",
-                                    color = Color.White,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 1.2.sp
-                                )
-                                Text(
-                                    text = "Quern v1.7.0 • Open Source AMOLED Edition",
-                                    color = palette.focusRing,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                }
-                item(key = "about_card") {
-                    SettingSectionCard(title = "About Quern") {
-                        Text(
-                            text = "Open-source Native Android & Android TV Cinema Client built with Kotlin, Jetpack Compose, Media3 ExoPlayer, and Stremio Addon Protocol v3.",
-                            color = LumaTextSecondary,
-                            fontSize = 14.sp
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "Integrations: TorBox • Real-Debrid • AllDebrid • Premiumize • Jellyfin • Emby • Plex • WebDAV • TMDB • Trakt • Multi-Screen Cloud Sync",
-                            color = LumaGreen,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
                 }
             }
 
@@ -3503,8 +2952,9 @@ private fun SettingSectionCard(
     Surface(
         color = palette.surface,
         shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.5.dp, palette.border),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .glossySheen(palette.isGlossy, cornerRadius = 18.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(title, color = LumaTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -3532,10 +2982,7 @@ private fun SelectablePillOption(
     Surface(
         color = bg,
         shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(
-            width = if (focused) 2.5.dp else 1.dp,
-            color = if (focused) palette.focusRing else if (selected) palette.accent else palette.border
-        ),
+        border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .tvClickable(
@@ -3589,10 +3036,7 @@ private fun SettingToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = null,
-            colors = SwitchDefaults.colors(
-                checkedTrackColor = if (focused) palette.onAccent.copy(alpha = 0.35f) else palette.accent,
-                checkedThumbColor = Color.White
-            ),
+            colors = quernSwitchColors(onAccentSurface = focused),
             modifier = Modifier.focusProperties { canFocus = false }
         )
     }
@@ -3670,8 +3114,9 @@ private fun ProfilesManagerSection(
     Surface(
         color = palette.surface,
         shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.5.dp, palette.border),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .glossySheen(palette.isGlossy, cornerRadius = 22.dp)
     ) {
         Column(
             modifier = Modifier
@@ -3709,8 +3154,8 @@ private fun ProfilesManagerSection(
                     var focused by remember { mutableStateOf(false) }
                     val avatarColor = Color(profile.avatarColorHex)
                     val avatarScale by animateFloatAsState(
-                        targetValue = if (focused) 1.07f else 1f,
-                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 480f),
+                        targetValue = if (focused) 1.05f else 1f,
+                        animationSpec = tween(150, easing = FastOutSlowInEasing),
                         label = "profile_scale"
                     )
 

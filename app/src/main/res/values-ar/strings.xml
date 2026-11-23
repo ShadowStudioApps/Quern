@@ -253,4 +253,59 @@
     <string name="profile_unlock_btn">فك</string>
     <string name="profile_pin_wrong">الرمز غير صحيح، حاول مجدداً</string>
     <string name="profile_pin_locked_out">محاولات كثيرة خاطئة — انتظر %1$d ثانية</string>
+
+    <!-- شاشة البحث -->
+    <string name="search_title">البحث الشامل</string>
+    <string name="search_subtitle">يبحث عبر إضافات Stremio و TMDB و Jellyfin و Emby و Plex و WebDAV</string>
+    <string name="search_placeholder">ابحث عن أفلام، مسلسلات، سيرفرات…</string>
+    <string name="search_button">بحث</string>
+    <string name="search_no_results">لا توجد نتائج لـ "%1$s".</string>
+    <string name="search_prompt">اكتب عنواناً واضغط بحث.</string>
+
+    <!-- شاشة المكتبة -->
+    <string name="library_title">المكتبة والسحابة</string>
+    <string name="library_refresh_cloud">تحديث السحابة</string>
+    <string name="library_tab_favorites">المفضلة (%1$d)</string>
+    <string name="library_tab_debrid">سحابة Debrid</string>
+    <string name="library_tab_webdav">ملفات WebDAV</string>
+    <string name="library_empty_favorites">لا توجد عناصر في المفضلة بعد.</string>
+    <string name="library_empty_cloud">لا توجد ملفات سحابية. اربط TorBox أو Real-Debrid أو AllDebrid أو Premiumize من الإعدادات ← الخدمات.</string>
+    <string name="library_empty_webdav">لم يتم إعداد سيرفرات WebDAV. أضف سيرفر من الإعدادات ← الخدمات.</string>
+
+    <!-- شاشة التفاصيل -->
+    <string name="detail_back">رجوع</string>
+    <string name="detail_favorite">المفضلة</string>
+    <string name="detail_all_sources">كل المصادر</string>
+    <string name="detail_play">تشغيل</string>
+    <string name="detail_play_count">تشغيل (%1$d)</string>
+    <string name="detail_resume">استمرار</string>
+    <string name="detail_resume_time">استمرار • %1$s</string>
+    <string name="addons_phone_qr_btn">إعداد عبر QR الهاتف</string>
+    <string name="detail_movie_origin">فيلم • %1$s</string>
+    <string name="detail_series_origin">مسلسل • %1$s</string>
+    <string name="detail_episodes">الحلقات</string>
+    <string name="detail_season_n">الموسم %1$d</string>
+    <string name="detail_cast">طاقم التمثيل</string>
+    <string name="detail_trailers">الإعلانات</string>
+    <string name="detail_trailer_chip">إعلان</string>
+    <string name="detail_official_trailer">الإعلان الرسمي</string>
+    <string name="detail_series_details">تفاصيل المسلسل</string>
+    <string name="detail_movie_details">تفاصيل الفيلم</string>
+    <string name="detail_release_info">الإصدار</string>
+    <string name="detail_runtime">المدة</string>
+    <string name="detail_genres">التصنيفات</string>
+    <string name="detail_director">الإخراج</string>
+    <string name="detail_available_sources">المصادر المتاحة</string>
+    <string name="detail_resolving">جاري التحميل…</string>
+    <string name="detail_streams_count">%1$d مصدر</string>
+    <string name="detail_subtitles">الترجمة</string>
+    <string name="detail_subtitles_languages">%1$d لغة</string>
+    <string name="detail_filter_all">الكل</string>
+    <string name="detail_filter_cached">⚡ فوري</string>
+    <string name="detail_active_sources_count">المصادر النشطة • %1$d مصدر</string>
+    <string name="detail_filtered_sources_count">%1$s • %2$d مصدر</string>
+    <string name="detail_subtitles_ready">%1$d ترجمة جاهزة</string>
+    <string name="detail_fetching_streams">جاري جلب المصادر من الإضافات و Debrid والسيرفرات…</string>
+    <string name="detail_no_matching_streams">لا توجد مصادر مطابقة لهذا الفلتر.</string>
+    <string name="detail_resolve_via_debrid">فتح عبر Debrid</string>
 </resources>

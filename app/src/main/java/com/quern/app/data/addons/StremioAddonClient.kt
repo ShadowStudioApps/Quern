@@ -83,7 +83,7 @@ class StremioAddonClient(
             httpClient.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext emptyList()
                 val parsed = json.decodeFromString<StremioCatalogResponse>(resp.body?.string().orEmpty())
-                parsed.metas.map { dto ->
+                parsed.metas.distinctBy { "${it.type}_${it.id}" }.map { dto ->
                     MediaItem(
                         id = dto.id,
                         title = dto.name,
@@ -140,7 +140,7 @@ class StremioAddonClient(
                             thumbnailUrl = vid.thumbnail,
                             airDate = vid.released?.take(10)
                         )
-                    }
+                    }.distinctBy { it.id }
                     MediaDetail(
                         item = item,
                         runtime = meta.runtime,

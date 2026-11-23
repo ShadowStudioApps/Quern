@@ -22,6 +22,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
+import java.util.Locale
 
 /**
  * Plex Media Server client using X-Plex-Token and Plex JSON API.
@@ -197,7 +198,7 @@ class PlexClient(
             backdropUrl = art ?: thumb,
             overview = obj["summary"]?.jsonPrimitive?.contentOrNull,
             year = obj["year"]?.jsonPrimitive?.contentOrNull,
-            rating = obj["rating"]?.jsonPrimitive?.doubleOrNull?.let { String.format("%.1f", it) },
+            rating = obj["rating"]?.jsonPrimitive?.doubleOrNull?.let { String.format(Locale.US, "%.1f", it) },
             origin = SourceOrigin.PLEX,
             sourceId = serverId
         )

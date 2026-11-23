@@ -1,5 +1,8 @@
 package com.quern.app.ui.screens
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,12 +49,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -111,22 +120,16 @@ fun HomeScreen(
 ) {
     val palette = LocalQuernPalette.current
     var selectedCategory by remember { mutableStateOf("All") }
-    var focusedHeroItem by remember { mutableStateOf<MediaItem?>(null) }
-    var focusedItemIndex by remember { mutableIntStateOf(0) }
-    // Focus changes land here first (no recomposition); the hero only follows once focus rests ~220 ms,
-    // so fast D-Pad scrolling doesn't swap the backdrop for every card it passes.
+    var heroResetSignal by remember { mutableIntStateOf(0) }
+    // Focus changes land here first (no recomposition); HomeHeroSection consumes it after a 220ms
+    // dwell so only the hero recomposes — never HomeScreen, LazyColumn, or any poster row.
     val pendingHeroFocus = remember { MutableStateFlow<Pair<MediaItem, Int>?>(null) }
-    LaunchedEffect(pendingHeroFocus) {
-        pendingHeroFocus.collectLatest { pending ->
-            if (pending == null) return@collectLatest
-            delay(220L)
-            focusedHeroItem = pending.first
-            focusedItemIndex = pending.second
-        }
+    val onPosterFocused = remember(pendingHeroFocus) {
+        { item: MediaItem, idx: Int -> pendingHeroFocus.value = item to idx }
     }
-    var autoSlideIndex by remember { mutableIntStateOf(0) }
     val firstRowFocusRequester = remember { FocusRequester() }
     var isFirstRowItemAttached by remember { mutableStateOf(false) }
+    val onFirstRowAttachedChanged = remember { { attached: Boolean -> isFirstRowItemAttached = attached } }
     val todayYmd = remember {
         val cal = Calendar.getInstance()
         cal.get(Calendar.YEAR) * 10_000 + (cal.get(Calendar.MONTH) + 1) * 100 + cal.get(Calendar.DAY_OF_MONTH)
@@ -201,27 +204,25 @@ fun HomeScreen(
         (if (primary.isNotEmpty()) primary else fallback).take(8)
     }
 
-    LaunchedEffect(filteredRows.firstOrNull()?.id, filteredRows.firstOrNull()?.items?.firstOrNull()?.id) {
-        if (filteredRows.isEmpty() || filteredRows.firstOrNull()?.items.isNullOrEmpty()) {
+    val hasContinueWatching = sortedContinueWatching.isNotEmpty()
+    val hasAnyContentRow = hasContinueWatching || filteredRows.isNotEmpty()
+    val firstRowAnchorKey = if (hasContinueWatching) {
+        "cw_${sortedContinueWatching.firstOrNull()?.contentId}"
+    } else {
+        "cat_${filteredRows.firstOrNull()?.id}_${filteredRows.firstOrNull()?.items?.firstOrNull()?.id}"
+    }
+    LaunchedEffect(firstRowAnchorKey, hasAnyContentRow) {
+        if (!hasAnyContentRow) {
             isFirstRowItemAttached = false
         }
     }
 
-    // Gentle auto-cycle on Hero Spotlight when no poster is actively hovered
-    LaunchedEffect(featuredSlides.size, focusedHeroItem) {
-        if (featuredSlides.size > 1 && focusedHeroItem == null) {
-            while (true) {
-                delay(7500L)
-                autoSlideIndex = (autoSlideIndex + 1) % featuredSlides.size
-            }
+    val onSelectCategory = remember(pendingHeroFocus) {
+        { category: String ->
+            selectedCategory = category
+            pendingHeroFocus.value = null
+            heroResetSignal += 1
         }
-    }
-
-    val heroItem = focusedHeroItem ?: featuredSlides.getOrNull(autoSlideIndex % featuredSlides.size.coerceAtLeast(1))
-    val activeDotIndex = if (focusedHeroItem != null) {
-        focusedItemIndex % featuredSlides.size.coerceAtLeast(1)
-    } else {
-        autoSlideIndex % featuredSlides.size.coerceAtLeast(1)
     }
 
     Box(
@@ -238,57 +239,46 @@ fun HomeScreen(
                 Spacer(Modifier.height(14.dp))
                 Text("Loading your cinema hub...", color = LumaTextSecondary, fontSize = 14.sp)
             }
-        } else if (isTv && heroItem != null && showHeroBanner) {
-            // TV Cinema Mode: Pinned large vivid Hero Spotlight at top so moving across ANY row
-            // always shows a big, crystal-clear preview of the focused Movie or Series!
+        } else if (isTv && featuredSlides.isNotEmpty() && showHeroBanner) {
+            // Borderless full-bleed TV layout:
+            // HomeHeroSection dissolves cleanly into palette.background at its bottom edge so
+            // LazyColumn sits directly underneath with ZERO GPU overdraw and ZERO sliced rows.
             Column(modifier = Modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier.padding(
-                        start = 14.dp,
-                        end = 14.dp,
-                        top = 6.dp,
-                        bottom = 4.dp
-                    )
-                ) {
-                    LumaHeroBanner(
-                        item = heroItem,
-                        isTv = true,
-                        onSelect = onItemClick,
-                        onRefresh = onRefresh,
-                        selectedCategory = selectedCategory,
-                        onCategorySelected = {
-                            selectedCategory = it
-                            pendingHeroFocus.value = null
-                            focusedHeroItem = null
-                            autoSlideIndex = 0
-                        },
-                        activeServiceBadge = activeServiceBadge,
-                        firstRowFocusRequester = if (filteredRows.isNotEmpty()) firstRowFocusRequester else null,
-                        isFirstRowAttached = { isFirstRowItemAttached },
-                        totalSlides = featuredSlides.size,
-                        activeSlideIndex = activeDotIndex
-                    )
-                }
+                HomeHeroSection(
+                    featuredSlides = featuredSlides,
+                    pendingHeroFocus = pendingHeroFocus,
+                    resetSignal = heroResetSignal,
+                    isTv = true,
+                    onSelect = onItemClick,
+                    onRefresh = onRefresh,
+                    selectedCategory = selectedCategory,
+                    onCategorySelected = onSelectCategory,
+                    activeServiceBadge = activeServiceBadge,
+                    firstRowFocusRequester = if (hasAnyContentRow) firstRowFocusRequester else null,
+                    isFirstRowAttached = { isFirstRowItemAttached }
+                )
 
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-                    contentPadding = PaddingValues(top = 4.dp, bottom = 36.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 40.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (sortedContinueWatching.isNotEmpty()) {
-                        item(key = "continue_watching") {
+                    if (hasContinueWatching) {
+                        item(key = "continue_watching", contentType = "continue_watching") {
                             ContinueWatchingRow(
                                 items = sortedContinueWatching,
                                 isTv = true,
-                                onClick = onContinueClick
+                                onClick = onContinueClick,
+                                firstItemFocusRequester = firstRowFocusRequester,
+                                onFirstItemAttachedChanged = onFirstRowAttachedChanged
                             )
                         }
                     }
 
                     items(filteredRows, key = { it.id }, contentType = { "carousel" }) { row ->
-                        val isFirstRow = row.id == filteredRows.firstOrNull()?.id
+                        val attachFirstRow = !hasContinueWatching && row.id == filteredRows.firstOrNull()?.id
                         LumaMediaCarouselRow(
                             row = row,
                             isTv = true,
@@ -297,14 +287,9 @@ fun HomeScreen(
                             cardCorner = cardCorner,
                             showPosterLabels = showPosterLabels,
                             onItemClick = onItemClick,
-                            onItemFocused = { item ->
-                                pendingHeroFocus.value =
-                                    item to row.items.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
-                            },
-                            firstItemFocusRequester = if (isFirstRow) firstRowFocusRequester else null,
-                            onFirstItemAttachedChanged = if (isFirstRow) {
-                                { attached -> isFirstRowItemAttached = attached }
-                            } else null
+                            onItemFocused = onPosterFocused,
+                            firstItemFocusRequester = if (attachFirstRow) firstRowFocusRequester else null,
+                            onFirstItemAttachedChanged = if (attachFirstRow) onFirstRowAttachedChanged else null
                         )
                     }
                 }
@@ -315,31 +300,21 @@ fun HomeScreen(
                 contentPadding = PaddingValues(bottom = 72.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (heroItem != null && showHeroBanner) {
+                if (featuredSlides.isNotEmpty() && showHeroBanner) {
                     item(key = "hero") {
-                        Box(
-                            modifier = Modifier.padding(
-                                horizontal = if (isTv) 14.dp else 0.dp,
-                                vertical = if (isTv) 5.dp else 0.dp
-                            )
-                        ) {
-                            LumaHeroBanner(
-                                item = heroItem,
-                                isTv = isTv,
-                                onSelect = onItemClick,
-                                onRefresh = onRefresh,
-                                selectedCategory = selectedCategory,
-                                onCategorySelected = {
-                                    selectedCategory = it
-                                    pendingHeroFocus.value = null
-                                    focusedHeroItem = null
-                                    autoSlideIndex = 0
-                                },
-                                activeServiceBadge = activeServiceBadge,
-                                totalSlides = featuredSlides.size,
-                                activeSlideIndex = activeDotIndex
-                            )
-                        }
+                        HomeHeroSection(
+                            featuredSlides = featuredSlides,
+                            pendingHeroFocus = pendingHeroFocus,
+                            resetSignal = heroResetSignal,
+                            isTv = isTv,
+                            onSelect = onItemClick,
+                            onRefresh = onRefresh,
+                            selectedCategory = selectedCategory,
+                            onCategorySelected = onSelectCategory,
+                            activeServiceBadge = activeServiceBadge,
+                            firstRowFocusRequester = null,
+                            isFirstRowAttached = { false }
+                        )
                     }
                 } else if (rows.isEmpty()) {
                     item(key = "welcome_empty") {
@@ -357,8 +332,8 @@ fun HomeScreen(
                     }
                 }
 
-                if (sortedContinueWatching.isNotEmpty()) {
-                    item(key = "continue_watching") {
+                if (hasContinueWatching) {
+                    item(key = "continue_watching", contentType = "continue_watching") {
                         ContinueWatchingRow(
                             items = sortedContinueWatching,
                             isTv = isTv,
@@ -376,7 +351,7 @@ fun HomeScreen(
                         cardCorner = cardCorner,
                         showPosterLabels = showPosterLabels,
                         onItemClick = onItemClick,
-                        onItemFocused = { if (isTv) pendingHeroFocus.value = it to focusedItemIndex }
+                        onItemFocused = if (isTv) onPosterFocused else null
                     )
                 }
             }
@@ -385,10 +360,84 @@ fun HomeScreen(
 }
 
 @Composable
+private fun HomeHeroSection(
+    featuredSlides: List<MediaItem>,
+    pendingHeroFocus: MutableStateFlow<Pair<MediaItem, Int>?>,
+    resetSignal: Int,
+    isTv: Boolean,
+    onSelect: (MediaItem) -> Unit,
+    onRefresh: () -> Unit,
+    selectedCategory: String,
+    onCategorySelected: (String) -> Unit,
+    activeServiceBadge: String?,
+    firstRowFocusRequester: FocusRequester?,
+    isFirstRowAttached: () -> Boolean,
+    modifier: Modifier = Modifier
+) {
+    var focusedHeroItem by remember { mutableStateOf<MediaItem?>(null) }
+    var focusedItemIndex by remember { mutableIntStateOf(0) }
+    var autoSlideIndex by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(resetSignal) {
+        focusedHeroItem = null
+        focusedItemIndex = 0
+        autoSlideIndex = 0
+    }
+
+    LaunchedEffect(pendingHeroFocus) {
+        pendingHeroFocus.collectLatest { pending ->
+            if (pending == null) return@collectLatest
+            delay(220L)
+            focusedHeroItem = pending.first
+            focusedItemIndex = pending.second
+        }
+    }
+
+    // Gentle auto-cycle on Hero Spotlight when no poster is actively hovered
+    LaunchedEffect(featuredSlides.size, focusedHeroItem) {
+        if (featuredSlides.size > 1 && focusedHeroItem == null) {
+            while (true) {
+                delay(7500L)
+                autoSlideIndex = (autoSlideIndex + 1) % featuredSlides.size
+            }
+        }
+    }
+
+    val heroItem = focusedHeroItem
+        ?: featuredSlides.getOrNull(autoSlideIndex % featuredSlides.size.coerceAtLeast(1))
+        ?: return
+    val activeDotIndex = if (focusedHeroItem != null) {
+        focusedItemIndex % featuredSlides.size.coerceAtLeast(1)
+    } else {
+        autoSlideIndex % featuredSlides.size.coerceAtLeast(1)
+    }
+
+    LumaHeroBanner(
+        item = heroItem,
+        isTv = isTv,
+        onSelect = onSelect,
+        onRefresh = onRefresh,
+        selectedCategory = selectedCategory,
+        onCategorySelected = onCategorySelected,
+        activeServiceBadge = activeServiceBadge,
+        firstRowFocusRequester = firstRowFocusRequester,
+        isFirstRowAttached = isFirstRowAttached,
+        totalSlides = featuredSlides.size,
+        activeSlideIndex = activeDotIndex,
+        modifier = modifier
+    )
+}
+
+private val ContinueCardShape = RoundedCornerShape(10.dp)
+private val ContinueThumbScrim = Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)))
+
+@Composable
 private fun ContinueWatchingRow(
     items: List<WatchProgress>,
     isTv: Boolean,
-    onClick: (WatchProgress) -> Unit
+    onClick: (WatchProgress) -> Unit,
+    firstItemFocusRequester: FocusRequester? = null,
+    onFirstItemAttachedChanged: ((Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val palette = LocalQuernPalette.current
@@ -417,28 +466,53 @@ private fun ContinueWatchingRow(
         }
 
         LazyRow(
-            contentPadding = PaddingValues(horizontal = if (isTv) 14.dp else 12.dp, vertical = 3.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(horizontal = if (isTv) 16.dp else 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(items, key = { it.contentId }) { progress ->
+            itemsIndexed(items, key = { _, it -> it.contentId }, contentType = { _, _ -> "cw_card" }) { index, progress ->
+                val isFirst = index == 0
+                if (isFirst && firstItemFocusRequester != null && onFirstItemAttachedChanged != null) {
+                    DisposableEffect(progress.contentId) {
+                        onDispose { onFirstItemAttachedChanged(false) }
+                    }
+                }
                 var focused by remember { mutableStateOf(false) }
+                val focusScale = animateFloatAsState(
+                    targetValue = if (focused) 1.04f else 1f,
+                    animationSpec = tween(150, easing = FastOutSlowInEasing),
+                    label = "cwFocusScale"
+                )
                 val remainingMins = ((progress.durationMs - progress.positionMs).coerceAtLeast(0L) / 60_000L)
                 val imgReq = remember(progress.backdropUrl, progress.posterUrl) {
                     val url = progress.backdropUrl ?: progress.posterUrl
                     if (url.isNullOrBlank()) null else {
-                        ImageRequest.Builder(context).data(url).size(320, 180).crossfade(true).build()
+                        ImageRequest.Builder(context).data(url).size(320, 180).crossfade(false).build()
                     }
                 }
 
                 Column(
                     modifier = Modifier
+                        .then(
+                            if (isFirst && firstItemFocusRequester != null) {
+                                Modifier
+                                    .focusRequester(firstItemFocusRequester)
+                                    .onGloballyPositioned { coords ->
+                                        onFirstItemAttachedChanged?.invoke(coords.isAttached)
+                                    }
+                            } else Modifier
+                        )
                         .width(if (isTv) 142.dp else 130.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .zIndex(if (focused) 5f else 0f)
+                        .graphicsLayer {
+                            val s = focusScale.value
+                            scaleX = s
+                            scaleY = s
+                        }
+                        .clip(ContinueCardShape)
                         .background(palette.surface)
-                        .border(
-                            width = if (focused) 2.dp else 1.dp,
-                            color = if (focused) palette.focusRing else palette.border,
-                            shape = RoundedCornerShape(10.dp)
+                        .then(
+                            if (focused) Modifier.border(2.dp, palette.focusRing, ContinueCardShape)
+                            else Modifier
                         )
                         .tvClickable(
                             onFocusChangedState = { focused = it },
@@ -463,9 +537,7 @@ private fun ContinueWatchingRow(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(
-                                    Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)))
-                                )
+                                .background(ContinueThumbScrim)
                         )
 
                         Surface(

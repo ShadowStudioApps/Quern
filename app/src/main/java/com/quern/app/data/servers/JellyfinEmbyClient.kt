@@ -27,6 +27,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
+import java.util.Locale
 
 /**
  * Supports both Jellyfin and Emby personal media servers using either API Key or Username/Password login.
@@ -271,7 +272,7 @@ class JellyfinEmbyClient(
         val type = if (typeRaw.equals("Series", ignoreCase = true)) MediaType.SERIES else MediaType.MOVIE
         val imdbId = obj["ProviderIds"]?.jsonObject?.get("Imdb")?.jsonPrimitive?.contentOrNull
         val year = obj["ProductionYear"]?.jsonPrimitive?.contentOrNull
-        val rating = obj["CommunityRating"]?.jsonPrimitive?.doubleOrNull?.let { String.format("%.1f", it) }
+        val rating = obj["CommunityRating"]?.jsonPrimitive?.doubleOrNull?.let { String.format(Locale.US, "%.1f", it) }
 
         return MediaItem(
             id = "srv:$serverId:$rawId",

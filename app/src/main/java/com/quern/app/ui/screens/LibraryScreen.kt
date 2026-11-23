@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.quern.app.R
 import com.quern.app.data.servers.WebDavEntry
 import com.quern.app.domain.model.DebridCloudItem
 import com.quern.app.domain.model.MediaItem
@@ -57,6 +58,7 @@ import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.qString
 
 @Composable
 fun LibraryScreen(
@@ -79,8 +81,9 @@ fun LibraryScreen(
 
     LaunchedEffect(selectedTab) {
         if (selectedTab == 1) onRefreshCloud()
-        if (selectedTab == 2 && activeWebDavServer != null) {
-            onBrowseWebDav(activeWebDavServer!!.id, null)
+        val srv = activeWebDavServer
+        if (selectedTab == 2 && srv != null) {
+            onBrowseWebDav(srv.id, null)
         }
     }
 
@@ -96,14 +99,14 @@ fun LibraryScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "Library & Cloud",
+                text = qString(R.string.library_title),
                 color = LumaTextPrimary,
                 fontSize = if (isTv) 26.sp else 22.sp,
                 fontWeight = FontWeight.Bold
             )
             if (selectedTab == 1) {
                 IconButton(onClick = onRefreshCloud) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh Cloud", tint = palette.focusRing)
+                    Icon(Icons.Default.Refresh, contentDescription = qString(R.string.library_refresh_cloud), tint = palette.focusRing)
                 }
             }
         }
@@ -111,7 +114,11 @@ fun LibraryScreen(
         Spacer(Modifier.height(10.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf("Favorites (${favorites.size})", "Debrid Cloud", "WebDAV Files").forEachIndexed { idx, label ->
+            listOf(
+                qString(R.string.library_tab_favorites, favorites.size),
+                qString(R.string.library_tab_debrid),
+                qString(R.string.library_tab_webdav)
+            ).forEachIndexed { idx, label ->
                 var focused by remember { mutableStateOf(false) }
                 val selected = selectedTab == idx
                 Surface(
@@ -149,7 +156,7 @@ fun LibraryScreen(
             0 -> {
                 if (favorites.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No favorites saved yet.", color = LumaTextSecondary)
+                        Text(qString(R.string.library_empty_favorites), color = LumaTextSecondary)
                     }
                 } else {
                     LazyVerticalGrid(
@@ -158,7 +165,7 @@ fun LibraryScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
-                        items(favorites, key = { it.id }) { item ->
+                        items(favorites, key = { "${it.origin}_${it.type}_${it.id}" }) { item ->
                             LumaPosterCard(item = item, isTv = isTv, onClick = { onItemClick(item) })
                         }
                     }
@@ -173,7 +180,7 @@ fun LibraryScreen(
                 } else if (cloudItems.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            "No cloud files found. Connect TorBox, Real-Debrid, AllDebrid, or Premiumize in Settings → Services.",
+                            qString(R.string.library_empty_cloud),
                             color = LumaTextSecondary
                         )
                     }
@@ -227,7 +234,7 @@ fun LibraryScreen(
             2 -> {
                 if (webDavServers.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No WebDAV servers configured. Add one in Settings → Services.", color = LumaTextSecondary)
+                        Text(qString(R.string.library_empty_webdav), color = LumaTextSecondary)
                     }
                 } else {
                     Column(modifier = Modifier.fillMaxSize()) {

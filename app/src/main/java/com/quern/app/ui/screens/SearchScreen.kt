@@ -35,11 +35,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.quern.app.R
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.ui.components.LumaPosterCard
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.qString
 
 @Composable
 fun SearchScreen(
@@ -59,13 +61,13 @@ fun SearchScreen(
             .padding(horizontal = if (isTv) 28.dp else 16.dp, vertical = 18.dp)
     ) {
         Text(
-            text = "Search Everywhere",
+            text = qString(R.string.search_title),
             color = LumaTextPrimary,
             fontSize = if (isTv) 26.sp else 22.sp,
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "Searches across Stremio Addons, TMDB, Jellyfin, Emby, Plex & WebDAV",
+            text = qString(R.string.search_subtitle),
             color = LumaTextSecondary,
             fontSize = 13.sp
         )
@@ -79,7 +81,7 @@ fun SearchScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                placeholder = { Text("Search movies, series, servers...", color = LumaTextSecondary) },
+                placeholder = { Text(qString(R.string.search_placeholder), color = LumaTextSecondary) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = palette.focusRing) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -102,7 +104,7 @@ fun SearchScreen(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.height(54.dp)
             ) {
-                Text("Search", fontWeight = FontWeight.Bold)
+                Text(qString(R.string.search_button), fontWeight = FontWeight.Bold)
             }
         }
 
@@ -118,14 +120,14 @@ fun SearchScreen(
                 }
                 results.isEmpty() && query.isNotBlank() -> {
                     Text(
-                        text = "No results found for \"$query\".",
+                        text = qString(R.string.search_no_results, query),
                         color = LumaTextSecondary,
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
                 results.isEmpty() -> {
                     Text(
-                        text = "Type a title and press Search.",
+                        text = qString(R.string.search_prompt),
                         color = LumaTextSecondary,
                         modifier = Modifier.align(Alignment.Center)
                     )
@@ -137,7 +139,7 @@ fun SearchScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
-                        items(results, key = { "${it.origin}_${it.id}" }) { item ->
+                        items(results, key = { "${it.origin}_${it.type}_${it.id}" }) { item ->
                             LumaPosterCard(
                                 item = item,
                                 isTv = isTv,

@@ -1,5 +1,6 @@
 package com.quern.app.domain.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -34,6 +35,7 @@ enum class SourceOrigin(val displayName: String) {
     DIRECT("Direct")
 }
 
+@Immutable
 @Serializable
 data class MediaItem(
     val id: String,
@@ -52,6 +54,7 @@ data class MediaItem(
     val genres: List<String> = emptyList()
 )
 
+@Immutable
 @Serializable
 data class Episode(
     val id: String,
@@ -64,6 +67,7 @@ data class Episode(
     val runtimeMinutes: Int? = null
 )
 
+@Immutable
 @Serializable
 data class MediaDetail(
     val item: MediaItem,
@@ -80,6 +84,7 @@ data class MediaDetail(
         episodes.filter { it.seasonNumber == season }.sortedBy { it.episodeNumber }
 }
 
+@Immutable
 @Serializable
 data class StreamSource(
     val id: String,
@@ -104,6 +109,7 @@ data class StreamSource(
         get() = url.isNullOrBlank() && (!infoHash.isNullOrBlank() || !magnetUri.isNullOrBlank())
 }
 
+@Immutable
 @Serializable
 data class SubtitleTrack(
     val id: String,
@@ -125,6 +131,7 @@ data class SubtitleTrack(
     }
 }
 
+@Immutable
 data class CatalogRow(
     val id: String,
     val title: String,
@@ -132,6 +139,7 @@ data class CatalogRow(
     val items: List<MediaItem>
 )
 
+@Immutable
 data class WatchProgress(
     val contentId: String,
     val title: String,

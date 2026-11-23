@@ -5,13 +5,12 @@ package com.quern.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -57,6 +56,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.focus.focusProperties
@@ -65,8 +66,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.annotation.ExperimentalCoilApi
@@ -93,6 +96,7 @@ import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
 import com.quern.app.ui.theme.QuernGlassBorderBrush
 import com.quern.app.ui.theme.QuernTheme
+import com.quern.app.ui.theme.glossySheen
 import okhttp3.OkHttpClient
 
 /**
@@ -128,39 +132,14 @@ fun QuernApp(
         val isTv = rememberIsTvMode(settings.uiModeOverride)
         val palette = LocalQuernPalette.current
 
-        val homeRows by viewModel.homeRows.collectAsState()
-        val isLoadingHome by viewModel.isLoadingHome.collectAsState()
-        val continueWatching by viewModel.continueWatching.collectAsState()
-        val searchQuery by viewModel.searchQuery.collectAsState()
-        val searchResults by viewModel.searchResults.collectAsState()
-        val isSearching by viewModel.isSearching.collectAsState()
-        val detailState by viewModel.detailState.collectAsState()
         val activePlayback by viewModel.activePlayback.collectAsState()
-        val favorites by viewModel.favorites.collectAsState()
-        val cloudItems by viewModel.cloudItems.collectAsState()
-        val isLoadingCloud by viewModel.isLoadingCloud.collectAsState()
-        val webDavEntries by viewModel.webDavEntries.collectAsState()
-        val addons by viewModel.addons.collectAsState()
-        val mediaServers by viewModel.mediaServers.collectAsState()
-        val debridStatuses by viewModel.debridStatuses.collectAsState()
-        val tmdbConfig by viewModel.tmdbConfig.collectAsState()
-        val traktState by viewModel.traktState.collectAsState()
-        val traktDeviceCode by viewModel.traktDeviceCode.collectAsState()
-        val cloudAccount by viewModel.cloudAccountState.collectAsState()
         val toastMessage by viewModel.toastMessage.collectAsState()
-        val addonHealthMap by viewModel.addonHealthMap.collectAsState()
-        val checkingHealthUrls by viewModel.checkingHealthUrls.collectAsState()
-        val companionSession by viewModel.companionSession.collectAsState()
 
         var currentTab by remember { mutableStateOf(QuernTab.HOME) }
         var settingsInitialGroup by remember { mutableStateOf(SettingsGroup.ADDONS) }
         var showingDetail by remember { mutableStateOf(false) }
 
         val snackbarHostState = remember { SnackbarHostState() }
-
-        val activeBadge = remember(debridStatuses) {
-            debridStatuses.entries.firstOrNull { it.value.isConnected }?.key?.displayName
-        }
 
         BackHandler(enabled = showingDetail) {
             showingDetail = false
@@ -191,6 +170,7 @@ fun QuernApp(
                 settings = settings,
                 okHttpClient = okHttpClient,
                 onProgressUpdate = { pos, dur, playing -> viewModel.onPlaybackProgress(pos, dur, playing) },
+                onPlaybackStop = { pos, dur -> viewModel.onPlaybackStopped(pos, dur) },
                 onPlayNextEpisode = { viewModel.playNextEpisode() },
                 onBack = { viewModel.closePlayer() }
             )
@@ -206,12 +186,13 @@ fun QuernApp(
             AnimatedContent(
                 targetState = Pair(showingDetail, currentTab),
                 transitionSpec = {
-                    (fadeIn(tween(180)) + slideInHorizontally(tween(180)) { it / 28 })
-                        .togetherWith(fadeOut(tween(130)))
+                    fadeIn(tween(150, easing = FastOutSlowInEasing))
+                        .togetherWith(fadeOut(tween(100, easing = FastOutSlowInEasing)))
                 },
                 label = "mainScreenTransition"
             ) { (isDetail, tab) ->
                 if (isDetail) {
+                    val detailState by viewModel.detailState.collectAsState()
                     val detailItemId = detailState.detail?.item?.id.orEmpty()
                     val isFav by viewModel.repository.observeIsFavorite(detailItemId).collectAsState(initial = false)
                     DetailScreen(
@@ -226,140 +207,174 @@ fun QuernApp(
                     )
                 } else {
                     when (tab) {
-                        QuernTab.HOME -> HomeScreen(
-                            rows = homeRows,
-                            continueWatching = continueWatching,
-                            isLoading = isLoadingHome,
-                            isTv = isTv,
-                            onItemClick = openItemDetail,
-                            onContinueClick = { progress ->
-                                val resumedDirect = settings.continueWatchingAction == ContinueWatchingAction.RESUME_DIRECT &&
-                                    viewModel.resumeWatchProgress(progress)
-                                if (!resumedDirect) {
-                                    openItemDetail(
-                                        MediaItem(
-                                            id = progress.contentId.substringBefore(":"),
-                                            title = progress.title,
-                                            type = progress.type,
-                                            posterUrl = progress.posterUrl,
-                                            backdropUrl = progress.backdropUrl
-                                        )
-                                    )
-                                }
-                            },
-                            onOpenAddons = {
-                                settingsInitialGroup = SettingsGroup.ADDONS
-                                currentTab = QuernTab.SETTINGS
-                            },
-                            onOpenServers = {
-                                settingsInitialGroup = SettingsGroup.SERVICES
-                                currentTab = QuernTab.SETTINGS
-                            },
-                            onRefresh = { viewModel.refreshHome() },
-                            addonsQrUrl = viewModel.addonsCompanionUrl,
-                            companionSession = companionSession,
-                            onRefreshCompanionSession = { viewModel.refreshCompanionSession() },
-                            onBindCompanionServer = { viewModel.acquireCompanionServer() },
-                            onUnbindCompanionServer = { viewModel.releaseCompanionServer() },
-                            activeServiceBadge = activeBadge,
-                            showHeroBanner = settings.showHeroBanner,
-                            showPosterLabels = settings.showPosterLabels,
-                            hideUnreleasedContent = settings.hideUnreleasedContent,
-                            rowOrder = settings.rowOrder,
-                            showContinueWatching = settings.showContinueWatching,
-                            continueWatchingSort = settings.continueWatchingSort,
-                            cardSize = settings.cardSize,
-                            cardShape = settings.cardShape,
-                            cardCorner = settings.cardCorner
-                        )
-
-                        QuernTab.SEARCH -> SearchScreen(
-                            query = searchQuery,
-                            results = searchResults,
-                            isSearching = isSearching,
-                            isTv = isTv,
-                            onQueryChange = { viewModel.updateSearchQuery(it) },
-                            onSearchSubmit = { viewModel.performSearch() },
-                            onItemClick = openItemDetail
-                        )
-
-                        QuernTab.LIBRARY -> LibraryScreen(
-                            favorites = favorites,
-                            cloudItems = cloudItems,
-                            isLoadingCloud = isLoadingCloud,
-                            servers = mediaServers,
-                            webDavEntries = webDavEntries,
-                            isTv = isTv,
-                            onItemClick = openItemDetail,
-                            onRefreshCloud = { viewModel.refreshCloudLibrary() },
-                            onPlayCloudItem = { viewModel.playCloudItem(it) },
-                            onBrowseWebDav = { srvId, path -> viewModel.browseWebDav(srvId, path) },
-                            onPlayWebDavEntry = { srv, entry -> viewModel.playWebDavEntry(srv, entry) }
-                        )
-
-                        QuernTab.SETTINGS -> SettingsScreen(
-                            settings = settings,
-                            pinMigrationState = pinMigrationState,
-                            onRetryPinMigration = { viewModel.retryPinMigrationIfNeeded() },
-                            companionUrl = viewModel.companionUrl,
-                            addonsQrUrl = viewModel.addonsCompanionUrl,
-                            companionSession = companionSession,
-                            onRefreshCompanionSession = { viewModel.refreshCompanionSession() },
-                            onBindCompanionServer = { viewModel.acquireCompanionServer() },
-                            onUnbindCompanionServer = { viewModel.releaseCompanionServer() },
-                            cloudAccount = cloudAccount,
-                            addons = addons,
-                            debridStatuses = debridStatuses,
-                            getDebridKey = { viewModel.repository.debridManager.getApiKey(it) },
-                            mediaServers = mediaServers,
-                            tmdbConfig = tmdbConfig,
-                            traktState = traktState,
-                            traktDeviceCode = traktDeviceCode,
-                            isTv = isTv,
-                            initialGroup = settingsInitialGroup,
-                            addonHealthMap = addonHealthMap,
-                            checkingHealthUrls = checkingHealthUrls,
-                            onUpdateSettings = { viewModel.updateSettings(it) },
-                            onApplyAppIcon = { iconOpt ->
-                                runCatching { AppIconManager.applyIcon(context, iconOpt) }
-                                viewModel.showToast("App icon updated!")
-                            },
-                            onCloudSignUp = { u, k, e, p -> viewModel.signUpCloudAccount(u, k, e, p) },
-                            onCloudSignIn = { u, k, e, p -> viewModel.signInCloudAccount(u, k, e, p) },
-                            onCloudSyncNow = { viewModel.syncCloudNow() },
-                            onCloudSignOut = { viewModel.signOutCloudAccount() },
-                            onSyncStremio = { email, pass -> viewModel.syncFromStremio(email, pass) },
-                            onImportNuvio = { raw -> viewModel.importFromNuvio(raw) },
-                            onInstallAddon = { url, done -> viewModel.installAddon(url) { done() } },
-                            onToggleAddon = { url, enabled -> viewModel.toggleAddonEnabled(url, enabled) },
-                            onMoveAddonUp = { url -> viewModel.moveAddonUp(url) },
-                            onMoveAddonDown = { url -> viewModel.moveAddonDown(url) },
-                            onRemoveAddon = { url -> viewModel.removeAddon(url) },
-                            onCheckAddonHealth = { url -> viewModel.checkAddonHealth(url) },
-                            onCheckAllAddonsHealth = { viewModel.checkAllAddonsHealth() },
-                            onToggleCatalogVisibility = { key -> viewModel.toggleCatalogVisibility(key) },
-                            onRefreshHome = { viewModel.refreshHome() },
-                            onShowToast = { viewModel.showToast(it) },
-                            onApplyPreset = { preset, label ->
-                                viewModel.applyDevicePreset(preset)
-                                viewModel.showToast(label)
-                            },
-                            onExportSettingsCode = { viewModel.exportSettingsCode() },
-                            onExportSettingsJson = { viewModel.exportSettingsJson() },
-                            onImportSettingsCode = { viewModel.importSettingsCode(it) },
-                            onSaveDebridKey = { type, key -> viewModel.saveDebridKey(type, key) },
-                            onSaveMediaServer = { cfg, cb -> viewModel.saveMediaServer(cfg, cb) },
-                            onDeleteMediaServer = { viewModel.deleteMediaServer(it) },
-                            onSaveTmdb = { key, lang -> viewModel.saveTmdbConfig(key, lang) },
-                            onStartTraktAuth = { id, sec -> viewModel.startTraktDeviceAuth(id, sec) },
-                            onConfirmTraktAuth = { id, sec -> viewModel.confirmTraktDeviceAuth(id, sec) },
-                            onDisconnectTrakt = { viewModel.disconnectTrakt() },
-                            onClearCache = {
-                                context.imageLoader.memoryCache?.clear()
-                                context.imageLoader.diskCache?.clear()
-                                viewModel.showToast("Cache cleared!")
+                        QuernTab.HOME -> {
+                            val homeRows by viewModel.homeRows.collectAsState()
+                            val isLoadingHome by viewModel.isLoadingHome.collectAsState()
+                            val continueWatching by viewModel.continueWatching.collectAsState()
+                            val companionSession by viewModel.companionSession.collectAsState()
+                            val debridStatuses by viewModel.debridStatuses.collectAsState()
+                            val activeBadge = remember(debridStatuses) {
+                                debridStatuses.entries.firstOrNull { it.value.isConnected }?.key?.displayName
                             }
-                        )
+                            HomeScreen(
+                                rows = homeRows,
+                                continueWatching = continueWatching,
+                                isLoading = isLoadingHome,
+                                isTv = isTv,
+                                onItemClick = openItemDetail,
+                                onContinueClick = { progress ->
+                                    val resumedDirect = settings.continueWatchingAction == ContinueWatchingAction.RESUME_DIRECT &&
+                                        viewModel.resumeWatchProgress(progress)
+                                    if (!resumedDirect) {
+                                        openItemDetail(
+                                            MediaItem(
+                                                id = progress.contentId.substringBefore(":"),
+                                                title = progress.title,
+                                                type = progress.type,
+                                                posterUrl = progress.posterUrl,
+                                                backdropUrl = progress.backdropUrl
+                                            )
+                                        )
+                                    }
+                                },
+                                onOpenAddons = {
+                                    settingsInitialGroup = SettingsGroup.ADDONS
+                                    currentTab = QuernTab.SETTINGS
+                                },
+                                onOpenServers = {
+                                    settingsInitialGroup = SettingsGroup.SERVICES
+                                    currentTab = QuernTab.SETTINGS
+                                },
+                                onRefresh = { viewModel.refreshHome() },
+                                addonsQrUrl = viewModel.addonsCompanionUrl,
+                                companionSession = companionSession,
+                                onRefreshCompanionSession = { viewModel.refreshCompanionSession() },
+                                onBindCompanionServer = { viewModel.acquireCompanionServer() },
+                                onUnbindCompanionServer = { viewModel.releaseCompanionServer() },
+                                activeServiceBadge = activeBadge,
+                                showHeroBanner = settings.showHeroBanner,
+                                showPosterLabels = settings.showPosterLabels,
+                                hideUnreleasedContent = settings.hideUnreleasedContent,
+                                rowOrder = settings.rowOrder,
+                                showContinueWatching = settings.showContinueWatching,
+                                continueWatchingSort = settings.continueWatchingSort,
+                                cardSize = settings.cardSize,
+                                cardShape = settings.cardShape,
+                                cardCorner = settings.cardCorner
+                            )
+                        }
+
+                        QuernTab.SEARCH -> {
+                            val searchQuery by viewModel.searchQuery.collectAsState()
+                            val searchResults by viewModel.searchResults.collectAsState()
+                            val isSearching by viewModel.isSearching.collectAsState()
+                            SearchScreen(
+                                query = searchQuery,
+                                results = searchResults,
+                                isSearching = isSearching,
+                                isTv = isTv,
+                                onQueryChange = { viewModel.updateSearchQuery(it) },
+                                onSearchSubmit = { viewModel.performSearch() },
+                                onItemClick = openItemDetail
+                            )
+                        }
+
+                        QuernTab.LIBRARY -> {
+                            val favorites by viewModel.favorites.collectAsState()
+                            val cloudItems by viewModel.cloudItems.collectAsState()
+                            val isLoadingCloud by viewModel.isLoadingCloud.collectAsState()
+                            val mediaServers by viewModel.mediaServers.collectAsState()
+                            val webDavEntries by viewModel.webDavEntries.collectAsState()
+                            LibraryScreen(
+                                favorites = favorites,
+                                cloudItems = cloudItems,
+                                isLoadingCloud = isLoadingCloud,
+                                servers = mediaServers,
+                                webDavEntries = webDavEntries,
+                                isTv = isTv,
+                                onItemClick = openItemDetail,
+                                onRefreshCloud = { viewModel.refreshCloudLibrary() },
+                                onPlayCloudItem = { viewModel.playCloudItem(it) },
+                                onBrowseWebDav = { srvId, path -> viewModel.browseWebDav(srvId, path) },
+                                onPlayWebDavEntry = { srv, entry -> viewModel.playWebDavEntry(srv, entry) }
+                            )
+                        }
+
+                        QuernTab.SETTINGS -> {
+                            val companionSession by viewModel.companionSession.collectAsState()
+                            val cloudAccount by viewModel.cloudAccountState.collectAsState()
+                            val addons by viewModel.addons.collectAsState()
+                            val debridStatuses by viewModel.debridStatuses.collectAsState()
+                            val mediaServers by viewModel.mediaServers.collectAsState()
+                            val tmdbConfig by viewModel.tmdbConfig.collectAsState()
+                            val traktState by viewModel.traktState.collectAsState()
+                            val traktDeviceCode by viewModel.traktDeviceCode.collectAsState()
+                            val addonHealthMap by viewModel.addonHealthMap.collectAsState()
+                            val checkingHealthUrls by viewModel.checkingHealthUrls.collectAsState()
+                            SettingsScreen(
+                                settings = settings,
+                                pinMigrationState = pinMigrationState,
+                                onRetryPinMigration = { viewModel.retryPinMigrationIfNeeded() },
+                                companionUrl = viewModel.companionUrl,
+                                addonsQrUrl = viewModel.addonsCompanionUrl,
+                                companionSession = companionSession,
+                                onRefreshCompanionSession = { viewModel.refreshCompanionSession() },
+                                onBindCompanionServer = { viewModel.acquireCompanionServer() },
+                                onUnbindCompanionServer = { viewModel.releaseCompanionServer() },
+                                cloudAccount = cloudAccount,
+                                addons = addons,
+                                debridStatuses = debridStatuses,
+                                getDebridKey = { viewModel.repository.debridManager.getApiKey(it) },
+                                mediaServers = mediaServers,
+                                tmdbConfig = tmdbConfig,
+                                traktState = traktState,
+                                traktDeviceCode = traktDeviceCode,
+                                isTv = isTv,
+                                initialGroup = settingsInitialGroup,
+                                addonHealthMap = addonHealthMap,
+                                checkingHealthUrls = checkingHealthUrls,
+                                onUpdateSettings = { viewModel.updateSettings(it) },
+                                onApplyAppIcon = { iconOpt ->
+                                    runCatching { AppIconManager.applyIcon(context, iconOpt) }
+                                    viewModel.showToast("App icon updated!")
+                                },
+                                onCloudSignUp = { u, k, e, p -> viewModel.signUpCloudAccount(u, k, e, p) },
+                                onCloudSignIn = { u, k, e, p -> viewModel.signInCloudAccount(u, k, e, p) },
+                                onCloudSyncNow = { viewModel.syncCloudNow() },
+                                onCloudSignOut = { viewModel.signOutCloudAccount() },
+                                onSyncStremio = { email, pass -> viewModel.syncFromStremio(email, pass) },
+                                onImportNuvio = { raw -> viewModel.importFromNuvio(raw) },
+                                onInstallAddon = { url, done -> viewModel.installAddon(url) { done() } },
+                                onToggleAddon = { url, enabled -> viewModel.toggleAddonEnabled(url, enabled) },
+                                onMoveAddonUp = { url -> viewModel.moveAddonUp(url) },
+                                onMoveAddonDown = { url -> viewModel.moveAddonDown(url) },
+                                onRemoveAddon = { url -> viewModel.removeAddon(url) },
+                                onCheckAddonHealth = { url -> viewModel.checkAddonHealth(url) },
+                                onCheckAllAddonsHealth = { viewModel.checkAllAddonsHealth() },
+                                onToggleCatalogVisibility = { key -> viewModel.toggleCatalogVisibility(key) },
+                                onRefreshHome = { viewModel.refreshHome() },
+                                onShowToast = { viewModel.showToast(it) },
+                                onApplyPreset = { preset, label ->
+                                    viewModel.applyDevicePreset(preset)
+                                    viewModel.showToast(label)
+                                },
+                                onExportSettingsCode = { viewModel.exportSettingsCode() },
+                                onExportSettingsJson = { viewModel.exportSettingsJson() },
+                                onImportSettingsCode = { viewModel.importSettingsCode(it) },
+                                onSaveDebridKey = { type, key -> viewModel.saveDebridKey(type, key) },
+                                onSaveMediaServer = { cfg, cb -> viewModel.saveMediaServer(cfg, cb) },
+                                onDeleteMediaServer = { viewModel.deleteMediaServer(it) },
+                                onSaveTmdb = { key, lang -> viewModel.saveTmdbConfig(key, lang) },
+                                onStartTraktAuth = { id, sec -> viewModel.startTraktDeviceAuth(id, sec) },
+                                onConfirmTraktAuth = { id, sec -> viewModel.confirmTraktDeviceAuth(id, sec) },
+                                onDisconnectTrakt = { viewModel.disconnectTrakt() },
+                                onClearCache = {
+                                    context.imageLoader.memoryCache?.clear()
+                                    context.imageLoader.diskCache?.clear()
+                                    viewModel.showToast("Cache cleared!")
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -384,7 +399,6 @@ fun QuernApp(
                                     currentTab = currentTab,
                                     onSelectTab = { currentTab = it }
                                 )
-                                HorizontalDivider(color = palette.border, thickness = 1.dp)
                             }
                             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                                 content()
@@ -518,7 +532,7 @@ fun QuernTvTopNavBar(
         Surface(
             color = palette.surface,
             shape = RoundedCornerShape(999.dp),
-            border = BorderStroke(1.dp, palette.border)
+            modifier = Modifier.glossySheen(palette.isGlossy, cornerRadius = 999.dp, intensity = 0.9f)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
@@ -531,8 +545,8 @@ fun QuernTvTopNavBar(
                     val label = tabLabel(tab)
 
                     val scale by animateFloatAsState(
-                        targetValue = if (focused) 1.04f else 1f,
-                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 500f),
+                        targetValue = if (focused) 1.03f else 1f,
+                        animationSpec = tween(150, easing = FastOutSlowInEasing),
                         label = "topTabScale"
                     )
                     val bg by animateColorAsState(
@@ -541,7 +555,7 @@ fun QuernTvTopNavBar(
                             selected -> palette.surfaceElevated
                             else -> Color.Transparent
                         },
-                        animationSpec = tween(140),
+                        animationSpec = tween(150, easing = FastOutSlowInEasing),
                         label = "topTabBg"
                     )
                     val fg = when {
@@ -593,9 +607,10 @@ fun QuernFloatingPhoneDock(
     Surface(
         color = palette.surface.copy(alpha = 0.94f),
         shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(1.dp, QuernGlassBorderBrush),
         shadowElevation = 16.dp,
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
+            .fillMaxWidth()
+            .glossySheen(palette.isGlossy, cornerRadius = 999.dp, intensity = 0.85f)
     ) {
         Row(
             modifier = Modifier
@@ -655,6 +670,8 @@ private fun Modifier.restoreLastContentFocus(memory: ContentFocusMemory): Modifi
     }
     .focusGroup()
 
+private val RailItemShape = RoundedCornerShape(14.dp)
+
 @Composable
 fun QuernTvNavigationRail(
     currentTab: QuernTab,
@@ -669,10 +686,17 @@ fun QuernTvNavigationRail(
     var railHasFocus by remember { mutableStateOf(false) }
 
     val expanded = !autoHideCollapsed || railHasFocus
-    val railWidth by animateDpAsState(
-        targetValue = if (expanded) 136.dp else 64.dp,
-        animationSpec = tween(160),
+    // Keep animated values as State<T> and read them in layout/graphicsLayer/drawBehind phases only
+    // so expanding/collapsing or focusing rail items triggers ZERO recompositions per frame.
+    val railWidthState = animateDpAsState(
+        targetValue = if (expanded) 142.dp else 64.dp,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
         label = "railWidth"
+    )
+    val labelAlphaState = animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = tween(150, easing = FastOutSlowInEasing),
+        label = "railLabelAlpha"
     )
 
     LaunchedEffect(Unit) {
@@ -681,118 +705,123 @@ fun QuernTvNavigationRail(
 
     Box(
         modifier = Modifier
-            .width(railWidth)
+            .layout { measurable, constraints ->
+                val widthPx = railWidthState.value.roundToPx()
+                val placeable = measurable.measure(
+                    constraints.copy(minWidth = widthPx, maxWidth = widthPx)
+                )
+                layout(placeable.width, placeable.height) {
+                    placeable.placeRelative(0, 0)
+                }
+            }
             .fillMaxHeight()
+            .clipToBounds()
             .background(palette.background)
             .onFocusChanged { railHasFocus = it.hasFocus }
             .padding(vertical = 18.dp, horizontal = 10.dp)
     ) {
-        // Subtle brand mark at top when expanded
-        if (expanded) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                QuernBrandMark(size = 18.dp)
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    text = "QUERN",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.2.sp
-                )
-            }
+        // Always-visible brand mark aligned with the tab icons below; app name fades in on expand
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 11.dp, top = 4.dp)
+        ) {
+            QuernBrandMark(size = 22.dp)
+            Spacer(Modifier.width(9.dp))
+            Text(
+                text = "QUERN",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.2.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.graphicsLayer { alpha = labelAlphaState.value }
+            )
         }
 
-        // Vertically centered squircle icon column (matches reference Image #1!)
+        // Vertically centered squircle icon column with constant icon X-position (zero horizontal jump on expand/collapse)
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth()
                 .focusProperties { enter = { tabFocusRequesters.getValue(latestTab) } }
                 .focusGroup(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalAlignment = if (expanded) Alignment.Start else Alignment.CenterHorizontally
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalAlignment = Alignment.Start
         ) {
             QuernTab.entries.forEach { tab ->
                 var focused by remember { mutableStateOf(false) }
                 val selected = currentTab == tab
                 val label = tabLabel(tab)
 
-                val scale by animateFloatAsState(
-                    targetValue = if (focused) 1.06f else 1f,
-                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 500f),
+                val scaleState = animateFloatAsState(
+                    targetValue = if (focused) 1.03f else 1f,
+                    animationSpec = tween(150, easing = FastOutSlowInEasing),
                     label = "railItemScale"
                 )
-                val squircleBg by animateColorAsState(
+                val itemBgState = animateColorAsState(
                     targetValue = when {
-                        focused -> Color(0xFF2F80ED)
+                        focused -> palette.accent
+                        selected && expanded -> palette.accent.copy(alpha = if (palette.isGlossy) 0.45f else 0.24f)
                         selected -> palette.accent
                         else -> Color.Transparent
                     },
-                    animationSpec = tween(140),
-                    label = "railSquircleBg"
+                    animationSpec = tween(150, easing = FastOutSlowInEasing),
+                    label = "railItemBg"
                 )
-                val iconTint = when {
-                    focused -> Color.White
-                    selected -> palette.onAccent
+                val itemTint = when {
+                    focused -> palette.onAccent
+                    selected -> if (expanded) palette.focusRing else palette.onAccent
                     else -> Color(0xFF8E94A0)
                 }
 
-                val itemBg = if (expanded) {
-                    if (focused) Color(0xFF2F80ED)
-                    else if (selected) palette.accent.copy(alpha = 0.24f)
-                    else Color.Transparent
-                } else {
-                    squircleBg
-                }
-                val itemTint = if (expanded) {
-                    if (focused) Color.White else if (selected) palette.focusRing else Color(0xFF8E94A0)
-                } else {
-                    iconTint
-                }
-
-                // Single persistent Row focus target so expanding/collapsing never disposes the focused node
+                // Single persistent Row focus target so expanding/collapsing never disposes the focused node.
+                // Fixed start padding (11.dp) + fixed 22.dp icon centers the icon at 44.dp inner width (11+22+11=44).
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(44.dp)
-                        .graphicsLayer { scaleX = scale; scaleY = scale }
+                        .graphicsLayer {
+                            val s = scaleState.value
+                            scaleX = s
+                            scaleY = s
+                        }
                         .focusRequester(tabFocusRequesters.getValue(tab))
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(itemBg)
-                        .border(
-                            width = if (expanded && focused) 2.dp else 0.dp,
-                            color = if (expanded && focused) Color.White.copy(alpha = 0.85f) else Color.Transparent,
-                            shape = RoundedCornerShape(14.dp)
+                        .clip(RailItemShape)
+                        .drawBehind { drawRect(itemBgState.value) }
+                        .glossySheen(palette.isGlossy && (focused || selected), cornerRadius = 14.dp, intensity = if (focused) 1.15f else 0.7f)
+                        .then(
+                            if (focused) Modifier.border(1.75.dp, palette.focusRing.copy(alpha = 0.9f), RailItemShape)
+                            else Modifier
                         )
                         .tvClickable(
                             onFocusChangedState = { focused = it },
                             onClick = { onSelectTab(tab) }
                         )
-                        .padding(horizontal = if (expanded) 10.dp else 0.dp),
+                        .padding(start = 11.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center
+                    horizontalArrangement = Arrangement.Start
                 ) {
                     Icon(
                         imageVector = tab.icon,
                         contentDescription = label,
                         tint = itemTint,
-                        modifier = Modifier.size(if (expanded) 21.dp else 23.dp)
+                        modifier = Modifier.size(22.dp)
                     )
-                    if (expanded) {
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = label,
-                            color = if (focused) Color.White else if (selected) Color.White else Color(0xFF9CA3AF),
-                            fontSize = 12.sp,
-                            fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.Medium,
-                            maxLines = 1
-                        )
-                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = label,
+                        color = if (focused) palette.onAccent else if (selected) Color.White else Color(0xFF9CA3AF),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                        modifier = Modifier.graphicsLayer { alpha = labelAlphaState.value }
+                    )
                 }
             }
         }

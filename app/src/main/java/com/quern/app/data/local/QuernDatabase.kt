@@ -148,7 +148,6 @@ abstract class QuernDatabase : RoomDatabase() {
     companion object {
         fun build(context: Context): QuernDatabase =
             Room.databaseBuilder(context.applicationContext, QuernDatabase::class.java, "quern.db")
-                .fallbackToDestructiveMigration()
                 .build()
     }
 }
