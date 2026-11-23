@@ -118,9 +118,7 @@ fun ServersScreen(
 
     val palette = LocalQuernPalette.current
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(palette.background),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = if (isTv) 32.dp else 18.dp,
             end = if (isTv) 32.dp else 18.dp,
@@ -182,9 +180,8 @@ fun ServersScreen(
         // Sleek Segmented Pill Navigation
         item(key = "segments") {
             Surface(
-                color = LumaSurface,
+                color = palette.glassSurface,
                 shape = RoundedCornerShape(999.dp),
-                border = BorderStroke(1.dp, LumaGlassBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(

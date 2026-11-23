@@ -77,7 +77,44 @@ data class QuernPalette(
     val border: Color,
     val ambientGlow: Color = Color(0xFF294E7A),
     val isGlossy: Boolean = false
-)
+) {
+    /** Frosted translucent card surface that lets the blurred theme backdrop breathe through. */
+    val glassSurface: Color
+        get() = surface.copy(alpha = if (isGlossy) 0.64f else 0.58f)
+
+    /** Slightly denser frosted pill/input surface for high contrast over blurred glows. */
+    val glassElevated: Color
+        get() = surfaceElevated.copy(alpha = if (isGlossy) 0.74f else 0.68f)
+}
+
+/**
+ * Lightweight GPU-only frosted specular sheen (subtle glass top-light without any border lines).
+ */
+fun Modifier.frostedSheen(
+    cornerRadius: Dp = 18.dp,
+    intensity: Float = 0.75f
+): Modifier = this.drawWithCache {
+    val radiusPx = cornerRadius.toPx()
+    val cr = CornerRadius(radiusPx, radiusPx)
+    val topSheen = Brush.verticalGradient(
+        colorStops = arrayOf(
+            0.0f to Color.White.copy(alpha = (0.075f * intensity).coerceIn(0f, 0.14f)),
+            0.26f to Color.White.copy(alpha = (0.025f * intensity).coerceIn(0f, 0.06f)),
+            0.65f to Color.Transparent,
+            1.0f to Color.Transparent
+        ),
+        startY = 0f,
+        endY = size.height
+    )
+    onDrawWithContent {
+        drawContent()
+        drawRoundRect(
+            brush = topSheen,
+            cornerRadius = cr,
+            size = Size(size.width, size.height)
+        )
+    }
+}
 
 /**
  * Lightweight GPU-only piano-black specular sheen for Glossy Black surfaces.

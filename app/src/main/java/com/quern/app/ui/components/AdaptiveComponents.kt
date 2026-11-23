@@ -65,8 +65,10 @@ import androidx.compose.ui.node.currentValueOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -182,6 +184,13 @@ class ContentFocusMemory {
 }
 
 val LocalContentFocusMemory = staticCompositionLocalOf<ContentFocusMemory?> { null }
+
+/**
+ * Horizontal inset reserved for the floating TV navigation rail so full-bleed backgrounds
+ * (like the Home hero backdrop and blurred theme glows) extend edge-to-edge behind the rail
+ * while text and rows align cleanly to its right with zero visual separation.
+ */
+val LocalTvRailInset = staticCompositionLocalOf { 0.dp }
 
 private object RememberLastFocusedElement : ModifierNodeElement<RememberLastFocusedNode>() {
     override fun create() = RememberLastFocusedNode()
@@ -304,7 +313,8 @@ fun LumaHeroBanner(
     val context = LocalContext.current
     val palette = LocalQuernPalette.current
     val strings = LocalQuernStrings.current
-    val heroHeight = if (isTv) 248.dp else 252.dp
+    val railInset = if (isTv) LocalTvRailInset.current else 0.dp
+    val heroHeight = if (isTv) 254.dp else 252.dp
     val viewDetailsFocus = remember { FocusRequester() }
     val isAr = strings.watchNow == "شاهد الآن"
     val viewDetailsLabel = if (isAr) "عرض التفاصيل" else "View Details"
@@ -336,13 +346,13 @@ fun LumaHeroBanner(
         }
     }
 
-    // Full-bleed edge-to-edge hero: zero box borders, bottom edge dissolves 100% into palette.background
-    // so content rows below sit seamlessly with zero GPU overdraw behind LazyColumn.
+    // Full-bleed edge-to-edge hero: extends all the way behind the floating left rail and
+    // melts smoothly into the app's blurred backdrop using a single hardware-accelerated scrim
+    // (no CompositingStrategy.Offscreen FBO, keeping GPU RenderTarget memory minimal and scrolling silky).
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(heroHeight)
-            .background(palette.background)
     ) {
         if (imageModel != null) {
             AsyncImage(
@@ -354,25 +364,37 @@ fun LumaHeroBanner(
             )
         }
 
-        // Single-pass scrim dissolving seamlessly into palette.background on the left and bottom
+        // Single-pass cinema scrim: blends bottom & left edges smoothly into the blurred theme
+        // backdrop without allocating any offscreen RenderTarget.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .drawWithCache {
+                    val meltColor = if (palette.isGlossy) {
+                        palette.background
+                    } else {
+                        Color(
+                            red = (palette.background.red * 0.86f + palette.ambientGlow.red * 0.14f).coerceIn(0f, 1f),
+                            green = (palette.background.green * 0.86f + palette.ambientGlow.green * 0.14f).coerceIn(0f, 1f),
+                            blue = (palette.background.blue * 0.86f + palette.ambientGlow.blue * 0.14f).coerceIn(0f, 1f),
+                            alpha = 1f
+                        )
+                    }
                     val vertical = Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.0f to palette.background.copy(alpha = 0.36f),
+                            0.0f to palette.background.copy(alpha = 0.34f),
                             0.24f to Color.Transparent,
-                            0.58f to palette.background.copy(alpha = 0.48f),
-                            0.82f to palette.background.copy(alpha = 0.90f),
-                            1.0f to palette.background
+                            0.56f to meltColor.copy(alpha = 0.42f),
+                            0.82f to meltColor.copy(alpha = 0.88f),
+                            1.0f to meltColor
                         )
                     )
                     val horizontal = Brush.horizontalGradient(
                         colorStops = arrayOf(
-                            0.0f to palette.background.copy(alpha = 0.92f),
-                            0.34f to palette.background.copy(alpha = 0.52f),
-                            0.64f to palette.background.copy(alpha = 0.08f),
+                            0.0f to meltColor.copy(alpha = 0.86f),
+                            0.24f to palette.background.copy(alpha = 0.56f),
+                            0.54f to palette.background.copy(alpha = 0.12f),
+                            0.78f to Color.Transparent,
                             1.0f to Color.Transparent
                         )
                     )
@@ -397,7 +419,12 @@ fun LumaHeroBanner(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopStart)
-                .padding(horizontal = if (isTv) 14.dp else 12.dp, vertical = 7.dp)
+                .padding(
+                    start = if (isTv) railInset + 16.dp else 12.dp,
+                    end = if (isTv) 20.dp else 12.dp,
+                    top = if (isTv) 12.dp else 7.dp,
+                    bottom = 6.dp
+                )
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -498,8 +525,12 @@ fun LumaHeroBanner(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(horizontal = if (isTv) 20.dp else 14.dp, vertical = 14.dp)
-                .fillMaxWidth(if (isTv) 0.54f else 0.92f)
+                .padding(
+                    start = if (isTv) railInset + 16.dp else 14.dp,
+                    end = if (isTv) 20.dp else 14.dp,
+                    bottom = 16.dp
+                )
+                .fillMaxWidth(if (isTv) 0.58f else 0.92f)
         ) {
             Text(
                 text = item.title,
@@ -698,11 +729,17 @@ fun LumaMediaCarouselRow(
     modifier: Modifier = Modifier
 ) {
     val palette = LocalQuernPalette.current
+    val railInset = if (isTv) LocalTvRailInset.current else 0.dp
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = if (isTv) 14.dp else 12.dp, vertical = 2.dp),
+                .padding(
+                    start = if (isTv) railInset + 16.dp else 12.dp,
+                    end = if (isTv) 20.dp else 12.dp,
+                    top = 2.dp,
+                    bottom = 2.dp
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -735,7 +772,12 @@ fun LumaMediaCarouselRow(
 
         val uniqueItems = remember(row.items) { row.items.distinctBy { "${it.type}_${it.id}" } }
         LazyRow(
-            contentPadding = PaddingValues(horizontal = if (isTv) 16.dp else 12.dp, vertical = 10.dp),
+            contentPadding = PaddingValues(
+                start = if (isTv) railInset + 16.dp else 12.dp,
+                end = if (isTv) 20.dp else 12.dp,
+                top = 8.dp,
+                bottom = 10.dp
+            ),
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 8.dp)
         ) {
             itemsIndexed(

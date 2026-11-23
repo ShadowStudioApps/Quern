@@ -430,10 +430,10 @@ data class AppSettings(
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val crashReportingOptIn: Boolean = false,
     val activeProfileId: String = "main",
+    // A fresh install starts with one profile; users add more from the picker's "+" or Settings.
+    // Existing installs keep their saved profiles (SettingsStore only falls back to this when none are stored).
     val profiles: List<UserProfile> = listOf(
-        UserProfile("main", "Shadow", 0xFFD97736, pinCode = null),
-        UserProfile("family", "Family", 0xFF8C3B5E, pinCode = null),
-        UserProfile("kids", "Kids", 0xFF0E7C7B, pinCode = null)
+        UserProfile("main", "User", 0xFF345372, pinCode = null)
     )
 ) {
     val activeProfile: UserProfile

@@ -18,7 +18,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.runtime.rememberCoroutineScope
+import com.quern.app.ui.theme.LocalQuernStrings
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,6 +54,64 @@ import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaTextSecondary
 import com.quern.app.ui.theme.qString
 
+private const val MAX_PROFILES = 6
+
+/** "+" tile after the profiles: opens the create-profile dialog. Same size and focus style as a profile. */
+@Composable
+private fun AddProfileTile(onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val scale = animateFloatAsState(
+        targetValue = if (focused) 1.1f else 1f,
+        animationSpec = tween(150, easing = FastOutSlowInEasing),
+        label = "addProfileScale"
+    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = scale.value
+                scaleY = scale.value
+            }
+            .tvClickable(onFocusChangedState = { focused = it }, onClick = onClick)
+            .padding(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(CircleShape)
+                .border(
+                    width = if (focused) 4.dp else 0.dp,
+                    color = if (focused) Color.White else Color.Transparent,
+                    shape = CircleShape
+                )
+                .padding(if (focused) 4.dp else 0.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(132.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = if (focused) 0.22f else 0.10f))
+                    .border(2.dp, Color.White.copy(alpha = 0.35f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(56.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            text = LocalQuernStrings.current.addProfileLabel,
+            color = if (focused) Color.White else LumaTextSecondary,
+            fontSize = 18.sp,
+            fontWeight = if (focused) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1
+        )
+    }
+}
+
 /**
  * Full-screen "Who's watching?" picker shown at launch and from the rail's profile button.
  * Locked profiles go through the existing PIN keypad (with its attempt lockout) before switching.
@@ -60,14 +122,17 @@ fun ProfilePickerScreen(
     activeProfileId: String,
     isAr: Boolean,
     onProfileChosen: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onCreateProfile: (UserProfile) -> Unit
 ) {
     val palette = LocalQuernPalette.current
     val activeFocus = remember { FocusRequester() }
     var pinTarget by remember { mutableStateOf<UserProfile?>(null) }
+    var showCreate by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     // BACK keeps the current profile and closes the picker.
-    BackHandler(enabled = pinTarget == null) { onDismiss() }
+    BackHandler(enabled = pinTarget == null && !showCreate) { onDismiss() }
 
     LaunchedEffect(Unit) { runCatching { activeFocus.requestFocus() } }
 
@@ -159,8 +224,22 @@ fun ProfilePickerScreen(
                         }
                     }
                 }
+                if (profiles.size < MAX_PROFILES) {
+                    AddProfileTile(onClick = { showCreate = true })
+                }
             }
         }
+    }
+
+    if (showCreate) {
+        CreateProfileDialog(
+            isAr = isAr,
+            onDismiss = { showCreate = false },
+            onCreate = { name, colorHex, pin, avatarKey ->
+                showCreate = false
+                scope.launch { onCreateProfile(buildNewProfile(name, colorHex, pin, avatarKey)) }
+            }
+        )
     }
 
     pinTarget?.let { target ->

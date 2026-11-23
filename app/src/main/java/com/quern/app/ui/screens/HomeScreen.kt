@@ -80,6 +80,7 @@ import com.quern.app.domain.model.RowOrderPreset
 import com.quern.app.domain.model.SourceOrigin
 import com.quern.app.domain.model.WatchProgress
 import java.util.Calendar
+import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.LumaHeroBanner
 import com.quern.app.ui.components.LumaMediaCarouselRow
 import com.quern.app.ui.components.QuernCompanionSignInCard
@@ -90,6 +91,7 @@ import com.quern.app.ui.theme.LumaGlassBorder
 import com.quern.app.ui.theme.LumaGlassFillStrong
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.frostedSheen
 import com.quern.app.ui.theme.qString
 
 @Composable
@@ -226,10 +228,9 @@ fun HomeScreen(
         }
     }
 
+    // Transparent: the app-wide SoftGlowBackground shows through (QuernApp).
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(palette.background)
+        modifier = Modifier.fillMaxSize()
     ) {
         if (isLoading && rows.isEmpty()) {
             Column(
@@ -455,12 +456,18 @@ private fun ContinueWatchingRow(
     val context = LocalContext.current
     val palette = LocalQuernPalette.current
     val strings = LocalQuernStrings.current
+    val railInset = if (isTv) LocalTvRailInset.current else 0.dp
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = if (isTv) 14.dp else 12.dp, vertical = 2.dp),
+                .padding(
+                    start = if (isTv) railInset + 16.dp else 12.dp,
+                    end = if (isTv) 20.dp else 12.dp,
+                    top = 2.dp,
+                    bottom = 2.dp
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -479,8 +486,13 @@ private fun ContinueWatchingRow(
         }
 
         LazyRow(
-            contentPadding = PaddingValues(horizontal = if (isTv) 16.dp else 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(
+                start = if (isTv) railInset + 16.dp else 12.dp,
+                end = if (isTv) 20.dp else 12.dp,
+                top = 6.dp,
+                bottom = 6.dp
+            ),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             itemsIndexed(items, key = { _, it -> it.contentId }, contentType = { _, _ -> "cw_card" }) { index, progress ->
                 val isFirst = index == 0
@@ -514,7 +526,7 @@ private fun ContinueWatchingRow(
                                     }
                             } else Modifier
                         )
-                        .width(if (isTv) 142.dp else 130.dp)
+                        .width(if (isTv) 156.dp else 136.dp)
                         .zIndex(if (focused) 5f else 0f)
                         .graphicsLayer {
                             val s = focusScale.value
@@ -522,7 +534,8 @@ private fun ContinueWatchingRow(
                             scaleY = s
                         }
                         .clip(ContinueCardShape)
-                        .background(palette.surface)
+                        .background(palette.glassSurface)
+                        .frostedSheen(cornerRadius = 10.dp, intensity = 0.65f)
                         .then(
                             if (focused) Modifier.border(2.dp, palette.focusRing, ContinueCardShape)
                             else Modifier
@@ -535,8 +548,8 @@ private fun ContinueWatchingRow(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(if (isTv) 74.dp else 66.dp)
-                            .background(palette.surfaceElevated)
+                            .height(if (isTv) 78.dp else 68.dp)
+                            .background(palette.glassElevated)
                     ) {
                         if (imgReq != null) {
                             AsyncImage(
@@ -605,11 +618,12 @@ private fun ContinueWatchingRow(
                         }
                     }
 
-                    Column(modifier = Modifier.padding(8.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)) {
                         Text(
                             text = progress.title,
                             color = if (focused) palette.focusRing else LumaTextPrimary,
-                            fontSize = 11.5.sp,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -619,7 +633,8 @@ private fun ContinueWatchingRow(
                             Text(
                                 text = progress.episodeLabel,
                                 color = LumaTextSecondary,
-                                fontSize = 9.5.sp,
+                                fontSize = 9.sp,
+                                lineHeight = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -649,11 +664,11 @@ private fun EmptyHomeCard(
     var refreshFocused by remember { mutableStateOf(false) }
 
     Surface(
-        color = palette.surface,
+        color = palette.glassSurface,
         shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.5.dp, palette.border),
         modifier = Modifier
             .fillMaxWidth()
+            .frostedSheen(cornerRadius = 22.dp, intensity = 0.7f)
             .padding(horizontal = if (isTv) 32.dp else 16.dp, vertical = if (isTv) 28.dp else 18.dp)
     ) {
         Row(

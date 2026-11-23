@@ -24,7 +24,16 @@ for ($i = 1; $i -le 3; $i++) {
     Start-Sleep -Seconds 3
 }
 
-# 2. Wait for Home content to load
+# 2. With more than one profile the "Who's watching?" picker opens first, focused on the active
+#    profile: OK keeps that profile and lands on Home with focus on the rail. Then wait for Home.
+Start-Sleep -Seconds 3
+& $adb shell uiautomator dump /sdcard/quern_ui.xml | Out-Null
+$ui = & $adb shell cat /sdcard/quern_ui.xml
+& $adb shell rm /sdcard/quern_ui.xml | Out-Null
+if (($ui -join "") -match "watching|يشاهد") {
+    & $adb shell input keyevent 23
+    "Profile picker shown: kept the active profile"
+}
 Start-Sleep -Seconds 10
 
 # 3. Fixed start position: focus begins on rail Home -> RIGHT into content -> DOWN, DOWN = first card of row 2

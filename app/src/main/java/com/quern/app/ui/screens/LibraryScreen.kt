@@ -51,6 +51,7 @@ import com.quern.app.domain.model.DebridCloudItem
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.domain.model.MediaServerConfig
 import com.quern.app.domain.model.MediaServerType
+import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.LumaBadgeChip
 import com.quern.app.ui.components.LumaPosterCard
 import com.quern.app.ui.components.tvClickable
@@ -75,6 +76,7 @@ fun LibraryScreen(
     onPlayWebDavEntry: (MediaServerConfig, WebDavEntry) -> Unit
 ) {
     val palette = LocalQuernPalette.current
+    val railInset = if (isTv) LocalTvRailInset.current else 0.dp
     var selectedTab by remember { mutableIntStateOf(0) }
     val webDavServers = remember(servers) { servers.filter { it.type == MediaServerType.WEBDAV } }
     var activeWebDavServer by remember(webDavServers) { mutableStateOf(webDavServers.firstOrNull()) }
@@ -90,8 +92,12 @@ fun LibraryScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(palette.background)
-            .padding(horizontal = if (isTv) 28.dp else 16.dp, vertical = 18.dp)
+            .padding(
+                start = if (isTv) railInset + 22.dp else 16.dp,
+                end = if (isTv) 28.dp else 16.dp,
+                top = 18.dp,
+                bottom = 18.dp
+            )
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -125,7 +131,7 @@ fun LibraryScreen(
                     color = when {
                         focused -> palette.accent
                         selected -> Color.White
-                        else -> palette.surface
+                        else -> palette.glassSurface
                     },
                     shape = RoundedCornerShape(999.dp),
                     border = BorderStroke(
@@ -192,7 +198,7 @@ fun LibraryScreen(
                         items(cloudItems, key = { "${it.service}_${it.id}" }) { cloudItem ->
                             var focused by remember { mutableStateOf(false) }
                             Surface(
-                                color = if (focused) palette.surfaceElevated else palette.surface,
+                                color = if (focused) palette.glassElevated else palette.glassSurface,
                                 shape = RoundedCornerShape(14.dp),
                                 border = BorderStroke(if (focused) 2.5.dp else 1.dp, if (focused) palette.focusRing else palette.border),
                                 modifier = Modifier
@@ -243,7 +249,7 @@ fun LibraryScreen(
                                 var focused by remember { mutableStateOf(false) }
                                 val selected = srv.id == activeWebDavServer?.id
                                 Surface(
-                                    color = if (focused) palette.accent else if (selected) Color.White else palette.surface,
+                                    color = if (focused) palette.accent else if (selected) Color.White else palette.glassSurface,
                                     shape = RoundedCornerShape(999.dp),
                                     border = BorderStroke(if (focused) 2.dp else 1.dp, if (focused) palette.focusRing else palette.border),
                                     modifier = Modifier
@@ -275,7 +281,7 @@ fun LibraryScreen(
                                 val srv = activeWebDavServer ?: return@items
                                 var focused by remember { mutableStateOf(false) }
                                 Surface(
-                                    color = if (focused) palette.surfaceElevated else palette.surface,
+                                    color = if (focused) palette.glassElevated else palette.glassSurface,
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(if (focused) 2.5.dp else 1.dp, if (focused) palette.focusRing else palette.border),
                                     modifier = Modifier

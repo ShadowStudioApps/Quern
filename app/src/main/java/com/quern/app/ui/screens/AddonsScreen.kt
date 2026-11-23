@@ -75,6 +75,7 @@ import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaRed
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.frostedSheen
 import com.quern.app.ui.theme.glossySheen
 import com.quern.app.ui.theme.qString
 
@@ -197,7 +198,6 @@ fun AddonsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(palette.background)
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -275,11 +275,11 @@ fun AddonsScreen(
 private fun EmptyAddonsBanner() {
     val palette = LocalQuernPalette.current
     Surface(
-        color = palette.surface,
+        color = palette.glassSurface,
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .glossySheen(palette.isGlossy, cornerRadius = 18.dp)
+            .frostedSheen(cornerRadius = 18.dp, intensity = if (palette.isGlossy) 0.95f else 0.7f)
     ) {
         Row(
             modifier = Modifier.padding(22.dp),
@@ -314,11 +314,11 @@ private fun AddonUrlInstallerCard(
     var showUrlDialog by remember { mutableStateOf(false) }
 
     Surface(
-        color = palette.surface,
+        color = palette.glassSurface,
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .glossySheen(palette.isGlossy, cornerRadius = 18.dp)
+            .frostedSheen(cornerRadius = 18.dp, intensity = if (palette.isGlossy) 0.95f else 0.7f)
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -551,12 +551,12 @@ private fun InstalledAddonCard(
     val homeCatalogs = remember(addon) { addon.manifest.catalogs.filter { !it.requiresExtra } }
 
     Surface(
-        color = palette.surface,
+        color = palette.glassSurface,
         shape = RoundedCornerShape(18.dp),
         border = if (toggleFocused) BorderStroke(2.dp, palette.focusRing) else null,
         modifier = Modifier
             .fillMaxWidth()
-            .glossySheen(palette.isGlossy, cornerRadius = 18.dp)
+            .frostedSheen(cornerRadius = 18.dp, intensity = if (palette.isGlossy) 0.95f else 0.7f)
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
             Row(

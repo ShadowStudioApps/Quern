@@ -53,17 +53,19 @@ Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, server
 Run `.\tools\measure.ps1` from the repo root after installing the release build and compiling speed-profile. Don't change its path or timing; if it must change, take a new baseline first.
 
 1. Cold start ×3: `am force-stop`, then `am start -W -n com.quern.app/.MainActivity`, and record `TotalTime`.
-2. Waits 10 s for Home to load.
+2. If the "Who's watching?" picker is showing (checked with `uiautomator dump`), presses OK to keep the active profile. Then waits 10 s for Home to load.
 3. Start position: rail Home, then RIGHT, DOWN, DOWN, which lands on the first card of row 2.
 4. Each run: `dumpsys gfxinfo reset`, then 20× DPAD_RIGHT and 20× DPAD_LEFT with `sleep 0.12` in one on-device loop. The real interval is about 265 ms because `input keyevent` takes about 150 ms to spawn. It does 3 runs of about 10.6 s each.
 5. Discards runs with fewer than 100 frames.
 6. Prints cold starts, per-run frames, janky %, p50/p90/p95/p99, totals and TOTAL PSS.
 
-Latest baseline (after STEP 4, same path): janky about 37–38%, p50 61–65 ms, p90 73–81 ms, PSS about 78–82 MB. Earlier B1 (after SB): janky 56.4%, p50 73–77 ms, PSS 88.8 MB. Cold start varies by about 100 ms between sessions; treat it as noise unless the change is larger. The first run after launch often has a p99 spike.
+Latest baseline (after the glass theme + floating rail, Shadow profile, same path): janky about 6–6.4%, p50 40–48 ms, p90 48–61 ms, PSS about 83–88 MB. The commit before it measured 3%, p50 34–38 ms on the same content, so the translucent design costs a few ms per frame. Home content (synced addons) changes these numbers, so compare builds on the same day. Older: after STEP 4 janky about 37–38%, p50 61–65 ms. Earlier B1 (after SB): janky 56.4%, p50 73–77 ms, PSS 88.8 MB. Cold start varies by about 100 ms between sessions; treat it as noise unless the change is larger. The first run after launch often has a p99 spike.
 
 ## How key pieces work (don't regress)
 
 - **Rail focus** (`ui/QuernApp.kt`, `QuernTvNavigationRail`): one persistent `Row` per tab, never `if (expanded) Row else Box`. The `Column` uses `focusProperties { enter = selected tab's requester }` + `focusGroup()`.
+- **Floating rail:** the rail is drawn over full-bleed content (no solid column). Screens pad their TV content by `LocalTvRailInset`. The content focus group itself starts at `railInset` (`padding(start = railInset)` before `restoreLastContentFocus`) and a `layout` shifts the content back to x=0. If the group starts at x=0, RIGHT from the rail never enters the content. Don't set the rail's `focusProperties { right = … }` to a content `FocusRequester`: it fails on a fresh launch.
+- **Backgrounds:** `SoftGlowBackground` (quarter/eighth-size bitmap, drawn once) sits behind every page; pages and the Scaffold are transparent. Never animate it or add `Modifier.blur` (measured 79–99% janky).
 - **RIGHT back to the same item:** `RememberLastFocusedNode` inside `tvClickable` (`ui/components/AdaptiveComponents.kt`) records the last focused item under `LocalContentFocusMemory`. The content area uses `restoreLastContentFocus`. Don't use `focusRestorer` here: in UI 1.7.6 it focuses the LazyColumn container itself, so focus becomes invisible.
 - **Hero banner:** focus goes through a `MutableStateFlow` with a 220 ms `collectLatest` debounce. One `AsyncImage` with Coil `crossfade(260)` + `placeholderMemoryCacheKey`, one `drawWithCache` scrim. `isFirstRowAttached` is a lambda.
 - **Poster cards:** Coil `crossfade(false)`, one 120 ms tween read only in `graphicsLayer`/draw, border drawn with `drawOutline`, plain `Row` rating badge.

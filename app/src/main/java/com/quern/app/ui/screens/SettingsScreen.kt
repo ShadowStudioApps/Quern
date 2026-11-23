@@ -141,6 +141,7 @@ import com.quern.app.domain.model.UiModeOverride
 import com.quern.app.domain.model.UpdateChannel
 import com.quern.app.domain.model.UserProfile
 import com.quern.app.player.ExternalPlayerHelper
+import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.ProfileAvatarCircle
 import com.quern.app.ui.components.ProfileAvatarGrid
 import com.quern.app.ui.components.QrCodeCard
@@ -153,6 +154,7 @@ import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaRed
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
+import com.quern.app.ui.theme.frostedSheen
 import com.quern.app.ui.theme.glossySheen
 import com.quern.app.ui.theme.qString
 import kotlinx.coroutines.delay
@@ -283,6 +285,7 @@ fun SettingsScreen(
 ) {
     val strings = LocalQuernStrings.current
     val palette = LocalQuernPalette.current
+    val railInset = if (isTv) LocalTvRailInset.current else 0.dp
 
     var selectedGroup by remember(initialGroup) { mutableStateOf(initialGroup) }
     var activeSubPage by remember { mutableStateOf(SettingsSubPage.NONE) }
@@ -306,7 +309,16 @@ fun SettingsScreen(
             SettingsSubPage.TRACKING -> qString(R.string.accounts_tracking_title)
             else -> qString(R.string.services_debrid_title)
         }
-        Column(modifier = Modifier.fillMaxSize().background(palette.background).padding(horizontal = 16.dp, vertical = 14.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    start = railInset + 16.dp,
+                    end = 16.dp,
+                    top = 14.dp,
+                    bottom = 14.dp
+                )
+        ) {
             SubPageTopBar(
                 title = barTitle,
                 onBack = { activeSubPage = SettingsSubPage.NONE }
@@ -576,22 +588,13 @@ fun SettingsScreen(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.0f to palette.ambientGlow.copy(alpha = if (palette.isGlossy) 0.08f else 0.20f),
-                            0.45f to palette.background,
-                            1.0f to palette.background
-                        )
-                    )
-                )
+                .padding(start = railInset)
         ) {
             LazyColumn(
                 modifier = Modifier
-                    .width(216.dp)
+                    .width(214.dp)
                     .fillMaxHeight()
-                    .background(Color.White.copy(alpha = 0.025f))
-                    .padding(horizontal = 14.dp, vertical = 20.dp),
+                    .padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 item(key = "title") {
@@ -607,13 +610,14 @@ fun SettingsScreen(
                 item(key = "global_search_btn") {
                     var searchFocused by remember { mutableStateOf(false) }
                     Surface(
-                        color = if (searchFocused) palette.accent else palette.surfaceElevated.copy(alpha = 0.85f),
+                        color = if (searchFocused) palette.accent else palette.glassSurface,
                         shape = RoundedCornerShape(14.dp),
                         border = if (searchFocused) BorderStroke(2.dp, palette.focusRing) else null,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
                             .clip(RoundedCornerShape(14.dp))
+                            .frostedSheen(cornerRadius = 14.dp, intensity = 0.65f)
                             .tvClickable(
                                 onFocusChangedState = { searchFocused = it },
                                 onClick = { showSearchDialog = true }
@@ -678,7 +682,6 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(palette.background)
                 .padding(top = 14.dp)
         ) {
             if (activeSubPage == SettingsSubPage.NONE) {
@@ -1221,13 +1224,12 @@ private fun CollapsibleAdvancedCard(
     var focused by remember { mutableStateOf(false) }
 
     Surface(
-        color = palette.surface,
+        color = palette.glassSurface,
         shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(
-            width = if (focused) 2.dp else 1.5.dp,
-            color = if (focused) palette.focusRing else palette.border
-        ),
-        modifier = Modifier.fillMaxWidth()
+        border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
+        modifier = Modifier
+            .fillMaxWidth()
+            .frostedSheen(cornerRadius = 18.dp, intensity = 0.75f)
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
             Row(
@@ -2407,11 +2409,11 @@ private fun SettingsCategoryOverviewPane(
         Spacer(Modifier.height(16.dp))
 
         Surface(
-            color = palette.surface,
+            color = palette.glassSurface,
             shape = RoundedCornerShape(20.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .glossySheen(palette.isGlossy, cornerRadius = 20.dp)
+                .frostedSheen(cornerRadius = 20.dp, intensity = if (palette.isGlossy) 0.95f else 0.7f)
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(6.dp),
@@ -2836,11 +2838,11 @@ internal fun SettingSectionCard(
 ) {
     val palette = LocalQuernPalette.current
     Surface(
-        color = palette.surface,
+        color = palette.glassSurface,
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .glossySheen(palette.isGlossy, cornerRadius = 18.dp)
+            .frostedSheen(cornerRadius = 18.dp, intensity = if (palette.isGlossy) 0.95f else 0.7f)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(title, color = LumaTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -2861,7 +2863,7 @@ internal fun SelectablePillOption(
     val bg = when {
         focused -> palette.accent
         selected -> palette.accent.copy(alpha = 0.82f)
-        else -> palette.surfaceElevated
+        else -> palette.glassElevated
     }
     val fg = if (focused || selected) palette.onAccent else LumaTextPrimary
 
@@ -2999,11 +3001,11 @@ private fun ProfilesManagerSection(
     }
 
     Surface(
-        color = palette.surface,
+        color = palette.glassSurface,
         shape = RoundedCornerShape(22.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .glossySheen(palette.isGlossy, cornerRadius = 22.dp)
+            .frostedSheen(cornerRadius = 22.dp, intensity = if (palette.isGlossy) 0.95f else 0.7f)
     ) {
         Column(
             modifier = Modifier
@@ -3226,14 +3228,7 @@ private fun ProfilesManagerSection(
             onCreate = { name, colorHex, pin, avatarKey ->
                 showCreateDialog = false
                 profileScope.launch {
-                    val hashedPin = pin.takeIf { it.length == 4 }?.let { PinHasher.hashPinAsync(it) }
-                    val newProfile = UserProfile(
-                        id = "prof_${UUID.randomUUID().toString().take(8)}",
-                        name = name.trim(),
-                        avatarColorHex = colorHex,
-                        pinCode = hashedPin,
-                        avatarKey = avatarKey
-                    )
+                    val newProfile = buildNewProfile(name, colorHex, pin, avatarKey)
                     onUpdateSettings { st ->
                         st.copy(
                             profiles = st.profiles + newProfile,
@@ -3584,8 +3579,20 @@ private fun MiniActionChip(
     }
 }
 
+/** New profile from the create dialog; a 4-digit PIN is hashed off the main thread. */
+internal suspend fun buildNewProfile(name: String, colorHex: Long, pin: String, avatarKey: String?): UserProfile {
+    val hashedPin = pin.takeIf { it.length == 4 }?.let { PinHasher.hashPinAsync(it) }
+    return UserProfile(
+        id = "prof_${UUID.randomUUID().toString().take(8)}",
+        name = name.trim(),
+        avatarColorHex = colorHex,
+        pinCode = hashedPin,
+        avatarKey = avatarKey
+    )
+}
+
 @Composable
-private fun CreateProfileDialog(
+internal fun CreateProfileDialog(
     isAr: Boolean,
     onDismiss: () -> Unit,
     onCreate: (String, Long, String, String?) -> Unit

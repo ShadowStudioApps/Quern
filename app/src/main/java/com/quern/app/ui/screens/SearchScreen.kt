@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.quern.app.R
 import com.quern.app.domain.model.MediaItem
+import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.LumaPosterCard
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaTextPrimary
@@ -54,11 +55,16 @@ fun SearchScreen(
     onItemClick: (MediaItem) -> Unit
 ) {
     val palette = LocalQuernPalette.current
+    val railInset = if (isTv) LocalTvRailInset.current else 0.dp
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(palette.background)
-            .padding(horizontal = if (isTv) 28.dp else 16.dp, vertical = 18.dp)
+            .padding(
+                start = if (isTv) railInset + 22.dp else 16.dp,
+                end = if (isTv) 28.dp else 16.dp,
+                top = 18.dp,
+                bottom = 18.dp
+            )
     ) {
         Text(
             text = qString(R.string.search_title),
@@ -88,10 +94,10 @@ fun SearchScreen(
                 keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = palette.surfaceElevated,
-                    unfocusedContainerColor = palette.surface,
+                    focusedContainerColor = palette.glassElevated,
+                    unfocusedContainerColor = palette.glassSurface,
                     focusedBorderColor = palette.focusRing,
-                    unfocusedBorderColor = palette.border,
+                    unfocusedBorderColor = Color.Transparent,
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White
                 ),

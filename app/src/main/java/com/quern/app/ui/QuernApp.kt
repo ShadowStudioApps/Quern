@@ -58,6 +58,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
+import com.quern.app.ui.components.SoftGlowBackground
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.focus.focusProperties
@@ -81,6 +84,7 @@ import com.quern.app.domain.model.NavigationStyle
 import com.quern.app.player.QuernPlayerScreen
 import com.quern.app.ui.components.ContentFocusMemory
 import com.quern.app.ui.components.LocalContentFocusMemory
+import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.QuernBrandMark
 import com.quern.app.ui.components.rememberIsTvMode
 import com.quern.app.ui.components.tvClickable
@@ -184,7 +188,10 @@ fun QuernApp(
                     showingDetail = false
                     profilePickerOpen = false
                 },
-                onDismiss = { profilePickerOpen = false }
+                onDismiss = { profilePickerOpen = false },
+                onCreateProfile = { profile ->
+                    viewModel.updateSettings { it.copy(profiles = it.profiles + profile) }
+                }
             )
             return@QuernTheme
         }
@@ -416,10 +423,24 @@ fun QuernApp(
             }
         }
 
+        // One soft, blurred colour background behind every page and theme; pages are transparent on top.
+        val glowColors = remember(palette.isGlossy, palette.accent, palette.ambientGlow, palette.surfaceElevated) {
+            if (palette.isGlossy) {
+                listOf(Color(0xFF1F2B3D), Color(0xFF2B384C), Color(0xFF141C28), Color(0xFF222D3F))
+            } else {
+                listOf(palette.ambientGlow, palette.accent, palette.surfaceElevated, palette.ambientGlow)
+            }
+        }
+        SoftGlowBackground(
+            baseColor = palette.background,
+            glowColors = glowColors,
+            intensity = if (palette.isGlossy) 0.78f else 0.86f
+        )
+
         if (isTv) {
             val contentFocusMemory = remember { ContentFocusMemory() }
             Scaffold(
-                containerColor = palette.background,
+                containerColor = Color.Transparent,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 snackbarHost = { SnackbarHost(snackbarHostState) }
             ) { innerPadding ->
@@ -437,13 +458,29 @@ fun QuernApp(
                                 )
                             }
                             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                content()
+                                CompositionLocalProvider(LocalTvRailInset provides 0.dp) {
+                                    content()
+                                }
                             }
                         }
                     }
 
-                    settings.navigationStyle == NavigationStyle.SIDEBAR_COLLAPSED -> {
-                        // Overlay Auto-Hide Sidebar: content NEVER resizes or shakes when rail expands!
+                    else -> {
+                        // Unified Integrated Sidebar (both Auto-Hide and Always-Expanded):
+                        // Content fills 100% edge-to-edge so hero backdrops and blurred glows flow seamlessly
+                        // right behind the floating navigation rail — zero separate panel, zero hard vertical cut.
+                        val autoHide = settings.navigationStyle == NavigationStyle.SIDEBAR_COLLAPSED
+                        var collapsedRailFocused by remember { mutableStateOf(false) }
+                        val scrimAlphaState = animateFloatAsState(
+                            targetValue = if (autoHide && collapsedRailFocused && !showingDetail) 1f else 0f,
+                            animationSpec = tween(180, easing = FastOutSlowInEasing),
+                            label = "railBackdropScrim"
+                        )
+                        val railInset = when {
+                            showingDetail -> 0.dp
+                            autoHide -> 66.dp
+                            else -> 152.dp
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -452,49 +489,67 @@ fun QuernApp(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(start = if (!showingDetail) 64.dp else 0.dp)
+                                    // Focus: RIGHT from the rail is a normal geometric search, and Compose only
+                                    // considers this group if its bounds lie to the right of the rail item. So the
+                                    // group starts at railInset (not x=0); entering it then restores the last item.
+                                    // Don't point the rail's `right` at a FocusRequester instead: on a fresh launch
+                                    // nothing is remembered, the request fails and focus stays stuck in the rail.
+                                    .padding(start = railInset)
                                     .restoreLastContentFocus(contentFocusMemory)
+                                    // Drawing: shift the content back so it still fills the screen from x=0 and
+                                    // the hero and backgrounds run behind the rail (screens pad by LocalTvRailInset).
+                                    .layout { measurable, constraints ->
+                                        val insetPx = railInset.roundToPx()
+                                        val fullWidth = constraints.maxWidth + insetPx
+                                        val placeable = measurable.measure(
+                                            constraints.copy(minWidth = fullWidth, maxWidth = fullWidth)
+                                        )
+                                        layout(constraints.maxWidth, placeable.height) {
+                                            placeable.place(-insetPx, 0)
+                                        }
+                                    }
                             ) {
-                                CompositionLocalProvider(LocalContentFocusMemory provides contentFocusMemory) {
+                                CompositionLocalProvider(
+                                    LocalContentFocusMemory provides contentFocusMemory,
+                                    LocalTvRailInset provides railInset
+                                ) {
                                     content()
                                 }
                             }
-                            if (!showingDetail) {
-                                QuernTvNavigationRail(
-                                    currentTab = currentTab,
-                                    autoHideCollapsed = true,
-                                    activeProfile = settings.activeProfile,
-                                    onOpenProfiles = { profilePickerOpen = true },
-                                    onSelectTab = { currentTab = it }
-                                )
-                            }
-                        }
-                    }
 
-                    else -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(innerPadding)
-                        ) {
+                            // Smooth cinema left-fade scrim when auto-hide rail expands so rail labels never clash with page text
+                            if (autoHide && !showingDetail) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .drawBehind {
+                                            val a = scrimAlphaState.value
+                                            if (a > 0.01f) {
+                                                drawRect(
+                                                    Brush.horizontalGradient(
+                                                        colorStops = arrayOf(
+                                                            0.0f to palette.background.copy(alpha = 0.95f * a),
+                                                            0.22f to palette.background.copy(alpha = 0.88f * a),
+                                                            0.42f to palette.background.copy(alpha = 0.36f * a),
+                                                            0.66f to Color.Transparent,
+                                                            1.0f to Color.Transparent
+                                                        )
+                                                    )
+                                                )
+                                            }
+                                        }
+                                )
+                            }
+
                             if (!showingDetail) {
                                 QuernTvNavigationRail(
                                     currentTab = currentTab,
-                                    autoHideCollapsed = false,
+                                    autoHideCollapsed = autoHide,
                                     activeProfile = settings.activeProfile,
                                     onOpenProfiles = { profilePickerOpen = true },
+                                    onRailFocusChanged = { collapsedRailFocused = it },
                                     onSelectTab = { currentTab = it }
                                 )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .restoreLastContentFocus(contentFocusMemory)
-                            ) {
-                                CompositionLocalProvider(LocalContentFocusMemory provides contentFocusMemory) {
-                                    content()
-                                }
                             }
                         }
                     }
@@ -502,7 +557,7 @@ fun QuernApp(
             }
         } else {
             Scaffold(
-                containerColor = palette.background,
+                containerColor = Color.Transparent,
                 snackbarHost = { SnackbarHost(snackbarHostState) }
             ) { innerPadding ->
                 Box(
@@ -552,7 +607,6 @@ fun QuernTvTopNavBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(palette.background)
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -570,7 +624,7 @@ fun QuernTvTopNavBar(
         }
 
         Surface(
-            color = palette.surface,
+            color = palette.glassSurface,
             shape = RoundedCornerShape(999.dp),
             modifier = Modifier.glossySheen(palette.isGlossy, cornerRadius = 999.dp, intensity = 0.9f)
         ) {
@@ -645,7 +699,7 @@ fun QuernFloatingPhoneDock(
 ) {
     val palette = LocalQuernPalette.current
     Surface(
-        color = palette.surface.copy(alpha = 0.94f),
+        color = palette.glassSurface.copy(alpha = 0.88f),
         shape = RoundedCornerShape(999.dp),
         shadowElevation = 16.dp,
         modifier = modifier
@@ -718,6 +772,7 @@ fun QuernTvNavigationRail(
     autoHideCollapsed: Boolean = false,
     activeProfile: UserProfile? = null,
     onOpenProfiles: (() -> Unit)? = null,
+    onRailFocusChanged: ((Boolean) -> Unit)? = null,
     onSelectTab: (QuernTab) -> Unit
 ) {
     val palette = LocalQuernPalette.current
@@ -731,7 +786,7 @@ fun QuernTvNavigationRail(
     // Keep animated values as State<T> and read them in layout/graphicsLayer/drawBehind phases only
     // so expanding/collapsing or focusing rail items triggers ZERO recompositions per frame.
     val railWidthState = animateDpAsState(
-        targetValue = if (expanded) 142.dp else 64.dp,
+        targetValue = if (expanded) 148.dp else 64.dp,
         animationSpec = tween(180, easing = FastOutSlowInEasing),
         label = "railWidth"
     )
@@ -758,16 +813,38 @@ fun QuernTvNavigationRail(
             }
             .fillMaxHeight()
             .clipToBounds()
-            .background(palette.background)
-            .onFocusChanged { railHasFocus = it.hasFocus }
-            .padding(vertical = 18.dp, horizontal = 10.dp)
+            // Whisper-soft left edge vignette only (zero solid column or seam); expanded readability
+            // in auto-hide mode is handled by the wide smooth cinema scrim behind the rail.
+            .drawWithCache {
+                val veil = Brush.horizontalGradient(
+                    colorStops = if (autoHideCollapsed) {
+                        arrayOf(
+                            0.0f to palette.background.copy(alpha = 0.34f),
+                            0.65f to palette.background.copy(alpha = 0.14f),
+                            1.0f to Color.Transparent
+                        )
+                    } else {
+                        arrayOf(
+                            0.0f to palette.background.copy(alpha = 0.56f),
+                            0.65f to palette.background.copy(alpha = 0.24f),
+                            1.0f to Color.Transparent
+                        )
+                    }
+                )
+                onDrawBehind { drawRect(veil) }
+            }
+            .onFocusChanged {
+                railHasFocus = it.hasFocus
+                onRailFocusChanged?.invoke(it.hasFocus)
+            }
+            .padding(top = 13.dp, bottom = 16.dp, start = 10.dp, end = 10.dp)
     ) {
-        // Always-visible brand mark aligned with the tab icons below; app name fades in on expand
+        // Always-visible brand mark aligned horizontally with the Hero top bar pills & tab icons below
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(start = 11.dp, top = 4.dp)
+                .padding(start = 11.dp, top = 0.dp)
         ) {
             QuernBrandMark(size = 22.dp)
             Spacer(Modifier.width(9.dp))
