@@ -49,22 +49,36 @@ A native media client for **Android TV / Google TV** and **Android phones**, bui
 
 ---
 
-## Requirements
+## Install
 
-- Android 7.0 (API 24) or newer. Tested on a Google TV Streamer (Android 14).
-- Builds need JDK 17 and the Android SDK (compileSdk 35).
+1. Download the latest `Quern-vX.Y.Z-release.apk` from the [Releases](https://github.com/ShadowStudioApps/Quern/releases) page.
+2. **Phone:** open the APK and allow installing from your browser or file manager.
+3. **Android TV / Google TV:** use a sideloading app such as Downloader with the APK link, or install over adb: `adb install -r Quern-vX.Y.Z-release.apk`.
 
-## Build
+Requires Android 7.0 (API 24) or newer. Tested on a Google TV Streamer (Android 14).
+
+### Signing
+
+Official APKs on the Releases page are signed by **Shadow Studio**:
+
+```
+CN=SHADOW STUDIO, O=SHADOW STUDIO
+SHA-256: efa7e9bcfd7171fbdd0f8a002b3f48d92936d6c477b792d0831f8f69f0f03b33
+```
+
+Check a download with `apksigner verify --print-certs <file>.apk`. Updates from the Releases page install over each other. An APK from any other source (including the CI test builds) has a different signature: Android will refuse to update over it, and uninstalling clears the app's data.
+
+## Build from source
+
+Needs JDK 17 and the Android SDK (compileSdk 35).
 
 ```bash
 ./gradlew assembleRelease
 ```
 
-The APK is written to `app/build/outputs/apk/release/app-release.apk`.
+The APK is written to `app/build/outputs/apk/release/app-release.apk`. Without your own `keystore.properties` it's signed with your local debug key.
 
-GitHub Actions builds the same APK on every push to `main` and uploads it as a workflow artifact.
-
-> **Signing:** release builds are currently signed with a debug key, so a build from one machine can't be installed over a build from another (including CI). Uninstall first if you switch sources, which clears the app's data. A proper release key will come with the first public release.
+GitHub Actions builds every push to `main` as a short-lived, debug-signed **test build**. Use the Releases page for real installs.
 
 ## Cloud sync (optional)
 

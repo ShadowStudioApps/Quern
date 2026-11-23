@@ -26,8 +26,11 @@ jobs:
       - name: Build R8-Optimized Universal APK (Phone + Android TV)
         run: gradle assembleRelease --stacktrace
 
-      - name: Upload Universal APK
+      # CI has no release keystore: this APK is debug-signed and only for testing.
+      # Official, Shadow Studio-signed APKs are published on the Releases page.
+      - name: Upload test APK (debug-signed)
         uses: actions/upload-artifact@v4
         with:
-          name: Quern-Universal-Phone-and-TV-APK
+          name: Quern-TEST-BUILD-debug-signed
           path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 7

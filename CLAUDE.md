@@ -1,54 +1,84 @@
 # Quern TV
 
-Native Android phone + Android TV client compatible with Stremio addons (protocol v3), Debrid services, and personal media servers. Package: `com.quern.app`.
+Native Android phone + Android TV client compatible with Stremio addons (protocol v3), Debrid services and personal media servers. Package `com.quern.app`, version 1.7.0 (code 15).
+
+## Repository
+
+- GitHub: `ShadowStudioApps/Quern`, **public**, MIT license. `main` is the only branch on the remote.
+- CI: `.github/workflows/build-apk.yml` runs `gradle assembleRelease` on every push to `main` and uploads a debug-signed **test build** artifact (kept 7 days).
+- Releases: official APKs go to GitHub Releases as `Quern-vX.Y.Z-release.apk`, built locally and signed with the Shadow Studio keystore. Publish one only when the user asks. Bump `versionCode`/`versionName` for each new release.
+- `.gitignore` excludes `local.properties`, `keystore.properties`, `*.jks`/`*.keystore`, `apk/`, `build/` and `*.ps1`. `tools/measure.ps1` is force-added on purpose.
 
 ## Stack
 
 - Kotlin 2.1.0, AGP 8.7.3, KSP 2.1.0-1.0.29, JDK 17
-- Jetpack Compose BOM 2024.12.01 + Material3 + TV Material 1.0.0, Navigation Compose 2.8.5
-- Media3 (ExoPlayer, HLS, DASH, OkHttp datasource) 1.5.1
+- Jetpack Compose BOM 2024.12.01 (UI 1.7.6) + Material3 + TV Material 1.0.0, Navigation Compose 2.8.5
+- Media3 1.5.1 (ExoPlayer, HLS, DASH, OkHttp datasource)
 - Coil 2.7.0, Room 2.6.1, OkHttp 4.12.0, kotlinx.serialization 1.7.3, Coroutines 1.9.0, ZXing 3.5.3
 - minSdk 24, targetSdk/compileSdk 35
 
-Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, servers, metadata, sync, local), `domain/model/`, `player/`, `ui/` (`QuernApp.kt`, `screens/`, `components/`, `theme/`), and `di/AppContainer.kt`. `sync/supabase_schema.sql` is the optional schema users run in their own Supabase project.
+Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, servers, metadata, sync, local, companion), `domain/model/`, `player/`, `ui/` (`QuernApp.kt`, `QuernViewModel.kt`, `screens/`, `components/`, `theme/`) and `di/AppContainer.kt`. `sync/supabase_schema.sql` is the optional schema users run in their own Supabase project.
 
 ## Hard rules
 
-- The app is client-only. Never bundle, hardcode, or suggest any addon, source, or content.
-- Never read, edit, or print `local.properties`, keystores, signing configs' secrets, or API keys.
-- After every change, verify it with `./gradlew assembleDebug`. A step is not done until the build passes.
+- The app is client-only. Never bundle, hardcode or suggest any addon, source or content, not even by name in code comments.
+- The repo is public. Before every push, scan the diff for secrets, private IPs and personal data. Placeholders such as `192.168.1.10` or `you@example.com` are fine.
+- Never read, edit or print `local.properties`, `keystore.properties`, keystores or API keys.
+- After every change, verify it with `./gradlew assembleDebug` (and `assembleRelease` before installing on the TV). A step isn't done until the build passes.
 - Ask before deleting files or adding or upgrading dependencies.
-- Don't commit or push unless the user asks.
+- Don't commit or push unless the user asks. Work on a branch, and merge into `main` only when asked.
 - Use free tools only.
-- Keep the repo private. Don't publish it or change its visibility until the user confirms the app works on the TV.
 - Work one step at a time and stop after each step for review.
 
-## Signing and CI
+## Signing
 
-- Local release builds are signed with the owner's release keystore through the git-ignored `keystore.properties` at the repo root (`app/build.gradle.kts`). When that file is missing, release falls back to the debug key.
-- Never read, print, or commit `keystore.properties` or the `.jks`. Check signing only with `apksigner verify --print-certs`.
-- CI (`.github/workflows/build-apk.yml`, `gradle assembleRelease`) has no keystore, so it signs with its own debug key. Never install a CI APK over a locally built one: the signatures don't match.
-- The user creates and holds the release keystore. Claude never creates one.
+- Local release builds are signed with the owner's keystore through `keystore.properties` at the repo root (read in `app/build.gradle.kts`). Without that file, release falls back to the debug key.
+- Release certificate: `CN=SHADOW STUDIO, O=SHADOW STUDIO`, SHA-256 `efa7e9bcfd7171fbdd0f8a002b3f48d92936d6c477b792d0831f8f69f0f03b33`. Check signing only with `apksigner verify --print-certs`. The certificate must never contain personal names or locations.
+- CI has no keystore and signs with its own debug key. Never install a CI APK on the TV.
+- The user creates and holds the keystore. Claude never creates one, never asks for its password and never handles it.
 
-## TV testing (Google TV Streamer, Android 14, over adb)
+## TV testing (Google TV Streamer "kirkwood", Android 14, adb over Wi-Fi)
 
-- Install with `adb install -r` only. Never `adb uninstall` or `pm clear`: user data lives on the device.
+- Install with `adb install -r` only. Never `adb uninstall` or `pm clear` without the user's explicit approval for that one time: user data lives on the device.
+- The TV has two profiles (user 0 and user 10). A package removed from one profile is still installed in the other.
+- If the adb server restarts, reconnect with `adb connect`. The TV may show an "Allow USB debugging?" prompt that the user must approve.
 - After every release install, run `adb shell cmd package compile -f -m speed-profile com.quern.app`.
 - Don't change any TV system settings.
-- For UI and focus checks, drive the app with `adb shell input keyevent ...` and capture with `adb exec-out screencap -p`.
+- Drive the UI with `adb shell input keyevent …` and capture with `adb exec-out screencap -p`. Keycodes: 19 up, 20 down, 21 left, 22 right, 23 OK, 4 back.
 
 ## Performance measurement protocol (identical every time)
 
-Run `.\tools\measure.ps1` from the repo root after installing the release build and compiling speed-profile. Don't change the script's path or timing between measurements; if it must change, take a new baseline first. The script does exactly this:
+Run `.\tools\measure.ps1` from the repo root after installing the release build and compiling speed-profile. Don't change its path or timing; if it must change, take a new baseline first.
 
 1. Cold start ×3: `am force-stop`, then `am start -W -n com.quern.app/.MainActivity`, and record `TotalTime`.
-2. Waits 10 s for Home content to load.
-3. Fixed start position: focus starts on rail Home, then RIGHT, DOWN, DOWN, which lands on the first card of row 2.
-4. Each run: `dumpsys gfxinfo com.quern.app reset`, then 20× DPAD_RIGHT followed by 20× DPAD_LEFT (40 keys, ending where it started), with `sleep 0.12` between keys in one on-device shell loop. Because `input keyevent` takes about 150 ms to spawn, the real interval is about 265 ms, so a run takes about 10.6 s. It does 3 runs.
+2. Waits 10 s for Home to load.
+3. Start position: rail Home, then RIGHT, DOWN, DOWN, which lands on the first card of row 2.
+4. Each run: `dumpsys gfxinfo reset`, then 20× DPAD_RIGHT and 20× DPAD_LEFT with `sleep 0.12` in one on-device loop. The real interval is about 265 ms because `input keyevent` takes about 150 ms to spawn. It does 3 runs of about 10.6 s each.
 5. Discards runs with fewer than 100 frames.
-6. Prints cold starts, per-run frames, janky %, p50/p90/p95/p99, the totals, and TOTAL PSS (`dumpsys meminfo`).
+6. Prints cold starts, per-run frames, janky %, p50/p90/p95/p99, totals and TOTAL PSS.
 
-Report the raw table and compare against the latest baseline. Baselines taken with a different path or timing aren't comparable.
+Latest baseline (after STEP 4, same path): janky about 37–38%, p50 61–65 ms, p90 73–81 ms, PSS about 78–82 MB. Earlier B1 (after SB): janky 56.4%, p50 73–77 ms, PSS 88.8 MB. Cold start varies by about 100 ms between sessions; treat it as noise unless the change is larger. The first run after launch often has a p99 spike.
+
+## How key pieces work (don't regress)
+
+- **Rail focus** (`ui/QuernApp.kt`, `QuernTvNavigationRail`): one persistent `Row` per tab, never `if (expanded) Row else Box`. The `Column` uses `focusProperties { enter = selected tab's requester }` + `focusGroup()`.
+- **RIGHT back to the same item:** `RememberLastFocusedNode` inside `tvClickable` (`ui/components/AdaptiveComponents.kt`) records the last focused item under `LocalContentFocusMemory`. The content area uses `restoreLastContentFocus`. Don't use `focusRestorer` here: in UI 1.7.6 it focuses the LazyColumn container itself, so focus becomes invisible.
+- **Hero banner:** focus goes through a `MutableStateFlow` with a 220 ms `collectLatest` debounce. One `AsyncImage` with Coil `crossfade(260)` + `placeholderMemoryCacheKey`, one `drawWithCache` scrim. `isFirstRowAttached` is a lambda.
+- **Poster cards:** Coil `crossfade(false)`, one 120 ms tween read only in `graphicsLayer`/draw, border drawn with `drawOutline`, plain `Row` rating badge.
+- **Rejected:** `allowRgb565` for posters. It needs `allowHardware(false)`, which measured +24 MB PSS and no jank gain.
+- **Dolby Vision** (`player/DolbyVisionFallback.kt`, `QuernRenderersFactory`): when no DV decoder supports profile 7 (`dvhe.07`), the track is presented as HEVC and the base layer plays as HDR10. Verified on the TV with `c2.mtk.hevc.decoder`. The TV's DV decoders cover profiles 4, 5, 8, 9 and 10 only.
+- **Data safety:** Room no longer uses `fallbackToDestructiveMigration`, so any schema change needs a version bump plus a migration. `SecureVault` stores only AES-GCM (`ENC:`); legacy `RAW:` entries migrate on read.
+- **Sync code** (`QUERN1:`): holds only enabled addon URLs and a few settings. It doesn't include Debrid keys, servers, profiles or watch history.
+
+## Open items
+
+- Full JSON backup export (history, favorites, servers, profiles, optional keys) so users can move devices without losing data.
+- French, Spanish, German, Turkish, Russian and Portuguese lack the new settings strings (only `values` and `values-ar` exist).
+- Cosmetic: the "QUERN" logo wraps one letter per line while the rail animates open (use `maxLines = 1, softWrap = false`).
+- DOWN from "View Details" skips Continue Watching (the first-row requester is bound to the first catalog row).
+- After BACK from a tab, rail focus can stay on that tab while Home is shown.
+- All theme presets now have a transparent `borderTint` (design choice from the settings redesign).
+- v1.7.0 is the first public release. The next release needs a `versionCode` bump (currently 15).
 
 ## Step reports
 
@@ -60,4 +90,4 @@ End every step with a short report that covers:
 
 ## Communication
 
-Reply to the user in Arabic, using masculine address, directly and concisely. Write code, comments, commit messages, and prompts in English.
+Reply to the user in Arabic, using masculine address, directly and concisely. Write code, comments, commit messages and prompts in English.
