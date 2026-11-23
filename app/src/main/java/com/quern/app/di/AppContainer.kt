@@ -19,6 +19,7 @@ import com.quern.app.data.servers.MediaServerManager
 import com.quern.app.data.servers.PlexClient
 import com.quern.app.data.servers.WebDavClient
 import com.quern.app.data.sync.CloudSyncManager
+import com.quern.app.data.sync.QuernAccount
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -85,6 +86,13 @@ class AppContainer(context: Context) {
         traktClient = traktClient,
         historyDao = database.watchHistoryDao(),
         favoriteDao = database.favoriteDao()
+    )
+
+    /** Quern account on Shadow Studio's server (sign up / sign in / session / encryption key). */
+    val quernAccount = QuernAccount(
+        httpClient = httpClient,
+        json = json,
+        vault = vault
     )
 
     val cloudSyncManager = CloudSyncManager(
