@@ -1,39 +1,83 @@
-# Quern — Open-Source Android TV & Phone Media Aggregator
+# Quern
 
-**Quern** is a high-performance, open-source native Android & Android TV media client built with **Kotlin, Jetpack Compose, and Media3 ExoPlayer**. One universal ~3.3 MB R8-optimized APK runs natively on both **Android Phones** and **Android TV / Google TV** with True AMOLED `#000000` support.
+A native media client for **Android TV / Google TV** and **Android phones**, built with Kotlin, Jetpack Compose and Media3 ExoPlayer. One APK runs on both, with a D-Pad-first TV interface and a touch interface for phones.
 
-> **Disclaimer:** Quern is a clean, empty media interface and player. It does not host, provide, or distribute any media content. Users connect their own addons, personal servers, and authorized services.
-
----
-
-## Key Features
-
-- **Universal Phone + Android TV / Google TV UI:**
-  - Full D-Pad remote navigation with visible focus halos & `BackHandler`.
-  - **3 Navigation Styles:** Left Sidebar, Auto-Hide Slim Sidebar, or **Top Bar (Desktop / TV)** full-width cinema mode.
-  - **True AMOLED Pure Black (`#000000`)** + 6 distinct themes including **Light Dark Blue (`#345372`)** and **Light Gray (`#D3D3D3`)**.
-  - **Dynamic External App Launcher Icons** (Slate Blue, Light Gray, Pure AMOLED White, Ocean Blue) for both Phone & TV banners.
-- **Multi-Language + Auto System Language:**
-  - Automatically follows your device language (`System Default`), plus manual switching for **Arabic (RTL), English, French, Spanish, German, Turkish, Russian, and Portuguese**.
-- **Stremio Addon Protocol v3 + QR Phone Companion:**
-  - Scan the built-in **QR Code** in **Addons** or **Settings → Account** from your phone browser (same Wi-Fi) to paste `manifest.json` URLs, Debrid keys, and server credentials straight to your TV—zero remote typing.
-- **Linked Servers & Cloud Services (AES-256 Keystore Encrypted):**
-  - **Debrid:** TorBox, Real-Debrid, AllDebrid, Premiumize (instant cache check, hash resolution, cloud library browser).
-  - **Personal Servers:** Jellyfin, Emby, Plex, and WebDAV / Custom HTTP Servers.
-  - **Metadata & Tracking:** TMDB (Arabic/English) and Trakt.tv (TV-friendly OAuth Device Code + scrobbling).
-- **Multi-Screen Account Sync:**
-  - Sync Addons and Settings across multiple TVs and phones via your own free **Supabase** project (`sync/supabase_schema.sql`) **or** instant **Portable Sync Codes (`QUERN1:...`)**.
-- **Native Media3 ExoPlayer:**
-  - Preferred Subtitle Language (10+ languages incl. Arabic), Preferred Audio Language, Subtitle size/color styling, playback speed, aspect ratio, Continue Watching, and optional External Player launch (VLC / Nova / MX Player).
+> **Quern ships empty.** It does not host, provide, bundle or recommend any content, catalog or addon. You connect your own Stremio-compatible addons, your own media servers and services you are authorised to use.
 
 ---
 
-## Build Locally or via GitHub Actions
+## Features
+
+### TV-first interface
+- Full D-Pad navigation with clear focus states. Focus returns to where you left it when you come back from the side rail.
+- Three navigation styles: left sidebar, auto-hide sidebar, or top bar.
+- Home with a hero spotlight that follows the focused title, Continue Watching, and configurable rows, card size, shape and corners.
+- 11 colour themes (including a true-black Glossy Black for OLED) and 6 launcher icons and TV banners.
+
+### Addons
+- Stremio addon protocol v3: catalogs, metadata, streams and subtitles.
+- Install by manifest URL or from your phone: scan the QR code on the TV and paste URLs, keys and server details in your phone's browser (same Wi-Fi), with no remote typing.
+- Per-addon health checks, ordering and per-catalog visibility on Home.
+- Streams appear as each addon answers, so one slow addon doesn't block the rest.
+
+### Services and servers (all optional, nothing preconfigured)
+- **Debrid:** TorBox, Real-Debrid, AllDebrid, Premiumize. Shows cache status and lets you browse your cloud library.
+- **Personal servers:** Jellyfin, Emby, Plex, WebDAV.
+- **Metadata and tracking:** TMDB and Trakt (device-code sign-in and scrobbling).
+
+### Playback
+- Media3 ExoPlayer with HLS and DASH. Preferred audio and subtitle language, subtitle size, colour and sync offset, playback speed, aspect ratio, and buffer presets for 4K remuxes.
+- Resume from where you stopped, including the last-watched episode of a series.
+- **Dolby Vision profile 7** (dual-layer UHD Blu-ray remuxes): on devices without a profile 7 decoder, Quern plays the HEVC base layer as HDR10 instead of failing. Other Dolby Vision profiles play natively when the device supports them.
+- Optional external player: VLC, MX Player, Just Player, mpv and other installed players.
+
+### Profiles, sync and backup
+- Multiple profiles with an optional PIN lock. PINs are stored hashed, with lockout after repeated wrong attempts.
+- Move your setup between TVs and phones with a portable sync code (`QUERN1:…`), or keep devices in sync through **your own** free Supabase project.
+- Import addons, library and watch progress from a Stremio account or a JSON backup.
+
+### Languages
+- Follows the system language or a manual choice. Arabic (right-to-left) and English are fully translated. French, Spanish, German, Turkish, Russian and Portuguese cover the main screens; newer settings fall back to English.
+
+---
+
+## Privacy and security
+
+- Debrid keys, server passwords and tokens are encrypted with AES-256-GCM through the Android Keystore and are never stored in plain text.
+- Official service endpoints are HTTPS-only. Plain HTTP is allowed only for user-entered addresses such as LAN media servers and self-hosted addons.
+- No analytics, no ads, no tracking. Quern only connects to the addons, servers and services you add.
+
+---
+
+## Requirements
+
+- Android 7.0 (API 24) or newer. Tested on a Google TV Streamer (Android 14).
+- Builds need JDK 17 and the Android SDK (compileSdk 35).
+
+## Build
 
 ```bash
 ./gradlew assembleRelease
 ```
 
-Output APK: `app/build/outputs/apk/release/app-release.apk`
+The APK is written to `app/build/outputs/apk/release/app-release.apk`.
 
-To enable free Cloud Account Sync across multiple TVs/phones, run [`sync/supabase_schema.sql`](sync/supabase_schema.sql) in a free Supabase project and enter your Project URL + Anon Key in **Settings → You → Account & Cloud Sync**.
+GitHub Actions builds the same APK on every push to `main` and uploads it as a workflow artifact.
+
+> **Signing:** release builds are currently signed with a debug key, so a build from one machine can't be installed over a build from another (including CI). Uninstall first if you switch sources, which clears the app's data. A proper release key will come with the first public release.
+
+## Cloud sync (optional)
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Run [`sync/supabase_schema.sql`](sync/supabase_schema.sql) in its SQL editor.
+3. In Quern, open **Settings → Accounts & Sync → Account** and enter your project URL and anon key.
+
+Your data stays in your own project.
+
+## Tech stack
+
+Kotlin 2.1 · Jetpack Compose (Material 3 + TV Material) · Media3 1.5 · Coil · Room · OkHttp · kotlinx.serialization
+
+## License
+
+[MIT](LICENSE)
