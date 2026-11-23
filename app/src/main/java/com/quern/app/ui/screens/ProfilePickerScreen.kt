@@ -43,6 +43,8 @@ import com.quern.app.R
 import com.quern.app.domain.model.UserProfile
 import com.quern.app.ui.components.ProfileAvatarCircle
 import com.quern.app.ui.components.QuernBrandMark
+import com.quern.app.ui.components.SoftGlowBackground
+import com.quern.app.ui.components.profileAvatarFor
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaTextSecondary
@@ -69,12 +71,17 @@ fun ProfilePickerScreen(
 
     LaunchedEffect(Unit) { runCatching { activeFocus.requestFocus() } }
 
+    // Glow colours come from the profiles themselves (picture gradient or initials colour) plus the theme.
+    val glowColors = remember(profiles, palette.accent) {
+        profiles.map { p -> Color(profileAvatarFor(p.avatarKey)?.from ?: p.avatarColorHex) } + palette.accent
+    }
+
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(palette.background),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
+        SoftGlowBackground(baseColor = palette.background, glowColors = glowColors)
+
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
