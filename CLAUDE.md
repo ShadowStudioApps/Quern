@@ -25,9 +25,10 @@ Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, server
 
 ## Signing and CI
 
-- Local release builds are signed with the local debug key.
-- CI (`.github/workflows/build-apk.yml`, `gradle assembleRelease`) signs with a different debug key. Never install a CI APK over a locally built one: the signatures don't match.
-- The user creates the real release keystore. Claude never creates one.
+- Local release builds are signed with the owner's release keystore through the git-ignored `keystore.properties` at the repo root (`app/build.gradle.kts`). When that file is missing, release falls back to the debug key.
+- Never read, print, or commit `keystore.properties` or the `.jks`. Check signing only with `apksigner verify --print-certs`.
+- CI (`.github/workflows/build-apk.yml`, `gradle assembleRelease`) has no keystore, so it signs with its own debug key. Never install a CI APK over a locally built one: the signatures don't match.
+- The user creates and holds the release keystore. Claude never creates one.
 
 ## TV testing (Google TV Streamer, Android 14, over adb)
 
