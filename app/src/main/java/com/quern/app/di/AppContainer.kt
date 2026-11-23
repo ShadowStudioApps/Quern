@@ -107,6 +107,10 @@ class AppContainer(context: Context) {
         settingsStore = settingsStore,
         addonDao = database.addonDao(),
         addonRepository = addonRepository,
+        debridManager = debridManager,
+        serverManager = serverManager,
+        tmdbClient = tmdbClient,
+        traktClient = traktClient,
         vault = vault,
         json = json
     )

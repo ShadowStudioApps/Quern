@@ -40,6 +40,15 @@ class TraktClient(
         vault.putString(KEY_CLIENT_SECRET, clientSecret.trim())
     }
 
+    /** Replaces the stored Trakt credentials with the ones from account sync (blank = removed). */
+    fun applySyncedState(state: TraktAuthState) {
+        vault.putString(KEY_CLIENT_ID, state.clientId.trim())
+        vault.putString(KEY_CLIENT_SECRET, state.clientSecret.trim())
+        vault.putString(KEY_ACCESS_TOKEN, state.accessToken)
+        vault.putString(KEY_REFRESH_TOKEN, state.refreshToken)
+        vault.putString(KEY_USERNAME, state.username.orEmpty())
+    }
+
     fun disconnect() {
         vault.remove(KEY_ACCESS_TOKEN)
         vault.remove(KEY_REFRESH_TOKEN)

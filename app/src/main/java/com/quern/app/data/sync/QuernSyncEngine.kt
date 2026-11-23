@@ -8,10 +8,21 @@ import android.provider.Settings
 import android.util.Log
 import com.quern.app.BuildConfig
 import com.quern.app.data.addons.AddonRepository
+import com.quern.app.data.debrid.DebridManager
 import com.quern.app.data.local.AddonDao
+import com.quern.app.data.local.PinHasher
 import com.quern.app.data.local.SecureVault
 import com.quern.app.data.local.SettingsStore
+import com.quern.app.data.metadata.TmdbClient
+import com.quern.app.data.metadata.TraktClient
+import com.quern.app.data.servers.MediaServerManager
+import com.quern.app.domain.model.DebridServiceType
+import com.quern.app.domain.model.MediaServerConfig
+import com.quern.app.domain.model.MediaServerType
+import com.quern.app.domain.model.TmdbConfig
+import com.quern.app.domain.model.TraktAuthState
 import com.quern.app.domain.model.UserProfile
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -68,8 +79,8 @@ data class SyncStatus(
 )
 
 /**
- * Account sync engine (docs/account-sync-format.md). Step C1 covers the `addons`, `settings`,
- * `profiles` and `device_<id>` sections.
+ * Account sync engine (docs/account-sync-format.md). Covers the `addons`, `settings`, `profiles`,
+ * `secrets` and `device_<id>` sections; `favorites` and `progress` come next.
  *
  * Per section it remembers the last server revision it saw and a hash of the local data as it was
  * right after the last successful pull or push. A section is uploaded only when the local hash
@@ -82,16 +93,28 @@ class QuernSyncEngine(
     private val settingsStore: SettingsStore,
     private val addonDao: AddonDao,
     private val addonRepository: AddonRepository,
+    private val debridManager: DebridManager,
+    private val serverManager: MediaServerManager,
+    private val tmdbClient: TmdbClient,
+    private val traktClient: TraktClient,
     private val vault: SecureVault,
     private val json: Json
 ) {
+    // Order matters: profiles are applied before secrets so PINs find their profile.
     private enum class Section(val key: String, val encrypted: Boolean) {
         ADDONS("addons", true),
         SETTINGS("settings", false),
-        PROFILES("profiles", false)
+        PROFILES("profiles", false),
+        SECRETS("secrets", true)
     }
 
-    private class RemoteRow(val section: String, val revision: Long, val encrypted: Boolean, val payload: String?)
+    private class RemoteRow(
+        val section: String,
+        val revision: Long,
+        val encrypted: Boolean,
+        val payload: String?,
+        val updatedAtMs: Long
+    )
 
     private class ConflictException : Exception("Section changed on the server")
 
@@ -133,7 +156,9 @@ class QuernSyncEngine(
                         launch {
                             merge(
                                 settingsStore.settings.map { Unit },
-                                addonDao.observeAll().map { Unit }
+                                addonDao.observeAll().map { Unit },
+                                // Debrid keys, servers, TMDB and Trakt live in the vault.
+                                vault.changes.filter { key -> SECRET_KEY_PREFIXES.any(key::startsWith) }.map { Unit }
                             )
                                 .drop(1)
                                 .debounce(PUSH_DEBOUNCE_MS)
@@ -205,13 +230,13 @@ class QuernSyncEngine(
             remote.revision > lastRevision(s)
         }
         if (stale.isEmpty()) return
-        val rows = fetchRows(select = "section,revision,encrypted,payload", sections = stale.map { it.key })
+        val rows = fetchRows(select = "section,revision,encrypted,payload,updated_at", sections = stale.map { it.key })
             .associateBy { it.section }
         stale.forEach { s -> rows[s.key]?.let { applyRow(s, it) } }
     }
 
     private suspend fun pullSection(s: Section) {
-        val row = fetchRows(select = "section,revision,encrypted,payload", sections = listOf(s.key)).firstOrNull()
+        val row = fetchRows(select = "section,revision,encrypted,payload,updated_at", sections = listOf(s.key)).firstOrNull()
         if (row == null) {
             // Row is gone on the server (e.g. account data deleted): upload again from scratch.
             setLastRevision(s, 0L)
@@ -228,7 +253,7 @@ class QuernSyncEngine(
             val decrypted = AccountCrypto.decrypt(text, key)
             key.fill(0)
             if (decrypted == null) {
-                _status.value = _status.value.copy(keyMismatch = true)
+                handleUndecryptable(s, row)
                 return
             }
             decrypted
@@ -246,6 +271,7 @@ class QuernSyncEngine(
                 }
                 Section.SETTINGS -> obj["values"]?.jsonObject?.let(settingsStore::applySyncSettingsValues)
                 Section.PROFILES -> applyProfiles(obj, union = firstLink)
+                Section.SECRETS -> applySecrets(obj, union = firstLink)
             }
         }.onFailure { Log.w(TAG, "Could not apply ${s.key}: ${it.javaClass.simpleName}") }
 
@@ -255,6 +281,101 @@ class QuernSyncEngine(
         val unioned = firstLink && s != Section.SETTINGS
         setLocalHash(s, if (unioned) "" else hash(buildLocal(s)))
     }
+
+    /**
+     * An encrypted row this device can't read was written with another password's key.
+     * - Row is older than this device's sign-in: the password changed and this device has the
+     *   newer key, so re-upload its own copy (docs: "re-uploads encrypted with the new key").
+     * - Otherwise this device holds the old key: stop uploading encrypted data and ask the user to
+     *   sign in again. Never overwrite data we couldn't read with an outdated key.
+     */
+    private fun handleUndecryptable(s: Section, row: RemoteRow) {
+        val signedInAt = account.signedInAtMs()
+        if (signedInAt > 0L && row.updatedAtMs in 1 until signedInAt) {
+            Log.i(TAG, "${s.key} was encrypted with an older password; re-uploading with the current key")
+            setLastRevision(s, row.revision)
+            setLocalHash(s, "")
+        } else {
+            Log.w(TAG, "${s.key} can't be decrypted with this device's key")
+            _status.value = _status.value.copy(keyMismatch = true)
+        }
+    }
+
+    private suspend fun applySecrets(obj: JsonObject, union: Boolean) {
+        // Debrid: whole map, blank/missing = removed (union keeps keys only this device has).
+        val remoteDebrid = obj["debrid"]?.jsonObject.orEmpty().mapNotNull { (name, value) ->
+            val type = runCatching { DebridServiceType.valueOf(name) }.getOrNull() ?: return@mapNotNull null
+            type to value.jsonPrimitive.contentOrNull.orEmpty()
+        }.toMap().filterValues { it.isNotBlank() }
+        val debrid = if (union) {
+            DebridServiceType.entries.associateWith { debridManager.getApiKey(it) }.filterValues { it.isNotBlank() } + remoteDebrid
+        } else {
+            remoteDebrid
+        }
+        debridManager.applySyncedKeys(debrid)
+        scope.launch { runCatching { debridManager.refreshAllStatuses() } }
+
+        // Media servers, by id.
+        val remoteServers = obj["servers"]?.jsonArray.orEmpty().mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val type = runCatching { MediaServerType.valueOf(o.str("type")) }.getOrNull() ?: return@mapNotNull null
+            MediaServerConfig(
+                id = id,
+                name = o.str("name"),
+                type = type,
+                baseUrl = o.str("baseUrl"),
+                apiKeyOrToken = o.str("token"),
+                username = o.str("username"),
+                password = o.str("password"),
+                userId = o.str("userId"),
+                enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull ?: true
+            )
+        }
+        val localServers = serverManager.getAllServers()
+        remoteServers.forEach { r ->
+            if (localServers.firstOrNull { it.id == r.id } != r) serverManager.saveServer(r)
+        }
+        if (!union) {
+            val keep = remoteServers.map { it.id }.toSet()
+            localServers.filter { it.id !in keep }.forEach { serverManager.deleteServer(it.id) }
+        }
+
+        // TMDB.
+        obj["tmdb"]?.jsonObject?.let { t ->
+            val apiKey = t.str("apiKey")
+            if (!(union && apiKey.isBlank())) {
+                tmdbClient.saveConfig(TmdbConfig(apiKey = apiKey, language = t.str("language").ifBlank { "en-US" }))
+            }
+        }
+
+        // Trakt.
+        obj["trakt"]?.jsonObject?.let { t ->
+            val state = TraktAuthState(
+                clientId = t.str("clientId"),
+                clientSecret = t.str("clientSecret"),
+                accessToken = t.str("accessToken"),
+                refreshToken = t.str("refreshToken"),
+                username = t.str("username").takeIf { it.isNotBlank() }
+            )
+            if (!(union && state.clientId.isBlank() && state.accessToken.isBlank())) {
+                traktClient.applySyncedState(state)
+            }
+        }
+
+        // Profile PIN hashes. Only accept real hashes, never a plaintext PIN.
+        val pins = obj["profilePins"]?.jsonObject.orEmpty()
+            .mapValues { it.value.jsonPrimitive.contentOrNull }
+            .filterValues { PinHasher.isHashed(it) }
+        settingsStore.update { cur ->
+            cur.copy(profiles = cur.profiles.map { p ->
+                val pin = pins[p.id] ?: if (union) p.pinCode else null
+                if (pin == p.pinCode) p else p.copy(pinCode = pin)
+            })
+        }
+    }
+
+    private fun JsonObject.str(name: String): String = this[name]?.jsonPrimitive?.contentOrNull.orEmpty()
 
     private suspend fun applyAddons(obj: JsonObject, union: Boolean) {
         val remote = obj["addons"]?.jsonArray.orEmpty()
@@ -447,6 +568,54 @@ class QuernSyncEngine(
                 }
             })
         }
+        Section.SECRETS -> buildSecrets()
+    }
+
+    private suspend fun buildSecrets(): JsonObject {
+        val servers = serverManager.getAllServers().sortedBy { it.id }
+        val tmdb = tmdbClient.getConfig()
+        val trakt = traktClient.getState()
+        return buildJsonObject {
+            put("formatVersion", 1)
+            put("debrid", buildJsonObject {
+                DebridServiceType.entries.forEach { type ->
+                    val key = debridManager.getApiKey(type)
+                    if (key.isNotBlank()) put(type.name, key)
+                }
+            })
+            put("servers", buildJsonArray {
+                servers.forEach { s ->
+                    add(buildJsonObject {
+                        put("id", s.id)
+                        put("name", s.name)
+                        put("type", s.type.name)
+                        put("baseUrl", s.baseUrl)
+                        put("username", s.username)
+                        put("userId", s.userId)
+                        put("password", s.password)
+                        put("token", s.apiKeyOrToken)
+                        put("enabled", s.enabled)
+                    })
+                }
+            })
+            put("tmdb", buildJsonObject {
+                put("apiKey", tmdb.apiKey)
+                put("language", tmdb.language)
+            })
+            put("trakt", buildJsonObject {
+                put("clientId", trakt.clientId)
+                put("clientSecret", trakt.clientSecret)
+                put("accessToken", trakt.accessToken)
+                put("refreshToken", trakt.refreshToken)
+                put("username", trakt.username.orEmpty())
+            })
+            put("profilePins", buildJsonObject {
+                settingsStore.settings.value.profiles
+                    .filter { PinHasher.isHashed(it.pinCode) }
+                    .sortedBy { it.id }
+                    .forEach { put(it.id, it.pinCode.orEmpty()) }
+            })
+        }
     }
 
     // ---------------------------------------------------------------- server rows
@@ -470,7 +639,8 @@ class QuernSyncEngine(
                     section = o["section"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
                     revision = o["revision"]?.jsonPrimitive?.longOrNull ?: 0L,
                     encrypted = o["encrypted"]?.jsonPrimitive?.booleanOrNull ?: false,
-                    payload = o["payload"]?.jsonPrimitive?.contentOrNull
+                    payload = o["payload"]?.jsonPrimitive?.contentOrNull,
+                    updatedAtMs = QuernAccount.parseServerTime(o["updated_at"]?.jsonPrimitive?.contentOrNull)
                 )
             }
         }
@@ -522,6 +692,8 @@ class QuernSyncEngine(
         private val JSON_MEDIA = "application/json".toMediaType()
         private const val PERIODIC_PULL_MS = 10 * 60 * 1000L
         private const val PUSH_DEBOUNCE_MS = 4_000L
+        /** Vault keys owned by the `secrets` section (see DebridManager, MediaServerManager, TmdbClient, TraktClient). */
+        private val SECRET_KEY_PREFIXES = listOf("debrid_key_", "srv_token_", "srv_pass_", "tmdb_", "trakt_")
 
         private const val KEY_REV = "sync_rev_"
         private const val KEY_HASH = "sync_hash_"

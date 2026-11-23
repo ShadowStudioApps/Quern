@@ -87,6 +87,9 @@ class QuernAccount(
     fun encryptionKey(): ByteArray? =
         vault.getString(KEY_ENC_KEY).takeIf { it.isNotBlank() }?.let { AccountCrypto.unb64url(it) }
 
+    /** When this device signed in, by the server's clock (epoch ms), or 0 if unknown. */
+    fun signedInAtMs(): Long = parseServerTime(vault.getString(KEY_SIGNED_IN_AT))
+
     suspend fun signUp(email: String, password: String): Result<Unit> = runAccount {
         val cleanEmail = validate(email, password)
         val keys = withContext(Dispatchers.Default) { AccountCrypto.derive(cleanEmail, password) }
@@ -212,13 +215,16 @@ class QuernAccount(
         vault.putString(KEY_USER_ID, userId)
         vault.putString(KEY_EMAIL, email)
         vault.putString(KEY_ENC_KEY, AccountCrypto.b64url(encKey))
+        // Server clock, so it can be compared with row timestamps (see QuernSyncEngine key mismatch).
+        val signedInAt = root["user"]?.jsonObject?.get("last_sign_in_at")?.jsonPrimitive?.contentOrNull
+        vault.putString(KEY_SIGNED_IN_AT, signedInAt.orEmpty())
         vault.remove(KEY_PENDING_EMAIL)
         encKey.fill(0)
         _state.value = loadState()
     }
 
     private fun clearSession() {
-        listOf(KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN, KEY_USER_ID, KEY_EMAIL, KEY_ENC_KEY, KEY_PENDING_EMAIL)
+        listOf(KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN, KEY_USER_ID, KEY_EMAIL, KEY_ENC_KEY, KEY_PENDING_EMAIL, KEY_SIGNED_IN_AT)
             .forEach(vault::remove)
         _state.value = loadState()
     }
@@ -301,5 +307,18 @@ class QuernAccount(
         private const val KEY_ENC_KEY = "acct_enc_key"
         private const val KEY_PENDING_EMAIL = "acct_pending_email"
         private const val KEY_DEVICE_ID = "acct_device_id"
+        private const val KEY_SIGNED_IN_AT = "acct_signed_in_at"
+
+        /** Parses Supabase/PostgreSQL timestamps such as `2026-11-23T10:15:30.123456+00:00`; 0 when invalid. */
+        fun parseServerTime(text: String?): Long {
+            if (text.isNullOrBlank()) return 0L
+            val normalized = text.trim()
+                .replace(' ', 'T')
+                .replace(Regex("\\.\\d+"), "")
+                .replace(Regex("Z$"), "+00:00")
+            return runCatching {
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(normalized)?.time
+            }.getOrNull() ?: 0L
+        }
     }
 }

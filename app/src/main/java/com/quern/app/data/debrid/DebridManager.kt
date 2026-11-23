@@ -51,6 +51,19 @@ class DebridManager(
         return status
     }
 
+    /**
+     * Stores keys that came from account sync, exactly as given (blank or missing = removed).
+     * They were validated on the device that added them; statuses refresh with [refreshAllStatuses].
+     */
+    fun applySyncedKeys(keys: Map<DebridServiceType, String>) {
+        DebridServiceType.entries.forEach { type ->
+            val key = keys[type].orEmpty().trim()
+            if (key == getApiKey(type)) return@forEach
+            if (key.isBlank()) vault.remove(keyFor(type)) else vault.putString(keyFor(type), key)
+            _statuses.value = _statuses.value + (type to DebridAccountStatus(type, key.isNotBlank()))
+        }
+    }
+
     suspend fun refreshAllStatuses() = coroutineScope {
         val results = DebridServiceType.entries.map { type ->
             async {

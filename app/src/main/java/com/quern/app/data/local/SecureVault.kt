@@ -6,6 +6,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
@@ -59,10 +62,15 @@ class SecureVault(context: Context) {
         "ENC:$ivB64:$dataB64"
     }.getOrNull()
 
+    private val _changes = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    /** Emits the name (never the value) of every key that was written or removed. */
+    val changes: SharedFlow<String> = _changes.asSharedFlow()
+
     fun putString(key: String, value: String) {
         if (value.isBlank()) {
             valueCache.remove(key)
             prefs.edit().remove(key).apply()
+            _changes.tryEmit(key)
             return
         }
         val secretKey = getOrCreateKey()
@@ -73,6 +81,7 @@ class SecureVault(context: Context) {
         }
         valueCache[key] = value
         prefs.edit().putString(key, encrypted).apply()
+        _changes.tryEmit(key)
     }
 
     fun getString(key: String, default: String = ""): String {
@@ -109,6 +118,7 @@ class SecureVault(context: Context) {
     fun remove(key: String) {
         valueCache.remove(key)
         prefs.edit().remove(key).apply()
+        _changes.tryEmit(key)
     }
 
     companion object {

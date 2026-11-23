@@ -91,8 +91,11 @@ Enum values use their Kotlin `name`. Unknown keys are ignored and unknown enum v
 - **Pull** on sign-in, on app start, when returning to the foreground, and every 10 minutes while open. Only sections whose server `revision` is newer than the last one this device saw get downloaded.
 - **Push** a section a few seconds after it changes locally (debounced), using an optimistic check: `PATCH …?user_id=eq.<uid>&section=eq.<s>&revision=eq.<lastSeen>`. If no row was updated, someone else changed it first: pull, merge, push again. A section that doesn't exist yet is created with `POST` (a `409` means another device created it first: pull).
 - Each device remembers, per section, the last revision it saw and a hash of its local data right after the last pull or push. It uploads only when that hash changes, so data that came from the server is never echoed back.
-- **First link** (a device signs in to an account that already has data): `addons` and `profiles` are merged (server items first, then items only this device had), `settings` takes the server copy. Afterwards it's last writer wins as below.
-- If an encrypted section can't be decrypted with this device's key (the password was changed elsewhere), the device stops uploading encrypted sections and asks the user to sign in again. It never overwrites data it couldn't read.
+- **First link** (a device signs in to an account that already has data): `addons`, `profiles` and `secrets` are merged (server items first or winning, then items only this device had), `settings` takes the server copy. Afterwards it's last writer wins as below.
+- `secrets` only accepts real PIN hashes (`PinHasher` format) in `profilePins`; anything else is ignored. A profile missing from `profilePins` has no PIN.
+- If an encrypted section can't be decrypted with this device's key:
+  - the row was last written **before** this device signed in (server clock, `user.last_sign_in_at`): the password changed and this device has the newer key, so it re-uploads its own copy;
+  - otherwise this device holds an old key: it stops uploading encrypted sections and asks the user to sign in again. It never overwrites data it couldn't read with an old key.
 - **Merging:**
   - `favorites` and `progress`: per item, the newest `updatedAt` wins (deletions included).
   - `addons`, `settings`, `profiles` and `secrets`: the whole section, last writer wins. The website and the TV both edit these deliberately, so the newest edit is the intended one.
