@@ -91,6 +91,11 @@ import com.quern.app.ui.screens.SearchScreen
 import com.quern.app.ui.screens.SettingsGroup
 import com.quern.app.ui.screens.AccountUi
 import com.quern.app.ui.screens.SettingsScreen
+import com.quern.app.ui.screens.ProfilePickerScreen
+import com.quern.app.ui.screens.ProfileAvatarCircle
+import com.quern.app.domain.model.AppLanguage
+import com.quern.app.domain.model.UserProfile
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LocalQuernStrings
 import com.quern.app.ui.theme.LumaTextPrimary
@@ -139,6 +144,8 @@ fun QuernApp(
         var currentTab by remember { mutableStateOf(QuernTab.HOME) }
         var settingsInitialGroup by remember { mutableStateOf(SettingsGroup.ADDONS) }
         var showingDetail by remember { mutableStateOf(false) }
+        // "Who's watching?" at launch when there is more than one profile; also opened from the rail.
+        var profilePickerOpen by rememberSaveable { mutableStateOf(settings.profiles.size > 1) }
 
         val snackbarHostState = remember { SnackbarHostState() }
 
@@ -162,6 +169,24 @@ fun QuernApp(
                 viewModel.installAddon(pendingDeepLinkAddonUrl)
                 onDeepLinkConsumed()
             }
+        }
+
+        if (profilePickerOpen && activePlayback == null) {
+            ProfilePickerScreen(
+                profiles = settings.profiles,
+                activeProfileId = settings.activeProfileId,
+                isAr = settings.effectiveLanguage == AppLanguage.ARABIC,
+                onProfileChosen = { id ->
+                    if (id != settings.activeProfileId) {
+                        viewModel.updateSettings { it.copy(activeProfileId = id) }
+                    }
+                    currentTab = QuernTab.HOME
+                    showingDetail = false
+                    profilePickerOpen = false
+                },
+                onDismiss = { profilePickerOpen = false }
+            )
+            return@QuernTheme
         }
 
         val playback = activePlayback
@@ -435,6 +460,8 @@ fun QuernApp(
                                 QuernTvNavigationRail(
                                     currentTab = currentTab,
                                     autoHideCollapsed = true,
+                                    activeProfile = settings.activeProfile,
+                                    onOpenProfiles = { profilePickerOpen = true },
                                     onSelectTab = { currentTab = it }
                                 )
                             }
@@ -451,6 +478,8 @@ fun QuernApp(
                                 QuernTvNavigationRail(
                                     currentTab = currentTab,
                                     autoHideCollapsed = false,
+                                    activeProfile = settings.activeProfile,
+                                    onOpenProfiles = { profilePickerOpen = true },
                                     onSelectTab = { currentTab = it }
                                 )
                             }
@@ -684,6 +713,8 @@ private val RailItemShape = RoundedCornerShape(14.dp)
 fun QuernTvNavigationRail(
     currentTab: QuernTab,
     autoHideCollapsed: Boolean = false,
+    activeProfile: UserProfile? = null,
+    onOpenProfiles: (() -> Unit)? = null,
     onSelectTab: (QuernTab) -> Unit
 ) {
     val palette = LocalQuernPalette.current
@@ -831,6 +862,42 @@ fun QuernTvNavigationRail(
                         modifier = Modifier.graphicsLayer { alpha = labelAlphaState.value }
                     )
                 }
+            }
+        }
+
+        // Active profile, pinned bottom-left: one press opens "Who's watching?".
+        if (activeProfile != null && onOpenProfiles != null) {
+            var profileFocused by remember { mutableStateOf(false) }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RailItemShape)
+                    .drawBehind { if (profileFocused) drawRect(palette.accent) }
+                    .then(
+                        if (profileFocused) Modifier.border(1.75.dp, palette.focusRing.copy(alpha = 0.9f), RailItemShape)
+                        else Modifier
+                    )
+                    .tvClickable(
+                        onFocusChangedState = { profileFocused = it },
+                        onClick = onOpenProfiles
+                    )
+                    .padding(start = 8.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ProfileAvatarCircle(activeProfile, size = 28.dp, fontSizeSp = 11f)
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    text = activeProfile.name,
+                    color = if (profileFocused) palette.onAccent else Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    modifier = Modifier.graphicsLayer { alpha = labelAlphaState.value }
+                )
             }
         }
     }

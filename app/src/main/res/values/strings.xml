@@ -341,4 +341,6 @@
     <string name="qa_err_rate">Too many attempts. Wait a few minutes and try again.</string>
     <string name="qa_err_network">Can\'t reach the Quern server. Check the TV\'s internet connection.</string>
     <string name="qa_err_server">Something went wrong on the server. Try again later.</string>
+    <string name="profile_picker_title">Who\'s watching?</string>
+    <string name="profile_picker_pin_subtitle">Enter the 4-digit PIN for this profile</string>
 </resources>

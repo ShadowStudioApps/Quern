@@ -3679,7 +3679,7 @@ private object PinAttemptTracker {
 }
 
 @Composable
-private fun PinKeypadDialog(
+internal fun PinKeypadDialog(
     profileId: String,
     title: String,
     subtitle: String,
