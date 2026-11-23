@@ -89,6 +89,7 @@ import com.quern.app.ui.screens.HomeScreen
 import com.quern.app.ui.screens.LibraryScreen
 import com.quern.app.ui.screens.SearchScreen
 import com.quern.app.ui.screens.SettingsGroup
+import com.quern.app.ui.screens.AccountUi
 import com.quern.app.ui.screens.SettingsScreen
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LocalQuernStrings
@@ -302,7 +303,9 @@ fun QuernApp(
 
                         QuernTab.SETTINGS -> {
                             val companionSession by viewModel.companionSession.collectAsState()
-                            val cloudAccount by viewModel.cloudAccountState.collectAsState()
+                            val accountState by viewModel.accountState.collectAsState()
+                            val accountBusy by viewModel.accountBusy.collectAsState()
+                            val accountMessage by viewModel.accountMessage.collectAsState()
                             val addons by viewModel.addons.collectAsState()
                             val debridStatuses by viewModel.debridStatuses.collectAsState()
                             val mediaServers by viewModel.mediaServers.collectAsState()
@@ -321,7 +324,16 @@ fun QuernApp(
                                 onRefreshCompanionSession = { viewModel.refreshCompanionSession() },
                                 onBindCompanionServer = { viewModel.acquireCompanionServer() },
                                 onUnbindCompanionServer = { viewModel.releaseCompanionServer() },
-                                cloudAccount = cloudAccount,
+                                account = AccountUi(
+                                    state = accountState,
+                                    busy = accountBusy,
+                                    message = accountMessage,
+                                    onSignIn = { e, p -> viewModel.accountSignIn(e, p) },
+                                    onSignUp = { e, p -> viewModel.accountSignUp(e, p) },
+                                    onResend = { e -> viewModel.accountResendConfirmation(e) },
+                                    onSignOut = { viewModel.accountSignOut() },
+                                    onDelete = { viewModel.accountDelete() }
+                                ),
                                 addons = addons,
                                 debridStatuses = debridStatuses,
                                 getDebridKey = { viewModel.repository.debridManager.getApiKey(it) },
@@ -338,10 +350,6 @@ fun QuernApp(
                                     runCatching { AppIconManager.applyIcon(context, iconOpt) }
                                     viewModel.showToast("App icon updated!")
                                 },
-                                onCloudSignUp = { u, k, e, p -> viewModel.signUpCloudAccount(u, k, e, p) },
-                                onCloudSignIn = { u, k, e, p -> viewModel.signInCloudAccount(u, k, e, p) },
-                                onCloudSyncNow = { viewModel.syncCloudNow() },
-                                onCloudSignOut = { viewModel.signOutCloudAccount() },
                                 onSyncStremio = { email, pass -> viewModel.syncFromStremio(email, pass) },
                                 onImportNuvio = { raw -> viewModel.importFromNuvio(raw) },
                                 onInstallAddon = { url, done -> viewModel.installAddon(url) { done() } },

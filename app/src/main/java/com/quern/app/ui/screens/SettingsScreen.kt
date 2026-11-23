@@ -104,7 +104,7 @@ import com.quern.app.data.companion.CompanionSessionState
 import com.quern.app.data.local.PinHasher
 import com.quern.app.data.local.PinMigrationState
 import com.quern.app.data.servers.ServerTestResult
-import com.quern.app.data.sync.CloudAccountState
+
 import com.quern.app.domain.model.AccentColorChoice
 import com.quern.app.domain.model.AppFontChoice
 import com.quern.app.domain.model.AppIconOption
@@ -236,7 +236,7 @@ fun SettingsScreen(
     onRefreshCompanionSession: () -> Unit = {},
     onBindCompanionServer: () -> Unit = {},
     onUnbindCompanionServer: () -> Unit = {},
-    cloudAccount: CloudAccountState,
+    account: AccountUi,
     addons: List<InstalledAddon>,
     debridStatuses: Map<DebridServiceType, DebridAccountStatus>,
     getDebridKey: (DebridServiceType) -> String,
@@ -250,10 +250,6 @@ fun SettingsScreen(
     checkingHealthUrls: Set<String> = emptySet(),
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onApplyAppIcon: (AppIconOption) -> Unit,
-    onCloudSignUp: (String, String, String, String) -> Unit,
-    onCloudSignIn: (String, String, String, String) -> Unit,
-    onCloudSyncNow: () -> Unit,
-    onCloudSignOut: () -> Unit,
     onSyncStremio: (String, String) -> Unit = { _, _ -> },
     onImportNuvio: (String) -> Unit = {},
     onInstallAddon: (String, () -> Unit) -> Unit,
@@ -528,7 +524,7 @@ fun SettingsScreen(
                     groupTitle = groupLabel(targetGroup),
                     isModified = isGroupModified(targetGroup, settings),
                     settings = settings,
-                    cloudAccount = cloudAccount,
+                    account = account,
                     connectedDebridCount = debridStatuses.values.count { it.isConnected },
                     mediaServerCount = mediaServers.size,
                     tmdbConfigured = tmdbConfig.isConfigured,
@@ -548,13 +544,9 @@ fun SettingsScreen(
                     onRefreshCompanionSession = onRefreshCompanionSession,
                     onBindCompanionServer = onBindCompanionServer,
                     onUnbindCompanionServer = onUnbindCompanionServer,
-                    cloudAccount = cloudAccount,
+                    account = account,
                     onBack = { activeSubPage = SettingsSubPage.NONE },
                     onUpdateSettings = onUpdateSettings,
-                    onCloudSignUp = onCloudSignUp,
-                    onCloudSignIn = onCloudSignIn,
-                    onCloudSyncNow = onCloudSyncNow,
-                    onCloudSignOut = onCloudSignOut,
                     onSyncStremio = onSyncStremio,
                     onImportNuvio = onImportNuvio,
                     onExportSettingsCode = onExportSettingsCode,
@@ -890,7 +882,7 @@ private fun SettingsSectionHeaderBar(
 }
 
 @Composable
-private fun HelpTextLine(text: String) {
+internal fun HelpTextLine(text: String) {
     Text(
         text = text,
         color = LumaTextSecondary,
@@ -2338,7 +2330,7 @@ private fun SettingsCategoryOverviewPane(
     groupTitle: String,
     isModified: Boolean,
     settings: AppSettings,
-    cloudAccount: CloudAccountState,
+    account: AccountUi,
     connectedDebridCount: Int = 0,
     mediaServerCount: Int = 0,
     tmdbConfigured: Boolean = false,
@@ -2385,7 +2377,7 @@ private fun SettingsCategoryOverviewPane(
             SettingsGroupRow(
                 Icons.Default.Person,
                 qString(R.string.accounts_cloud_title),
-                if (cloudAccount.isSignedIn) "${cloudAccount.email} • Synced" else qString(R.string.settings_export_import_title),
+                if (account.state.isSignedIn) account.state.email else qString(R.string.qa_not_signed_in),
                 SettingsSubPage.ACCOUNT
             ),
             SettingsGroupRow(
@@ -2491,13 +2483,9 @@ private fun SettingsSubPageContent(
     onRefreshCompanionSession: () -> Unit,
     onBindCompanionServer: () -> Unit = {},
     onUnbindCompanionServer: () -> Unit = {},
-    cloudAccount: CloudAccountState,
+    account: AccountUi,
     onBack: () -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
-    onCloudSignUp: (String, String, String, String) -> Unit,
-    onCloudSignIn: (String, String, String, String) -> Unit,
-    onCloudSyncNow: () -> Unit,
-    onCloudSignOut: () -> Unit,
     onSyncStremio: (String, String) -> Unit = { _, _ -> },
     onImportNuvio: (String) -> Unit = {},
     onExportSettingsCode: () -> String = { "" },
@@ -2529,6 +2517,10 @@ private fun SettingsSubPageContent(
 
         when (subPage) {
             SettingsSubPage.ACCOUNT -> {
+                item(key = "quern_account") {
+                    QuernAccountCard(account = account)
+                }
+
                 // Portable Settings Backup (Strictly NO Secrets)
                 item(key = "settings_export_import") {
                     var showExportDialog by remember { mutableStateOf(false) }
@@ -2770,118 +2762,6 @@ private fun SettingsSubPageContent(
                     }
                 }
 
-                // Multi-Screen Cloud Sync Account Card
-                item(key = "cloud_account") {
-                    var serverUrl by remember(cloudAccount.serverUrl) { mutableStateOf(cloudAccount.serverUrl) }
-                    var anonKey by remember(cloudAccount.anonKey) { mutableStateOf(cloudAccount.anonKey) }
-                    var email by remember(cloudAccount.email) { mutableStateOf(cloudAccount.email) }
-                    var password by remember { mutableStateOf("") }
-                    var showCustomServer by remember { mutableStateOf(cloudAccount.serverUrl.isNotBlank()) }
-
-                    SettingSectionCard(title = s.cloudSyncTitle) {
-                        if (cloudAccount.isSignedIn) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(Icons.Default.CloudDone, null, tint = LumaGreen, modifier = Modifier.size(26.dp))
-                                Column {
-                                    Text(cloudAccount.email, color = LumaTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text(
-                                        qString(R.string.account_sync_active, cloudAccount.lastSyncedAt ?: qString(R.string.account_ready)),
-                                        color = LumaGreen,
-                                        fontSize = 12.sp
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(14.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                SelectablePillOption(label = s.syncNowLabel, selected = true, onClick = onCloudSyncNow)
-                                SelectablePillOption(label = s.signOutLabel, selected = false, onClick = onCloudSignOut)
-                            }
-                        } else {
-                            Text(s.cloudSyncDesc, color = LumaTextSecondary, fontSize = 13.sp)
-                            Spacer(Modifier.height(10.dp))
-                            OutlinedTextField(
-                                value = email,
-                                onValueChange = { email = it },
-                                label = { Text(qString(R.string.account_email_label)) },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = palette.focusRing,
-                                    unfocusedBorderColor = palette.border,
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = password,
-                                onValueChange = { password = it },
-                                label = { Text(qString(R.string.account_password_label)) },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = palette.focusRing,
-                                    unfocusedBorderColor = palette.border,
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            SettingToggleRow(
-                                label = qString(R.string.account_custom_server_label),
-                                checked = showCustomServer,
-                                onCheckedChange = { showCustomServer = it }
-                            )
-                            if (showCustomServer) {
-                                Spacer(Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = serverUrl,
-                                    onValueChange = { serverUrl = it },
-                                    label = { Text(qString(R.string.account_supabase_url)) },
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = palette.focusRing,
-                                        unfocusedBorderColor = palette.border,
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = anonKey,
-                                    onValueChange = { anonKey = it },
-                                    label = { Text(qString(R.string.account_supabase_key)) },
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = palette.focusRing,
-                                        unfocusedBorderColor = palette.border,
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                SelectablePillOption(
-                                    label = s.createAccountLabel,
-                                    selected = true,
-                                    onClick = { onCloudSignUp(serverUrl, anonKey, email, password) }
-                                )
-                                SelectablePillOption(
-                                    label = s.signInLabel,
-                                    selected = false,
-                                    onClick = { onCloudSignIn(serverUrl, anonKey, email, password) }
-                                )
-                            }
-                        }
-                    }
-                }
             }
 
             SettingsSubPage.PROFILES -> {
@@ -2944,7 +2824,7 @@ private fun SubPageTopBar(
 }
 
 @Composable
-private fun SettingSectionCard(
+internal fun SettingSectionCard(
     title: String,
     content: @Composable () -> Unit
 ) {
@@ -2965,7 +2845,7 @@ private fun SettingSectionCard(
 }
 
 @Composable
-private fun SelectablePillOption(
+internal fun SelectablePillOption(
     label: String,
     selected: Boolean,
     onClick: () -> Unit

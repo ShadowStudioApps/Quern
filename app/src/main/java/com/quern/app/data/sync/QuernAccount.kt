@@ -45,6 +45,16 @@ enum class AccountError {
 
 class AccountException(val reason: AccountError, message: String) : Exception(message)
 
+/** Result of the last account action, shown (translated) on the account screen. */
+sealed interface AccountUiMessage {
+    data object SignedIn : AccountUiMessage
+    data object SignedUp : AccountUiMessage
+    data object ConfirmationResent : AccountUiMessage
+    data object SignedOut : AccountUiMessage
+    data object Deleted : AccountUiMessage
+    data class Failed(val reason: AccountError) : AccountUiMessage
+}
+
 /**
  * Quern account on Shadow Studio's server (Supabase Auth), as specified in
  * docs/account-sync-format.md. Holds the session and the encryption key; the sync engine

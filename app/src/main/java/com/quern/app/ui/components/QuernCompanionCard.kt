@@ -92,6 +92,9 @@ fun QuernCompanionSignInCard(
             if (nowMs >= session.expiresAtMs) break
             delay(1000L)
         }
+        // Sessions slide with every phone request, so expiry means 10 idle minutes:
+        // replace the code automatically so the QR on screen always works.
+        onRefreshSession()
     }
 
     val isExpired = session.isExpired(nowMs)

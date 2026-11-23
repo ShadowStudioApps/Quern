@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
         val container = (application as QuernApplication).container
         val viewModel = ViewModelProvider(
             this,
-            QuernViewModel.Factory(container.repository, container.settingsStore, container.cloudSyncManager)
+            QuernViewModel.Factory(container.repository, container.settingsStore, container.cloudSyncManager, container.quernAccount)
         )[QuernViewModel::class.java]
 
         setContent {

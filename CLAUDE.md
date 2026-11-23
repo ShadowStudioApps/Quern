@@ -44,7 +44,9 @@ Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, server
 - If the adb server restarts, reconnect with `adb connect`. The TV may show an "Allow USB debugging?" prompt that the user must approve.
 - After every release install, run `adb shell cmd package compile -f -m speed-profile com.quern.app`.
 - Don't change any TV system settings.
-- Drive the UI with `adb shell input keyevent …` and capture with `adb exec-out screencap -p`. Keycodes: 19 up, 20 down, 21 left, 22 right, 23 OK, 4 back.
+- Drive the UI with `adb shell input keyevent …` and capture with `adb exec-out screencap -p`. Keycodes: 19 up, 20 down, 21 left, 22 right, 23 OK, 4 back, 224 wake.
+- Inside Settings, never send OK (23) blind: take a screenshot first and confirm what has focus. A blind OK once applied the "TV" device preset and changed the user's navigation style.
+- The TV can fall asleep between steps (`dumpsys power` → `mWakefulness=Asleep`, screenshots come back black). Send 224 before continuing.
 
 ## Performance measurement protocol (identical every time)
 

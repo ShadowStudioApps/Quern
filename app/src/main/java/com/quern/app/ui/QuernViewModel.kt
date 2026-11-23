@@ -13,6 +13,11 @@ import com.quern.app.data.servers.ServerTestResult
 import com.quern.app.data.servers.WebDavEntry
 import com.quern.app.data.sync.CloudAccountState
 import com.quern.app.data.sync.CloudSyncManager
+import com.quern.app.data.sync.AccountError
+import com.quern.app.data.sync.AccountException
+import com.quern.app.data.sync.AccountUiMessage
+import com.quern.app.data.sync.QuernAccount
+import com.quern.app.data.sync.QuernAccountState
 import com.quern.app.domain.model.AppSettings
 import com.quern.app.domain.model.CatalogRow
 import com.quern.app.domain.model.DebridAccountStatus
@@ -34,6 +39,7 @@ import com.quern.app.domain.model.TraktDeviceCode
 import com.quern.app.domain.model.WatchProgress
 import com.quern.app.player.PlaybackRequest
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -58,18 +64,59 @@ data class DetailUiState(
 class QuernViewModel(
     val repository: QuernRepository,
     val settingsStore: SettingsStore,
-    val cloudSyncManager: CloudSyncManager
+    val cloudSyncManager: CloudSyncManager,
+    val quernAccount: QuernAccount
 ) : ViewModel() {
 
     val appSettings: StateFlow<AppSettings> = settingsStore.settings
     val pinMigrationState: StateFlow<PinMigrationState> = settingsStore.pinMigrationState
     val cloudAccountState: StateFlow<CloudAccountState> = cloudSyncManager.accountState
 
+    // ---- Quern account (Shadow Studio server) ----
+    val accountState: StateFlow<QuernAccountState> = quernAccount.state
+    private val _accountBusy = MutableStateFlow(false)
+    val accountBusy: StateFlow<Boolean> = _accountBusy.asStateFlow()
+    private val _accountMessage = MutableStateFlow<AccountUiMessage?>(null)
+    val accountMessage: StateFlow<AccountUiMessage?> = _accountMessage.asStateFlow()
+
+    fun clearAccountMessage() {
+        _accountMessage.value = null
+    }
+
+    private fun runAccountAction(onSuccess: AccountUiMessage, action: suspend () -> Result<Unit>) {
+        if (_accountBusy.value) return
+        viewModelScope.launch {
+            _accountBusy.value = true
+            _accountMessage.value = null
+            val result = action()
+            _accountMessage.value = result.fold(
+                onSuccess = { onSuccess },
+                onFailure = { AccountUiMessage.Failed((it as? AccountException)?.reason ?: AccountError.SERVER) }
+            )
+            _accountBusy.value = false
+        }
+    }
+
+    fun accountSignIn(email: String, password: String) =
+        runAccountAction(AccountUiMessage.SignedIn) { quernAccount.signIn(email, password) }
+
+    fun accountSignUp(email: String, password: String) =
+        runAccountAction(AccountUiMessage.SignedUp) { quernAccount.signUp(email, password) }
+
+    fun accountResendConfirmation(email: String) =
+        runAccountAction(AccountUiMessage.ConfirmationResent) { quernAccount.resendConfirmation(email) }
+
+    fun accountSignOut() =
+        runAccountAction(AccountUiMessage.SignedOut) { quernAccount.signOut(); Result.success(Unit) }
+
+    fun accountDelete() =
+        runAccountAction(AccountUiMessage.Deleted) { quernAccount.deleteAccount() }
+
     fun retryPinMigrationIfNeeded() {
         settingsStore.retryPinMigrationIfNeeded()
     }
 
-    private val companionServer = TvWebCompanionServer(repository, settingsStore, cloudSyncManager) {
+    private val companionServer = TvWebCompanionServer(repository, settingsStore, cloudSyncManager, quernAccount) {
         refreshHome()
         viewModelScope.launch {
             repository.debridManager.refreshAllStatuses()
@@ -87,19 +134,32 @@ class QuernViewModel(
 
     private var companionHolders = 0
 
+    private var companionStopJob: Job? = null
+
     @Synchronized
     fun acquireCompanionServer() {
+        companionStopJob?.cancel()
+        companionStopJob = null
         companionHolders++
         if (companionHolders == 1) {
             companionServer.start(viewModelScope)
         }
     }
 
+    /**
+     * When no TV screen shows the QR any more, keep the phone page alive while a paired phone
+     * is still using it, and stop the server once it has been idle for the session window.
+     */
     @Synchronized
     fun releaseCompanionServer() {
         companionHolders = (companionHolders - 1).coerceAtLeast(0)
-        if (companionHolders == 0) {
-            companionServer.stop()
+        if (companionHolders != 0) return
+        companionStopJob?.cancel()
+        companionStopJob = viewModelScope.launch {
+            while (companionHolders == 0 && companionServer.hasActivePhone()) {
+                delay(30_000L)
+            }
+            if (companionHolders == 0) companionServer.stop()
         }
     }
 
@@ -786,37 +846,9 @@ class QuernViewModel(
         _toastMessage.value = "Trakt disconnected"
     }
 
-    fun signUpCloudAccount(serverUrl: String, anonKey: String, email: String, password: String) {
-        viewModelScope.launch {
-            cloudSyncManager.signUp(serverUrl, anonKey, email, password)
-                .onSuccess { _toastMessage.value = it }
-                .onFailure { _toastMessage.value = it.message ?: "Sign up failed" }
-        }
-    }
 
-    fun signInCloudAccount(serverUrl: String, anonKey: String, email: String, password: String) {
-        viewModelScope.launch {
-            cloudSyncManager.signIn(serverUrl, anonKey, email, password)
-                .onSuccess {
-                    _toastMessage.value = it
-                    refreshHome()
-                }
-                .onFailure { _toastMessage.value = it.message ?: "Sign in failed" }
-        }
-    }
 
-    fun syncCloudNow() {
-        viewModelScope.launch {
-            cloudSyncManager.pushToCloud()
-                .onSuccess { _toastMessage.value = it }
-                .onFailure { _toastMessage.value = it.message ?: "Sync failed" }
-        }
-    }
 
-    fun signOutCloudAccount() {
-        cloudSyncManager.signOut()
-        _toastMessage.value = "Signed out"
-    }
 
     fun syncFromStremio(email: String, password: String) {
         viewModelScope.launch {
@@ -845,10 +877,11 @@ class QuernViewModel(
     class Factory(
         private val repository: QuernRepository,
         private val settingsStore: SettingsStore,
-        private val cloudSyncManager: CloudSyncManager
+        private val cloudSyncManager: CloudSyncManager,
+        private val quernAccount: QuernAccount
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            QuernViewModel(repository, settingsStore, cloudSyncManager) as T
+            QuernViewModel(repository, settingsStore, cloudSyncManager, quernAccount) as T
     }
 }

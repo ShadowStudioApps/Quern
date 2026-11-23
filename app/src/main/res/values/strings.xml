@@ -308,4 +308,37 @@
     <string name="detail_fetching_streams">Fetching streams across Addons, Debrid &amp; Servers…</string>
     <string name="detail_no_matching_streams">No matching streams for this filter.</string>
     <string name="detail_resolve_via_debrid">Resolve via Debrid</string>
+    <!-- Quern account (Shadow Studio server) -->
+    <string name="qa_title">Quern Account</string>
+    <string name="qa_desc_signed_out">One free account for all your TVs. Sign in on each TV and your addons, settings and watch history stay in sync.</string>
+    <string name="qa_privacy_note">Your password never leaves your devices, and private data is encrypted before it\'s uploaded.</string>
+    <string name="qa_phone_hint">Easier typing: open Phone QR Setup below and sign in from your phone.</string>
+    <string name="qa_email">Email</string>
+    <string name="qa_password">Password (%1$d+ characters)</string>
+    <string name="qa_sign_in">Sign In</string>
+    <string name="qa_create">Create Account</string>
+    <string name="qa_resend">Resend Email</string>
+    <string name="qa_awaiting">We sent a confirmation link to %1$s. Open it, then sign in.</string>
+    <string name="qa_signed_in_as">Signed in as %1$s</string>
+    <string name="qa_signed_in_desc">This TV is linked to your account.</string>
+    <string name="qa_sign_out">Sign Out</string>
+    <string name="qa_delete">Delete Account</string>
+    <string name="qa_delete_confirm_title">Delete your Quern account?</string>
+    <string name="qa_delete_confirm_body">This permanently deletes your account and everything synced to it on the server, for all your TVs. Data on this TV stays. This can\'t be undone.</string>
+    <string name="qa_delete_confirm_btn">Delete Forever</string>
+    <string name="qa_working">Working…</string>
+    <string name="qa_not_signed_in">Not signed in</string>
+    <string name="qa_msg_signed_in">Signed in. This TV is now linked to your account.</string>
+    <string name="qa_msg_signed_up">Account created and signed in.</string>
+    <string name="qa_msg_signed_up_confirm">Account created. Open the confirmation link we emailed you, then sign in.</string>
+    <string name="qa_msg_resent">Confirmation email sent again. Check your spam folder too.</string>
+    <string name="qa_msg_signed_out">Signed out. Data on this TV stays.</string>
+    <string name="qa_msg_deleted">Account deleted.</string>
+    <string name="qa_err_invalid_email">That email address doesn\'t look right.</string>
+    <string name="qa_err_weak_password">The password needs at least %1$d characters.</string>
+    <string name="qa_err_wrong">Wrong email or password.</string>
+    <string name="qa_err_not_confirmed">Confirm your email first (open the link we sent you), then sign in.</string>
+    <string name="qa_err_rate">Too many attempts. Wait a few minutes and try again.</string>
+    <string name="qa_err_network">Can\'t reach the Quern server. Check the TV\'s internet connection.</string>
+    <string name="qa_err_server">Something went wrong on the server. Try again later.</string>
 </resources>

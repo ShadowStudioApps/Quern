@@ -308,4 +308,37 @@
     <string name="detail_fetching_streams">جاري جلب المصادر من الإضافات و Debrid والسيرفرات…</string>
     <string name="detail_no_matching_streams">لا توجد مصادر مطابقة لهذا الفلتر.</string>
     <string name="detail_resolve_via_debrid">فتح عبر Debrid</string>
+    <!-- حساب Quern (سيرفر Shadow Studio) -->
+    <string name="qa_title">حساب Quern</string>
+    <string name="qa_desc_signed_out">حساب واحد مجاني لكل تلفزيوناتك. سجّل دخول على كل تلفزيون وتبقى إضافاتك وإعداداتك وسجل مشاهدتك متزامنة.</string>
+    <string name="qa_privacy_note">كلمة السر ما تطلع من أجهزتك، والبيانات الخاصة تتشفّر قبل ما ترتفع.</string>
+    <string name="qa_phone_hint">أسهل بالكتابة: افتح إعداد الجوال بالـ QR تحت وسجّل من جوالك.</string>
+    <string name="qa_email">الإيميل</string>
+    <string name="qa_password">كلمة السر (%1$d أحرف أو أكثر)</string>
+    <string name="qa_sign_in">تسجيل الدخول</string>
+    <string name="qa_create">إنشاء حساب</string>
+    <string name="qa_resend">إعادة إرسال الإيميل</string>
+    <string name="qa_awaiting">أرسلنا رابط تأكيد إلى %1$s. افتحه وبعدين سجّل دخول.</string>
+    <string name="qa_signed_in_as">مسجّل باسم %1$s</string>
+    <string name="qa_signed_in_desc">هذا التلفزيون مربوط بحسابك.</string>
+    <string name="qa_sign_out">تسجيل الخروج</string>
+    <string name="qa_delete">حذف الحساب</string>
+    <string name="qa_delete_confirm_title">تحذف حساب Quern؟</string>
+    <string name="qa_delete_confirm_body">هذا يحذف حسابك وكل شي متزامن عليه من السيرفر نهائياً، لكل تلفزيوناتك. البيانات اللي على هذا التلفزيون تبقى. ما يمكن التراجع عنه.</string>
+    <string name="qa_delete_confirm_btn">احذف نهائياً</string>
+    <string name="qa_working">جاري التنفيذ…</string>
+    <string name="qa_not_signed_in">غير مسجّل</string>
+    <string name="qa_msg_signed_in">تم تسجيل الدخول. هذا التلفزيون صار مربوط بحسابك.</string>
+    <string name="qa_msg_signed_up">انعمل الحساب وتم تسجيل الدخول.</string>
+    <string name="qa_msg_signed_up_confirm">انعمل الحساب. افتح رابط التأكيد اللي وصلك بالإيميل، وبعدين سجّل دخول.</string>
+    <string name="qa_msg_resent">انرسل إيميل التأكيد مرة ثانية. شيّك على مجلد الرسائل غير المرغوبة (Spam) بعد.</string>
+    <string name="qa_msg_signed_out">تم تسجيل الخروج. البيانات اللي على هذا التلفزيون تبقى.</string>
+    <string name="qa_msg_deleted">انحذف الحساب.</string>
+    <string name="qa_err_invalid_email">الإيميل مكتوب غلط.</string>
+    <string name="qa_err_weak_password">كلمة السر لازم تكون %1$d أحرف على الأقل.</string>
+    <string name="qa_err_wrong">الإيميل أو كلمة السر غلط.</string>
+    <string name="qa_err_not_confirmed">أكّد إيميلك أول (افتح الرابط اللي أرسلناه)، وبعدين سجّل دخول.</string>
+    <string name="qa_err_rate">محاولات كثيرة. انتظر كم دقيقة وجرّب مرة ثانية.</string>
+    <string name="qa_err_network">ما نقدر نوصل لسيرفر Quern. شيّك على اتصال التلفزيون بالإنترنت.</string>
+    <string name="qa_err_server">صار خطأ بالسيرفر. جرّب بعدين.</string>
 </resources>

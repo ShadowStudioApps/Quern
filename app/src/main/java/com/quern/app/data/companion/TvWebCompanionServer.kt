@@ -3,7 +3,11 @@ package com.quern.app.data.companion
 import com.quern.app.data.QuernRepository
 import com.quern.app.data.local.PinHasher
 import com.quern.app.data.local.SettingsStore
+import com.quern.app.data.sync.AccountCrypto
+import com.quern.app.data.sync.AccountError
+import com.quern.app.data.sync.AccountException
 import com.quern.app.data.sync.CloudSyncManager
+import com.quern.app.data.sync.QuernAccount
 import com.quern.app.domain.model.AppLanguage
 import com.quern.app.domain.model.AppThemePreset
 import com.quern.app.domain.model.AudioLanguage
@@ -74,6 +78,7 @@ class TvWebCompanionServer(
     private val repository: QuernRepository,
     private val settingsStore: SettingsStore,
     private val cloudSyncManager: CloudSyncManager,
+    private val quernAccount: QuernAccount,
     private val onDataChanged: () -> Unit
 ) {
     private var serverSocket: ServerSocket? = null
@@ -103,6 +108,12 @@ class TvWebCompanionServer(
             failedAttempts = 0,
             maxFailedAttempts = maxWrongCodeAttempts
         )
+    }
+
+    /** True while a paired phone has used the page within the session window. */
+    fun hasActivePhone(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val s = _sessionState.value
+        return s.isConnected && !s.isExpired(nowMs) && nowMs - s.lastActivityAtMs < sessionTtlMs
     }
 
     fun refreshSession() {
@@ -196,7 +207,10 @@ class TvWebCompanionServer(
                 isConnected = true,
                 failedAttempts = 0,
                 lastClientIp = remoteIp,
-                lastActivityAtMs = nowMs
+                lastActivityAtMs = nowMs,
+                // Sliding window: the session stays valid while the phone keeps using it and
+                // only expires after sessionTtlMs of inactivity.
+                expiresAtMs = maxOf(current.expiresAtMs, nowMs + sessionTtlMs)
             )
             return PairCheckResult.Valid
         }
@@ -470,16 +484,31 @@ class TvWebCompanionServer(
             "TV settings updated live."
         }
         "/sync-account" -> {
+            // Quern account on Shadow Studio's server. The password is typed on the phone and used
+            // by the TV only to derive keys; it is never stored or forwarded as-is.
             val action = form["action"].orEmpty()
-            val serverUrl = form["server_url"].orEmpty()
-            val anonKey = form["anon_key"].orEmpty()
             val email = form["email"].orEmpty()
             val password = form["password"].orEmpty()
             when (action) {
-                "signup" -> cloudSyncManager.signUp(serverUrl, anonKey, email, password).fold({ it }, { "Error: ${it.message}" })
-                "signin" -> cloudSyncManager.signIn(serverUrl, anonKey, email, password).fold({ it }, { "Error: ${it.message}" })
-                "push" -> cloudSyncManager.pushToCloud().fold({ it }, { "Error: ${it.message}" })
-                "pull" -> cloudSyncManager.pullFromCloud().fold({ it }, { "Error: ${it.message}" })
+                "signin" -> quernAccount.signIn(email, password).fold(
+                    { "Signed in as ${quernAccount.state.value.email}. This TV is now linked to your Quern account." },
+                    { accountErrorText(it) }
+                )
+                "signup" -> quernAccount.signUp(email, password).fold(
+                    {
+                        if (quernAccount.state.value.isSignedIn) "Account created and signed in."
+                        else "Account created. Open the confirmation link we emailed you, then sign in here."
+                    },
+                    { accountErrorText(it) }
+                )
+                "resend" -> quernAccount.resendConfirmation(email).fold(
+                    { "Confirmation email sent again. Check your inbox and spam folder." },
+                    { accountErrorText(it) }
+                )
+                "signout" -> {
+                    quernAccount.signOut()
+                    "Signed out on this TV. Your data on the TV stays."
+                }
                 else -> "Account updated."
             }
         }
@@ -498,6 +527,16 @@ class TvWebCompanionServer(
             cloudSyncManager.importFromNuvio(data).fold({ it }, { "Error: ${it.message}" })
         }
         else -> "Saved."
+    }
+
+    private fun accountErrorText(error: Throwable): String = when ((error as? AccountException)?.reason) {
+        AccountError.INVALID_EMAIL -> "Error: that email address doesn't look right."
+        AccountError.WEAK_PASSWORD -> "Error: the password needs at least ${AccountCrypto.MIN_PASSWORD_LENGTH} characters."
+        AccountError.WRONG_CREDENTIALS -> "Error: wrong email or password."
+        AccountError.EMAIL_NOT_CONFIRMED -> "Error: confirm your email first (open the link we sent you), then sign in."
+        AccountError.RATE_LIMITED -> "Error: too many attempts. Wait a few minutes and try again."
+        AccountError.NETWORK -> "Error: the TV can't reach the Quern server. Check its internet connection."
+        else -> "Error: ${error.message ?: "something went wrong"}"
     }
 
     private fun parseForm(raw: String): Map<String, String> =
@@ -521,7 +560,8 @@ class TvWebCompanionServer(
         val progress = runCatching { repository.continueWatching.firstOrNull() }.getOrNull().orEmpty()
         val tmdb = repository.tmdbClient.getConfig()
         val syncCode = runCatching { cloudSyncManager.exportSyncCode() }.getOrDefault("")
-        val account = cloudSyncManager.accountState.value
+        val account = quernAccount.state.value
+        val legacySync = cloudSyncManager.accountState.value
         val nowFormatted = SimpleDateFormat("MM/dd/yyyy, h:mm:ss a", Locale.US).format(Date())
 
         val activeProfile = settings.activeProfile
@@ -934,7 +974,7 @@ class TvWebCompanionServer(
                 </div>
                 <div class="stat-card">
                   <div class="stat-label">Last Sync</div>
-                  <div class="stat-value">${escapeHtml(account.lastSyncedAt ?: nowFormatted)}</div>
+                  <div class="stat-value">${escapeHtml(legacySync.lastSyncedAt ?: nowFormatted)}</div>
                 </div>
               </div>
 
@@ -1181,29 +1221,33 @@ class TvWebCompanionServer(
 
               <div class="card">
                 <div class="card-head">
-                  <h3>Cloud Sync Account</h3>
+                  <h3>Quern Account</h3>
                   ${if (account.isSignedIn) "<span class='badge badge-green'>${escapeHtml(account.email)}</span>" else "<span class='badge'>Not Signed In</span>"}
                 </div>
+                ${if (account.isSignedIn) """
+                <div class="page-sub">This TV is linked to <b>${escapeHtml(account.email)}</b>. Your addons, settings and watch history follow you to every TV signed in to this account.</div>
+                <form method="POST" action="/sync-account">
+                  $pairField
+                  <input type="hidden" name="tab" value="account"/>
+                  <button type="submit" name="action" value="signout" class="btn-sm">Sign Out on This TV</button>
+                </form>
+                """ else """
+                <div class="page-sub">One free account for all your TVs. Sign in on each TV and everything stays in sync. Your password never leaves your devices, and private data is encrypted before it's uploaded.</div>
+                ${account.awaitingEmailConfirmation?.let { pending -> "<div class=\"warn\">We sent a confirmation link to <b>${escapeHtml(pending)}</b>. Open it, then sign in below.</div>" }.orEmpty()}
                 <form method="POST" action="/sync-account">
                   $pairField
                   <input type="hidden" name="tab" value="account"/>
                   <div class="grid-2">
-                    <input name="email" value="${escapeHtml(account.email)}" type="email" placeholder="Email Address"/>
-                    <input name="password" type="password" placeholder="Password (6+ chars)"/>
-                  </div>
-                  <div class="grid-2">
-                    <input name="server_url" value="${escapeHtml(account.serverUrl)}" placeholder="Supabase Project URL (https://xxx.supabase.co)"/>
-                    <input name="anon_key" value="${escapeHtml(account.anonKey)}" placeholder="Supabase Anon Public Key"/>
+                    <input name="email" value="${escapeHtml(account.awaitingEmailConfirmation ?: account.email)}" type="email" autocomplete="email" placeholder="Email address" required/>
+                    <input name="password" type="password" autocomplete="current-password" minlength="${AccountCrypto.MIN_PASSWORD_LENGTH}" placeholder="Password (${AccountCrypto.MIN_PASSWORD_LENGTH}+ characters)"/>
                   </div>
                   <div style="display:flex;gap:10px;flex-wrap:wrap">
-                    <button type="submit" name="action" value="signin" class="btn-primary">Sign In &amp; Sync</button>
+                    <button type="submit" name="action" value="signin" class="btn-primary">Sign In</button>
                     <button type="submit" name="action" value="signup" class="btn-primary btn-accent">Create Account</button>
-                    ${if (account.isSignedIn) """<button type="submit" name="action" value="push" class="btn-sm">Push to Cloud</button>""" else ""}
+                    ${if (account.awaitingEmailConfirmation != null) """<button type="submit" name="action" value="resend" class="btn-sm" formnovalidate>Resend Email</button>""" else ""}
                   </div>
                 </form>
-                <div class="helper-link">
-                  Need a free Supabase sync project? Create one <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Here ↗</a>
-                </div>
+                """}
               </div>
 
               <div class="card">
