@@ -71,8 +71,9 @@ Enum values use their Kotlin `name`. Unknown keys are ignored and unknown enum v
 
 ### `profiles`
 ```json
-{ "formatVersion": 1, "profiles": [ { "id": "main", "name": "…", "avatarColorHex": 4282339954 } ] }
+{ "formatVersion": 1, "profiles": [ { "id": "main", "name": "…", "avatarColorHex": 4282339954, "avatarKey": "rocket" } ] }
 ```
+`avatarKey` is one of the built-in picture keys in `ui/components/ProfileAvatars.kt` (`paw`, `rocket`, `gamer`, …) or `null` for initials on `avatarColorHex`. Unknown keys fall back to initials. PIN hashes travel only in the encrypted `secrets` section.
 
 ### `favorites` and `progress`
 ```json

@@ -92,7 +92,7 @@ import com.quern.app.ui.screens.SettingsGroup
 import com.quern.app.ui.screens.AccountUi
 import com.quern.app.ui.screens.SettingsScreen
 import com.quern.app.ui.screens.ProfilePickerScreen
-import com.quern.app.ui.screens.ProfileAvatarCircle
+import com.quern.app.ui.components.ProfileAvatarCircle
 import com.quern.app.domain.model.AppLanguage
 import com.quern.app.domain.model.UserProfile
 import androidx.compose.runtime.saveable.rememberSaveable

@@ -247,6 +247,8 @@
     <string name="profile_create_title">Create New Profile</string>
     <string name="profile_name_label">Profile Name</string>
     <string name="profile_avatar_color">Avatar Color</string>
+    <string name="profile_picture_label">Picture</string>
+    <string name="profile_choose_picture">Choose a picture</string>
     <string name="profile_pin_optional">4-Digit Lock PIN (Optional)</string>
     <string name="profile_create_btn">Create</string>
     <string name="profile_lock_btn">Lock</string>

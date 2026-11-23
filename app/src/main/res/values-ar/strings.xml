@@ -247,6 +247,8 @@
     <string name="profile_create_title">إنشاء بروفايل جديد</string>
     <string name="profile_name_label">اسم البروفايل</string>
     <string name="profile_avatar_color">لون الصورة الرمزية</string>
+    <string name="profile_picture_label">الصورة</string>
+    <string name="profile_choose_picture">اختر صورة</string>
     <string name="profile_pin_optional">رمز قفل 4 أرقام (اختياري)</string>
     <string name="profile_create_btn">إنشاء</string>
     <string name="profile_lock_btn">قفل</string>

@@ -384,7 +384,9 @@ data class UserProfile(
     val id: String,
     val name: String,
     val avatarColorHex: Long,
-    val pinCode: String? = null // 4-digit optional PIN lock
+    val pinCode: String? = null, // 4-digit optional PIN lock
+    /** Built-in picture (see ui/components/ProfileAvatars.kt); null = initials on avatarColorHex. */
+    val avatarKey: String? = null
 ) {
     val isLocked: Boolean get() = !pinCode.isNullOrBlank()
 }

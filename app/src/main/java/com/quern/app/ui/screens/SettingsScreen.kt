@@ -53,6 +53,10 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -137,6 +141,8 @@ import com.quern.app.domain.model.UiModeOverride
 import com.quern.app.domain.model.UpdateChannel
 import com.quern.app.domain.model.UserProfile
 import com.quern.app.player.ExternalPlayerHelper
+import com.quern.app.ui.components.ProfileAvatarCircle
+import com.quern.app.ui.components.ProfileAvatarGrid
 import com.quern.app.ui.components.QrCodeCard
 import com.quern.app.ui.components.QuernCompanionSignInCard
 import com.quern.app.ui.components.quernSwitchColors
@@ -2949,6 +2955,7 @@ private fun ProfilesManagerSection(
     var forgotPinProfileId by remember { mutableStateOf<String?>(null) }
     var failedMigrationProfileId by remember { mutableStateOf<String?>(null) }
     var setPinTargetProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var avatarPickerProfileId by remember { mutableStateOf<String?>(null) }
 
     // Deterministic single-profile authority for gating Manage Profiles when any profile is locked:
     // Primary profile (index 0) if it is locked; otherwise the first locked profile in profile order.
@@ -3072,7 +3079,6 @@ private fun ProfilesManagerSection(
                                 modifier = Modifier
                                     .size(86.dp)
                                     .clip(CircleShape)
-                                    .background(avatarColor)
                                     .border(
                                         width = if (focused) 4.dp else if (selected) 3.dp else 3.dp,
                                         color = when {
@@ -3084,12 +3090,7 @@ private fun ProfilesManagerSection(
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = profile.name.take(2).uppercase(),
-                                    color = if (profile.avatarColorHex == 0xFFD3D3D3) Color.Black else Color.White,
-                                    fontSize = 28.sp,
-                                    fontWeight = FontWeight.Black
-                                )
+                                ProfileAvatarCircle(profile, size = 86.dp, fontSizeSp = 28f)
                             }
 
                             // Bottom-right dark circular Lock badge (matches reference screenshot!)
@@ -3141,6 +3142,13 @@ private fun ProfilesManagerSection(
 
                         if (manageMode) {
                             Spacer(Modifier.height(8.dp))
+                            MiniActionChip(
+                                icon = Icons.Default.Face,
+                                label = qString(R.string.profile_picture_label),
+                                tint = palette.focusRing,
+                                onClick = { avatarPickerProfileId = profile.id }
+                            )
+                            Spacer(Modifier.height(6.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 MiniActionChip(
                                     icon = if (profile.isLocked) Icons.Default.LockOpen else Icons.Default.Lock,
@@ -3215,7 +3223,7 @@ private fun ProfilesManagerSection(
         CreateProfileDialog(
             isAr = isAr,
             onDismiss = { showCreateDialog = false },
-            onCreate = { name, colorHex, pin ->
+            onCreate = { name, colorHex, pin, avatarKey ->
                 showCreateDialog = false
                 profileScope.launch {
                     val hashedPin = pin.takeIf { it.length == 4 }?.let { PinHasher.hashPinAsync(it) }
@@ -3223,7 +3231,8 @@ private fun ProfilesManagerSection(
                         id = "prof_${UUID.randomUUID().toString().take(8)}",
                         name = name.trim(),
                         avatarColorHex = colorHex,
-                        pinCode = hashedPin
+                        pinCode = hashedPin,
+                        avatarKey = avatarKey
                     )
                     onUpdateSettings { st ->
                         st.copy(
@@ -3231,6 +3240,50 @@ private fun ProfilesManagerSection(
                             activeProfileId = newProfile.id
                         )
                     }
+                }
+            }
+        )
+    }
+
+    val avatarPickerProfile = avatarPickerProfileId?.let { id ->
+        settings.profiles.firstOrNull { it.id == id }
+    }
+    avatarPickerProfile?.let { target ->
+        AlertDialog(
+            onDismissRequest = { avatarPickerProfileId = null },
+            containerColor = palette.surfaceElevated,
+            title = {
+                Text(
+                    text = "${qString(R.string.profile_choose_picture)} — ${target.name}",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 340.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    ProfileAvatarGrid(
+                        profileName = target.name,
+                        colorHex = target.avatarColorHex,
+                        selectedKey = target.avatarKey,
+                        onSelect = { key ->
+                            avatarPickerProfileId = null
+                            onUpdateSettings { st ->
+                                st.copy(profiles = st.profiles.map {
+                                    if (it.id == target.id) it.copy(avatarKey = key) else it
+                                })
+                            }
+                        }
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { avatarPickerProfileId = null }) {
+                    Text(qString(R.string.common_cancel), color = LumaTextSecondary)
                 }
             }
         )
@@ -3535,11 +3588,12 @@ private fun MiniActionChip(
 private fun CreateProfileDialog(
     isAr: Boolean,
     onDismiss: () -> Unit,
-    onCreate: (String, Long, String) -> Unit
+    onCreate: (String, Long, String, String?) -> Unit
 ) {
     val palette = LocalQuernPalette.current
     var name by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
+    var avatarKey by remember { mutableStateOf<String?>(null) }
     val avatarColors = listOf(
         0xFFD97736L,
         0xFF8C3B5EL,
@@ -3561,7 +3615,12 @@ private fun CreateProfileDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .heightIn(max = 380.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -3614,6 +3673,20 @@ private fun CreateProfileDialog(
                     }
                 }
 
+                Text(
+                    text = qString(R.string.profile_picture_label),
+                    color = LumaTextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                ProfileAvatarGrid(
+                    profileName = name,
+                    colorHex = selectedColor,
+                    selectedKey = avatarKey,
+                    itemSize = 44.dp,
+                    onSelect = { avatarKey = it }
+                )
+
                 OutlinedTextField(
                     value = pin,
                     onValueChange = { input -> pin = input.filter { it.isDigit() }.take(4) },
@@ -3635,7 +3708,7 @@ private fun CreateProfileDialog(
                 label = qString(R.string.profile_create_btn),
                 selected = true,
                 onClick = {
-                    if (name.isNotBlank()) onCreate(name, selectedColor, pin)
+                    if (name.isNotBlank()) onCreate(name, selectedColor, pin, avatarKey)
                 }
             )
         },

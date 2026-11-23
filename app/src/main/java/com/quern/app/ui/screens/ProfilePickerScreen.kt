@@ -41,41 +41,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.quern.app.R
 import com.quern.app.domain.model.UserProfile
+import com.quern.app.ui.components.ProfileAvatarCircle
 import com.quern.app.ui.components.QuernBrandMark
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaTextSecondary
 import com.quern.app.ui.theme.qString
-
-/** Two-letter initials for a profile avatar ("Shadow" -> "SH", "Ali Ahmed" -> "AA"). */
-internal fun profileInitials(name: String): String {
-    val words = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    return when {
-        words.size >= 2 -> "${words[0].first()}${words[1].first()}"
-        words.size == 1 -> words[0].take(2)
-        else -> "?"
-    }.uppercase()
-}
-
-/** Round profile avatar: colour fill + initials, used by the picker and the rail. */
-@Composable
-internal fun ProfileAvatarCircle(profile: UserProfile, size: Dp, fontSizeSp: Float) {
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(Color(profile.avatarColorHex)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = profileInitials(profile.name),
-            color = Color.White,
-            fontSize = fontSizeSp.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1
-        )
-    }
-}
 
 /**
  * Full-screen "Who's watching?" picker shown at launch and from the rail's profile button.
