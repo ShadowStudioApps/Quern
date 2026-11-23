@@ -323,6 +323,13 @@
     <string name="qa_awaiting">أرسلنا رابط تأكيد إلى %1$s. افتحه وبعدين سجّل دخول.</string>
     <string name="qa_signed_in_as">مسجّل باسم %1$s</string>
     <string name="qa_signed_in_desc">هذا التلفزيون مربوط بحسابك.</string>
+    <string name="qa_sync_now">مزامنة الآن</string>
+    <string name="qa_sync_running">جارٍ المزامنة…</string>
+    <string name="qa_sync_last">آخر مزامنة %1$s</string>
+    <string name="qa_sync_never">لم تتم المزامنة بعد</string>
+    <string name="qa_sync_just_now">تمت المزامنة للتو</string>
+    <string name="qa_sync_failed">فشلت آخر مزامنة. ستُعاد المحاولة تلقائيًا.</string>
+    <string name="qa_sync_key_mismatch">تم تغيير كلمة المرور من جهاز آخر. سجّل الخروج ثم الدخول من جديد لتستمر مزامنة الإضافات.</string>
     <string name="qa_sign_out">تسجيل الخروج</string>
     <string name="qa_delete">حذف الحساب</string>
     <string name="qa_delete_confirm_title">تحذف حساب Quern؟</string>

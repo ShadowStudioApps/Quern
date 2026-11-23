@@ -31,7 +31,7 @@ One row per `(user_id, section)`. `payload` is JSON (or an encrypted payload whe
 |---|---|---|
 | `addons` | yes | Installed addons, order, enabled flag, hidden catalogs. Manifest URLs often contain personal tokens. |
 | `secrets` | yes | Debrid API keys, media servers (with passwords and tokens), TMDB key, Trakt tokens, profile PIN hashes. |
-| `settings` | no | All entries of `AppSettings` except `profiles`, `activeProfileId`, `appIcon` and `uiModeOverride` (those stay per device). |
+| `settings` | no | All entries of `AppSettings` except the per-device ones: `profiles`, `activeProfileId`, `appIcon`, `uiModeOverride`, `navigationStyle`, `cardSize`, `fontScale`, `bufferProfile`, `playerEngine`, `preferExternalPlayer`, `preferredExternalPlayerPackage`. `hiddenCatalogKeys` travels in `addons`. |
 | `profiles` | no | Profile ids, names, avatar colours (no PINs). |
 | `favorites` | no | Library/favorites list, with deletions kept as tombstones. |
 | `progress` | yes | Watch progress / Continue Watching. Encrypted because it reveals viewing history; `lastStreamUrl` is never synced (it may contain tokens). |
@@ -89,7 +89,10 @@ Enum values use their Kotlin `name`. Unknown keys are ignored and unknown enum v
 ## Sync rules
 
 - **Pull** on sign-in, on app start, when returning to the foreground, and every 10 minutes while open. Only sections whose server `revision` is newer than the last one this device saw get downloaded.
-- **Push** a section a few seconds after it changes locally (debounced), using an optimistic check: `PATCH …?user_id=eq.<uid>&section=eq.<s>&revision=eq.<lastSeen>`. If no row was updated, someone else changed it first: pull, merge, push again.
+- **Push** a section a few seconds after it changes locally (debounced), using an optimistic check: `PATCH …?user_id=eq.<uid>&section=eq.<s>&revision=eq.<lastSeen>`. If no row was updated, someone else changed it first: pull, merge, push again. A section that doesn't exist yet is created with `POST` (a `409` means another device created it first: pull).
+- Each device remembers, per section, the last revision it saw and a hash of its local data right after the last pull or push. It uploads only when that hash changes, so data that came from the server is never echoed back.
+- **First link** (a device signs in to an account that already has data): `addons` and `profiles` are merged (server items first, then items only this device had), `settings` takes the server copy. Afterwards it's last writer wins as below.
+- If an encrypted section can't be decrypted with this device's key (the password was changed elsewhere), the device stops uploading encrypted sections and asks the user to sign in again. It never overwrites data it couldn't read.
 - **Merging:**
   - `favorites` and `progress`: per item, the newest `updatedAt` wins (deletions included).
   - `addons`, `settings`, `profiles` and `secrets`: the whole section, last writer wins. The website and the TV both edit these deliberately, so the newest edit is the intended one.

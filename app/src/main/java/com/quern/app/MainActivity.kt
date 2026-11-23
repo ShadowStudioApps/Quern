@@ -22,7 +22,13 @@ class MainActivity : ComponentActivity() {
         val container = (application as QuernApplication).container
         val viewModel = ViewModelProvider(
             this,
-            QuernViewModel.Factory(container.repository, container.settingsStore, container.cloudSyncManager, container.quernAccount)
+            QuernViewModel.Factory(
+                container.repository,
+                container.settingsStore,
+                container.cloudSyncManager,
+                container.quernAccount,
+                container.syncEngine
+            )
         )[QuernViewModel::class.java]
 
         setContent {
@@ -33,6 +39,12 @@ class MainActivity : ComponentActivity() {
                 onDeepLinkConsumed = { pendingAddonUrl.value = null }
             )
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Pull account changes made on other devices or the website while the app was in the background.
+        (application as QuernApplication).container.syncEngine.onForeground()
     }
 
     override fun onNewIntent(intent: Intent) {

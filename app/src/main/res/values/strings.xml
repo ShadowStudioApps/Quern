@@ -323,6 +323,13 @@
     <string name="qa_awaiting">We sent a confirmation link to %1$s. Open it, then sign in.</string>
     <string name="qa_signed_in_as">Signed in as %1$s</string>
     <string name="qa_signed_in_desc">This TV is linked to your account.</string>
+    <string name="qa_sync_now">Sync now</string>
+    <string name="qa_sync_running">Syncing…</string>
+    <string name="qa_sync_last">Last synced %1$s</string>
+    <string name="qa_sync_never">Not synced yet</string>
+    <string name="qa_sync_just_now">Synced just now</string>
+    <string name="qa_sync_failed">Last sync failed. It will retry automatically.</string>
+    <string name="qa_sync_key_mismatch">The password was changed on another device. Sign out and sign in again to keep syncing addons.</string>
     <string name="qa_sign_out">Sign Out</string>
     <string name="qa_delete">Delete Account</string>
     <string name="qa_delete_confirm_title">Delete your Quern account?</string>

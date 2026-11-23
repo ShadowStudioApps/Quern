@@ -339,6 +339,7 @@ fun QuernApp(
                             val traktDeviceCode by viewModel.traktDeviceCode.collectAsState()
                             val addonHealthMap by viewModel.addonHealthMap.collectAsState()
                             val checkingHealthUrls by viewModel.checkingHealthUrls.collectAsState()
+                            val syncStatus by viewModel.syncStatus.collectAsState()
                             SettingsScreen(
                                 settings = settings,
                                 pinMigrationState = pinMigrationState,
@@ -357,7 +358,9 @@ fun QuernApp(
                                     onSignUp = { e, p -> viewModel.accountSignUp(e, p) },
                                     onResend = { e -> viewModel.accountResendConfirmation(e) },
                                     onSignOut = { viewModel.accountSignOut() },
-                                    onDelete = { viewModel.accountDelete() }
+                                    onDelete = { viewModel.accountDelete() },
+                                    sync = syncStatus,
+                                    onSyncNow = { viewModel.syncNow() }
                                 ),
                                 addons = addons,
                                 debridStatuses = debridStatuses,

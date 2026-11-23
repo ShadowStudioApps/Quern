@@ -37,6 +37,10 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 
 /**
  * Strictly non-secret settings snapshot for portable export/import.
@@ -93,6 +97,7 @@ class SettingsStore(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("quern_app_settings_v4", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
+    private val syncJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val stateLock = Any()
 
     private val _settings = MutableStateFlow(load())
@@ -222,9 +227,33 @@ class SettingsStore(context: Context) {
         }
     }
 
+    /**
+     * Values for the account `settings` section (docs/account-sync-format.md). Leaves out keys that
+     * belong to one device (navigation, card size, buffer, player app) and hidden catalogs, which
+     * travel with the `addons` section.
+     */
+    fun syncSettingsValues(): JsonObject {
+        val all = syncJson.encodeToJsonElement(buildSnapshot()).jsonObject
+        return JsonObject(all.filterKeys { it !in SYNC_EXCLUDED_KEYS })
+    }
+
+    /** Applies a remote `settings` section. Unknown keys are ignored; unknown enum values keep the current value. */
+    fun applySyncSettingsValues(values: JsonObject) {
+        val current = syncJson.encodeToJsonElement(buildSnapshot()).jsonObject
+        val incoming = values.filterKeys { it in current && it !in SYNC_EXCLUDED_KEYS }
+        val snap = syncJson.decodeFromJsonElement<NonSecretSettingsSnapshot>(JsonObject(current + incoming))
+        applySnapshot(snap)
+    }
+
     fun exportNonSecretSettingsCode(): String {
+        val rawJson = json.encodeToString(buildSnapshot())
+        val encoded = Base64.encodeToString(rawJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        return "QUERN-CFG-1:$encoded"
+    }
+
+    private fun buildSnapshot(): NonSecretSettingsSnapshot {
         val s = _settings.value
-        val snap = NonSecretSettingsSnapshot(
+        return NonSecretSettingsSnapshot(
             language = s.language.name,
             theme = s.theme.name,
             amoledPureBlack = s.amoledPureBlack,
@@ -261,9 +290,6 @@ class SettingsStore(context: Context) {
             updateChannel = s.updateChannel.name,
             crashReportingOptIn = s.crashReportingOptIn
         )
-        val rawJson = json.encodeToString(snap)
-        val encoded = Base64.encodeToString(rawJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-        return "QUERN-CFG-1:$encoded"
     }
 
     fun importNonSecretSettingsCode(rawCode: String): Result<String> = runCatching {
@@ -277,6 +303,11 @@ class SettingsStore(context: Context) {
             else -> error("Invalid settings code format (expected QUERN-CFG-1:...)")
         }
         val snap = json.decodeFromString<NonSecretSettingsSnapshot>(payload)
+        applySnapshot(snap)
+        "Settings imported successfully (secrets untouched)."
+    }
+
+    private fun applySnapshot(snap: NonSecretSettingsSnapshot) {
         update { curr ->
             curr.copy(
                 language = runCatching { AppLanguage.valueOf(snap.language) }.getOrDefault(curr.language),
@@ -321,7 +352,6 @@ class SettingsStore(context: Context) {
                 crashReportingOptIn = snap.crashReportingOptIn
             )
         }
-        "Settings imported successfully (secrets untouched)."
     }
 
     fun exportNonSecretSettingsPrettyJson(): String {
@@ -486,5 +516,20 @@ class SettingsStore(context: Context) {
             .putString("profile_id", s.activeProfileId)
             .putString("profiles_json", profilesJson)
             .apply()
+    }
+
+    private companion object {
+        /** Per-device keys (screen, hardware, installed player apps) plus keys owned by other sections. */
+        val SYNC_EXCLUDED_KEYS = setOf(
+            "version",
+            "hiddenCatalogKeys",
+            "navigationStyle",
+            "cardSize",
+            "fontScale",
+            "bufferProfile",
+            "playerEngine",
+            "preferExternalPlayer",
+            "preferredExternalPlayerPackage"
+        )
     }
 }

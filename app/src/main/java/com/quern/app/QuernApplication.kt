@@ -14,6 +14,7 @@ class QuernApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        container.syncEngine.start()
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

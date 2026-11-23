@@ -20,6 +20,7 @@ import com.quern.app.data.servers.PlexClient
 import com.quern.app.data.servers.WebDavClient
 import com.quern.app.data.sync.CloudSyncManager
 import com.quern.app.data.sync.QuernAccount
+import com.quern.app.data.sync.QuernSyncEngine
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -97,6 +98,17 @@ class AppContainer(context: Context) {
         httpClient = httpClient,
         json = json,
         vault = vault
+    )
+
+    /** Account sync (docs/account-sync-format.md). Started by QuernApplication. */
+    val syncEngine = QuernSyncEngine(
+        context = context.applicationContext,
+        account = quernAccount,
+        settingsStore = settingsStore,
+        addonDao = database.addonDao(),
+        addonRepository = addonRepository,
+        vault = vault,
+        json = json
     )
 
     val cloudSyncManager = CloudSyncManager(

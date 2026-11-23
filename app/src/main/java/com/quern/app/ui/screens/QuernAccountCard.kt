@@ -32,6 +32,9 @@ import com.quern.app.data.sync.AccountCrypto
 import com.quern.app.data.sync.AccountError
 import com.quern.app.data.sync.AccountUiMessage
 import com.quern.app.data.sync.QuernAccountState
+import com.quern.app.data.sync.SyncStatus
+import com.quern.app.ui.theme.LumaRed
+import android.text.format.DateUtils
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaTextPrimary
@@ -47,8 +50,24 @@ class AccountUi(
     val onSignUp: (email: String, password: String) -> Unit,
     val onResend: (email: String) -> Unit,
     val onSignOut: () -> Unit,
-    val onDelete: () -> Unit
+    val onDelete: () -> Unit,
+    val sync: SyncStatus = SyncStatus(),
+    val onSyncNow: () -> Unit = {}
 )
+
+@Composable
+private fun syncStatusText(sync: SyncStatus): String = when {
+    sync.running -> qString(R.string.qa_sync_running)
+    sync.keyMismatch -> qString(R.string.qa_sync_key_mismatch)
+    sync.lastError != null -> qString(R.string.qa_sync_failed)
+    sync.lastSyncAt > 0L && System.currentTimeMillis() - sync.lastSyncAt < DateUtils.MINUTE_IN_MILLIS ->
+        qString(R.string.qa_sync_just_now)
+    sync.lastSyncAt > 0L -> qString(
+        R.string.qa_sync_last,
+        DateUtils.getRelativeTimeSpanString(sync.lastSyncAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString()
+    )
+    else -> qString(R.string.qa_sync_never)
+}
 
 @Composable
 private fun accountMessageText(message: AccountUiMessage, state: QuernAccountState): String = when (message) {
@@ -101,10 +120,19 @@ internal fun QuernAccountCard(account: AccountUi) {
                         fontSize = 16.sp
                     )
                     Text(qString(R.string.qa_signed_in_desc), color = LumaTextSecondary, fontSize = 12.sp)
+                    Text(
+                        syncStatusText(account.sync),
+                        color = if (account.sync.keyMismatch || account.sync.lastError != null) LumaRed else LumaTextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SelectablePillOption(label = qString(R.string.qa_sync_now), selected = true) {
+                    if (!account.sync.running) account.onSyncNow()
+                }
                 SelectablePillOption(label = qString(R.string.qa_sign_out), selected = false) {
                     if (!account.busy) account.onSignOut()
                 }

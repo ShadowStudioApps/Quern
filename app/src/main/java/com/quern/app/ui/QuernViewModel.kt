@@ -18,6 +18,8 @@ import com.quern.app.data.sync.AccountException
 import com.quern.app.data.sync.AccountUiMessage
 import com.quern.app.data.sync.QuernAccount
 import com.quern.app.data.sync.QuernAccountState
+import com.quern.app.data.sync.QuernSyncEngine
+import com.quern.app.data.sync.SyncStatus
 import com.quern.app.domain.model.AppSettings
 import com.quern.app.domain.model.CatalogRow
 import com.quern.app.domain.model.DebridAccountStatus
@@ -65,8 +67,21 @@ class QuernViewModel(
     val repository: QuernRepository,
     val settingsStore: SettingsStore,
     val cloudSyncManager: CloudSyncManager,
-    val quernAccount: QuernAccount
+    val quernAccount: QuernAccount,
+    val syncEngine: QuernSyncEngine
 ) : ViewModel() {
+
+    // ---- Account sync ----
+    val syncStatus: StateFlow<SyncStatus> = syncEngine.status
+
+    fun syncNow() {
+        viewModelScope.launch { syncEngine.syncNow() }
+    }
+
+    init {
+        // Addons installed or removed on another device / the website: reload the Home rows.
+        viewModelScope.launch { syncEngine.addonsApplied.collect { refreshHome() } }
+    }
 
     val appSettings: StateFlow<AppSettings> = settingsStore.settings
     val pinMigrationState: StateFlow<PinMigrationState> = settingsStore.pinMigrationState
@@ -885,10 +900,11 @@ class QuernViewModel(
         private val repository: QuernRepository,
         private val settingsStore: SettingsStore,
         private val cloudSyncManager: CloudSyncManager,
-        private val quernAccount: QuernAccount
+        private val quernAccount: QuernAccount,
+        private val syncEngine: QuernSyncEngine
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            QuernViewModel(repository, settingsStore, cloudSyncManager, quernAccount) as T
+            QuernViewModel(repository, settingsStore, cloudSyncManager, quernAccount, syncEngine) as T
     }
 }
