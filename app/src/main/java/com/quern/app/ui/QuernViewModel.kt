@@ -259,7 +259,14 @@ class QuernViewModel(
     }
 
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
+        val before = settingsStore.settings.value.profiles.map { it.id }.toSet()
         settingsStore.update(transform)
+        val after = settingsStore.settings.value.profiles.map { it.id }.toSet()
+        // A deleted profile takes its own watch history and favorites with it.
+        val removed = before - after
+        if (removed.isNotEmpty()) {
+            viewModelScope.launch { removed.forEach { repository.deleteProfileData(it) } }
+        }
     }
 
     fun applyDevicePreset(preset: QuernDevicePreset) {

@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "installed_addons")
@@ -23,9 +25,11 @@ data class AddonEntity(
     val priority: Int = 0
 )
 
-@Entity(tableName = "watch_history")
+/** Per-profile watch progress. Primary key is (profileId, contentId) since schema v2. */
+@Entity(tableName = "watch_history", primaryKeys = ["profileId", "contentId"])
 data class WatchHistoryEntity(
-    @PrimaryKey val contentId: String,
+    val profileId: String,
+    val contentId: String,
     val title: String,
     val mediaType: String,
     val posterUrl: String?,
@@ -38,9 +42,11 @@ data class WatchHistoryEntity(
     val updatedAt: Long
 )
 
-@Entity(tableName = "favorites")
+/** Per-profile favorites. Primary key is (profileId, contentId) since schema v2. */
+@Entity(tableName = "favorites", primaryKeys = ["profileId", "contentId"])
 data class FavoriteEntity(
-    @PrimaryKey val contentId: String,
+    val profileId: String,
+    val contentId: String,
     val title: String,
     val mediaType: String,
     val posterUrl: String?,
@@ -86,32 +92,38 @@ interface AddonDao {
 
 @Dao
 interface WatchHistoryDao {
-    @Query("SELECT * FROM watch_history ORDER BY updatedAt DESC LIMIT 30")
-    fun observeRecent(): Flow<List<WatchHistoryEntity>>
+    @Query("SELECT * FROM watch_history WHERE profileId = :profileId ORDER BY updatedAt DESC LIMIT 30")
+    fun observeRecent(profileId: String): Flow<List<WatchHistoryEntity>>
 
-    @Query("SELECT * FROM watch_history WHERE contentId = :contentId LIMIT 1")
-    suspend fun getById(contentId: String): WatchHistoryEntity?
+    @Query("SELECT * FROM watch_history WHERE profileId = :profileId AND contentId = :contentId LIMIT 1")
+    suspend fun getById(profileId: String, contentId: String): WatchHistoryEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: WatchHistoryEntity)
 
-    @Query("DELETE FROM watch_history WHERE contentId = :contentId")
-    suspend fun delete(contentId: String)
+    @Query("DELETE FROM watch_history WHERE profileId = :profileId AND contentId = :contentId")
+    suspend fun delete(profileId: String, contentId: String)
+
+    @Query("DELETE FROM watch_history WHERE profileId = :profileId")
+    suspend fun deleteAllForProfile(profileId: String)
 }
 
 @Dao
 interface FavoriteDao {
-    @Query("SELECT * FROM favorites ORDER BY addedAt DESC")
-    fun observeAll(): Flow<List<FavoriteEntity>>
+    @Query("SELECT * FROM favorites WHERE profileId = :profileId ORDER BY addedAt DESC")
+    fun observeAll(profileId: String): Flow<List<FavoriteEntity>>
 
-    @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE contentId = :contentId)")
-    fun observeIsFavorite(contentId: String): Flow<Boolean>
+    @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE profileId = :profileId AND contentId = :contentId)")
+    fun observeIsFavorite(profileId: String, contentId: String): Flow<Boolean>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: FavoriteEntity)
 
-    @Query("DELETE FROM favorites WHERE contentId = :contentId")
-    suspend fun delete(contentId: String)
+    @Query("DELETE FROM favorites WHERE profileId = :profileId AND contentId = :contentId")
+    suspend fun delete(profileId: String, contentId: String)
+
+    @Query("DELETE FROM favorites WHERE profileId = :profileId")
+    suspend fun deleteAllForProfile(profileId: String)
 }
 
 @Dao
@@ -136,7 +148,7 @@ interface MediaServerDao {
         FavoriteEntity::class,
         MediaServerEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class QuernDatabase : RoomDatabase() {
@@ -146,8 +158,53 @@ abstract class QuernDatabase : RoomDatabase() {
     abstract fun mediaServerDao(): MediaServerDao
 
     companion object {
-        fun build(context: Context): QuernDatabase =
+        /**
+         * @param legacyProfileId profile that receives history/favorites saved before profiles were
+         * separated (the profile active at upgrade time).
+         */
+        fun build(context: Context, legacyProfileId: String): QuernDatabase =
             Room.databaseBuilder(context.applicationContext, QuernDatabase::class.java, "quern.db")
+                .addMigrations(migration1To2(legacyProfileId))
                 .build()
+
+        /** v1 -> v2: watch_history and favorites become per-profile. Keeps every existing row. */
+        internal fun migration1To2(legacyProfileId: String) = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS watch_history_v2 (" +
+                        "profileId TEXT NOT NULL, contentId TEXT NOT NULL, title TEXT NOT NULL, " +
+                        "mediaType TEXT NOT NULL, posterUrl TEXT, backdropUrl TEXT, " +
+                        "positionMs INTEGER NOT NULL, durationMs INTEGER NOT NULL, episodeId TEXT, " +
+                        "episodeLabel TEXT, lastStreamUrl TEXT, updatedAt INTEGER NOT NULL, " +
+                        "PRIMARY KEY(profileId, contentId))"
+                )
+                db.execSQL(
+                    "INSERT INTO watch_history_v2 (profileId, contentId, title, mediaType, posterUrl, " +
+                        "backdropUrl, positionMs, durationMs, episodeId, episodeLabel, lastStreamUrl, updatedAt) " +
+                        "SELECT ?, contentId, title, mediaType, posterUrl, backdropUrl, positionMs, durationMs, " +
+                        "episodeId, episodeLabel, lastStreamUrl, updatedAt FROM watch_history",
+                    arrayOf<Any>(legacyProfileId)
+                )
+                db.execSQL("DROP TABLE watch_history")
+                db.execSQL("ALTER TABLE watch_history_v2 RENAME TO watch_history")
+
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS favorites_v2 (" +
+                        "profileId TEXT NOT NULL, contentId TEXT NOT NULL, title TEXT NOT NULL, " +
+                        "mediaType TEXT NOT NULL, posterUrl TEXT, backdropUrl TEXT, year TEXT, " +
+                        "rating TEXT, origin TEXT NOT NULL, sourceId TEXT, addedAt INTEGER NOT NULL, " +
+                        "PRIMARY KEY(profileId, contentId))"
+                )
+                db.execSQL(
+                    "INSERT INTO favorites_v2 (profileId, contentId, title, mediaType, posterUrl, " +
+                        "backdropUrl, year, rating, origin, sourceId, addedAt) " +
+                        "SELECT ?, contentId, title, mediaType, posterUrl, backdropUrl, year, rating, origin, " +
+                        "sourceId, addedAt FROM favorites",
+                    arrayOf<Any>(legacyProfileId)
+                )
+                db.execSQL("DROP TABLE favorites")
+                db.execSQL("ALTER TABLE favorites_v2 RENAME TO favorites")
+            }
+        }
     }
 }

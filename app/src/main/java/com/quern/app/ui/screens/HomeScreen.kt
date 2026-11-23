@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -258,7 +259,19 @@ fun HomeScreen(
                     isFirstRowAttached = { isFirstRowItemAttached }
                 )
 
+                // When Continue Watching appears (e.g. after switching to a profile that has history),
+                // LazyColumn keeps the current first row anchored and inserts the new row above the
+                // viewport. Scroll back up so it's actually visible when the user is at the top.
+                val tvListState = rememberLazyListState()
+                val hasContinueWatching = sortedContinueWatching.isNotEmpty()
+                LaunchedEffect(hasContinueWatching) {
+                    if (hasContinueWatching && tvListState.firstVisibleItemIndex <= 1) {
+                        tvListState.scrollToItem(0)
+                    }
+                }
+
                 LazyColumn(
+                    state = tvListState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),

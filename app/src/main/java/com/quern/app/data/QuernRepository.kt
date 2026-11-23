@@ -20,7 +20,10 @@ import com.quern.app.domain.model.WatchProgress
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -34,9 +37,16 @@ class QuernRepository(
     val tmdbClient: TmdbClient,
     val traktClient: TraktClient,
     private val historyDao: WatchHistoryDao,
-    private val favoriteDao: FavoriteDao
+    private val favoriteDao: FavoriteDao,
+    /** Active profile id; history and favorites are kept per profile. */
+    activeProfileId: Flow<String>,
+    /** Current active profile id, read at write time. */
+    private val currentProfileId: () -> String
 ) {
-    val continueWatching: Flow<List<WatchProgress>> = historyDao.observeRecent().map { list ->
+    private val profileId: Flow<String> = activeProfileId.distinctUntilChanged()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val continueWatching: Flow<List<WatchProgress>> = profileId.flatMapLatest { historyDao.observeRecent(it) }.map { list ->
         list.map {
             WatchProgress(
                 contentId = it.contentId,
@@ -54,7 +64,8 @@ class QuernRepository(
         }
     }
 
-    val favorites: Flow<List<MediaItem>> = favoriteDao.observeAll().map { list ->
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val favorites: Flow<List<MediaItem>> = profileId.flatMapLatest { favoriteDao.observeAll(it) }.map { list ->
         list.map {
             MediaItem(
                 id = it.contentId,
@@ -70,14 +81,18 @@ class QuernRepository(
         }
     }
 
-    fun observeIsFavorite(contentId: String): Flow<Boolean> = favoriteDao.observeIsFavorite(contentId)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun observeIsFavorite(contentId: String): Flow<Boolean> =
+        profileId.flatMapLatest { favoriteDao.observeIsFavorite(it, contentId) }
 
     suspend fun toggleFavorite(item: MediaItem, currentlyFavorite: Boolean) {
+        val pid = currentProfileId()
         if (currentlyFavorite) {
-            favoriteDao.delete(item.id)
+            favoriteDao.delete(pid, item.id)
         } else {
             favoriteDao.upsert(
                 FavoriteEntity(
+                    profileId = pid,
                     contentId = item.id,
                     title = item.title,
                     mediaType = item.type.stremioValue,
@@ -97,6 +112,7 @@ class QuernRepository(
         if (progress.durationMs <= 0L) return
         historyDao.upsert(
             WatchHistoryEntity(
+                profileId = currentProfileId(),
                 contentId = progress.contentId,
                 title = progress.title,
                 mediaType = progress.type.stremioValue,
@@ -113,10 +129,10 @@ class QuernRepository(
     }
 
     suspend fun getSavedPositionMs(contentId: String): Long =
-        historyDao.getById(contentId)?.positionMs ?: 0L
+        historyDao.getById(currentProfileId(), contentId)?.positionMs ?: 0L
 
     suspend fun getSavedWatchProgress(contentId: String): WatchProgress? =
-        historyDao.getById(contentId)?.let {
+        historyDao.getById(currentProfileId(), contentId)?.let {
             WatchProgress(
                 contentId = it.contentId,
                 title = it.title,
@@ -131,6 +147,12 @@ class QuernRepository(
                 updatedAt = it.updatedAt
             )
         }
+
+    /** Removes a deleted profile's watch history and favorites. */
+    suspend fun deleteProfileData(profileId: String) {
+        historyDao.deleteAllForProfile(profileId)
+        favoriteDao.deleteAllForProfile(profileId)
+    }
 
     suspend fun loadHomeCatalogs(hiddenCatalogKeys: Set<String> = emptySet()): List<CatalogRow> = coroutineScope {
         val tmdbDeferred = async { tmdbClient.getHomeCatalogRows() }

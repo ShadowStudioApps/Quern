@@ -20,6 +20,7 @@ import com.quern.app.data.servers.PlexClient
 import com.quern.app.data.servers.WebDavClient
 import com.quern.app.data.sync.CloudSyncManager
 import com.quern.app.data.sync.QuernAccount
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -40,7 +41,8 @@ class AppContainer(context: Context) {
 
     val vault: SecureVault = SecureVault(context)
     val settingsStore: SettingsStore = SettingsStore(context)
-    val database: QuernDatabase = QuernDatabase.build(context)
+    // Rows saved before profiles were separated move to the profile that is active at upgrade time.
+    val database: QuernDatabase = QuernDatabase.build(context, settingsStore.settings.value.activeProfileId)
 
     val torBoxClient = TorBoxClient(httpClient, json)
     val realDebridClient = RealDebridClient(httpClient, json)
@@ -85,7 +87,9 @@ class AppContainer(context: Context) {
         tmdbClient = tmdbClient,
         traktClient = traktClient,
         historyDao = database.watchHistoryDao(),
-        favoriteDao = database.favoriteDao()
+        favoriteDao = database.favoriteDao(),
+        activeProfileId = settingsStore.settings.map { it.activeProfileId },
+        currentProfileId = { settingsStore.settings.value.activeProfileId }
     )
 
     /** Quern account on Shadow Studio's server (sign up / sign in / session / encryption key). */
