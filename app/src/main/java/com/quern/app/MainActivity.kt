@@ -7,12 +7,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModelProvider
+import com.quern.app.data.sync.DeviceLinkClient
+import com.quern.app.data.sync.PendingDeviceLink
 import com.quern.app.ui.QuernApp
 import com.quern.app.ui.QuernViewModel
 
 class MainActivity : ComponentActivity() {
 
     private val pendingAddonUrl = mutableStateOf<String?>(null)
+    private val pendingDeviceLink = mutableStateOf<PendingDeviceLink?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,7 +40,9 @@ class MainActivity : ComponentActivity() {
                 viewModel = viewModel,
                 okHttpClient = container.httpClient,
                 pendingDeepLinkAddonUrl = pendingAddonUrl.value,
-                onDeepLinkConsumed = { pendingAddonUrl.value = null }
+                onDeepLinkConsumed = { pendingAddonUrl.value = null },
+                pendingDeviceLink = pendingDeviceLink.value,
+                onDeviceLinkDismissed = { pendingDeviceLink.value = null }
             )
         }
     }
@@ -58,8 +63,13 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         val data = intent?.dataString ?: return
-        if (data.startsWith("stremio://", ignoreCase = true)) {
-            pendingAddonUrl.value = data
+        when {
+            data.startsWith("stremio://", ignoreCase = true) -> {
+                pendingAddonUrl.value = data
+            }
+            data.startsWith("quern://", ignoreCase = true) -> {
+                DeviceLinkClient.parseDeepLink(data)?.let { pendingDeviceLink.value = it }
+            }
         }
     }
 }

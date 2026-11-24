@@ -23,6 +23,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * TMDB v3 API Client.
@@ -35,10 +36,66 @@ class TmdbClient(
     private val json: Json,
     private val vault: SecureVault
 ) {
+    private val logoCache = ConcurrentHashMap<String, String>()
+
     fun getConfig(): TmdbConfig = TmdbConfig(
         apiKey = vault.getString(KEY_API),
         language = vault.getString(KEY_LANG, "en-US")
     )
+
+    /**
+     * Fetches the transparent title logo PNG from TMDB `/images` when a user TMDB API key is
+     * configured. Results (including misses) are cached in memory for the session.
+     */
+    suspend fun fetchLogoUrl(tmdbId: Int?, imdbId: String?, type: MediaType): String? = withContext(Dispatchers.IO) {
+        val cfg = getConfig()
+        if (!cfg.isConfigured) return@withContext null
+        val cacheKey = "${type.stremioValue}_${tmdbId ?: imdbId.orEmpty()}"
+        if (cacheKey.endsWith("_")) return@withContext null
+        logoCache[cacheKey]?.let { return@withContext it.ifBlank { null } }
+
+        val pathType = if (type == MediaType.SERIES) "tv" else "movie"
+        val resolvedTmdbId = tmdbId ?: run {
+            val id = imdbId?.takeIf { it.startsWith("tt") } ?: return@run null
+            runCatching {
+                val req = buildRequest("/find/$id?external_source=imdb_id", cfg.apiKey, cfg.language)
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val obj = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
+                    val key = if (type == MediaType.SERIES) "tv_results" else "movie_results"
+                    (obj[key] as? JsonArray)?.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.intOrNull
+                }
+            }.getOrNull()
+        } ?: run {
+            logoCache[cacheKey] = ""
+            return@withContext null
+        }
+
+        val langPrefix = cfg.language.substringBefore("-").lowercase(Locale.US).ifBlank { "en" }
+        val found = runCatching {
+            val req = buildRequest(
+                "/$pathType/$resolvedTmdbId/images?include_image_language=$langPrefix,en,null",
+                cfg.apiKey,
+                cfg.language
+            )
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val logos = json.parseToJsonElement(resp.body?.string().orEmpty())
+                    .jsonObject["logos"] as? JsonArray ?: return@use null
+                val candidates = logos.mapNotNull { it as? JsonObject }
+                    .filter { !(it["file_path"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()) }
+                val chosen = candidates.firstOrNull {
+                    it["iso_639_1"]?.jsonPrimitive?.contentOrNull.equals(langPrefix, ignoreCase = true)
+                } ?: candidates.firstOrNull {
+                    it["iso_639_1"]?.jsonPrimitive?.contentOrNull.equals("en", ignoreCase = true)
+                } ?: candidates.firstOrNull()
+                chosen?.get("file_path")?.jsonPrimitive?.contentOrNull?.let { "$IMG_LOGO$it" }
+            }
+        }.getOrNull()
+
+        logoCache[cacheKey] = found.orEmpty()
+        found
+    }
 
     fun saveConfig(config: TmdbConfig) {
         vault.putString(KEY_API, config.apiKey.trim())
@@ -222,6 +279,7 @@ class TmdbClient(
     companion object {
         private const val BASE_URL = "https://api.themoviedb.org/3"
         private const val IMG_POSTER = "https://image.tmdb.org/t/p/w500"
+        private const val IMG_LOGO = "https://image.tmdb.org/t/p/w500"
         private const val IMG_BACKDROP = "https://image.tmdb.org/t/p/w1280"
         private const val KEY_API = "tmdb_api_key"
         private const val KEY_LANG = "tmdb_lang"

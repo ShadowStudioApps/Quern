@@ -586,6 +586,7 @@ fun SettingsScreen(
             else -> {
                 SettingsSubPageContent(
                     subPage = targetSubPage,
+                    isTv = isTv,
                     settings = settings,
                     pinMigrationState = pinMigrationState,
                     onRetryPinMigration = onRetryPinMigration,
@@ -2794,6 +2795,7 @@ private fun SettingsCategoryOverviewPane(
 @Composable
 private fun SettingsSubPageContent(
     subPage: SettingsSubPage,
+    isTv: Boolean = false,
     settings: AppSettings,
     pinMigrationState: PinMigrationState = PinMigrationState.DONE,
     onRetryPinMigration: () -> Unit = {},
@@ -2837,7 +2839,7 @@ private fun SettingsSubPageContent(
         when (subPage) {
             SettingsSubPage.ACCOUNT -> {
                 item(key = "quern_account") {
-                    QuernAccountCard(account = account)
+                    QuernAccountCard(account = account, isTv = isTv)
                 }
 
                 // Portable Settings Backup (Strictly NO Secrets)

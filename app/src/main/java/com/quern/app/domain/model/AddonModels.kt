@@ -119,9 +119,11 @@ data class StremioMetaPreview(
     val name: String = "",
     val poster: String? = null,
     val background: String? = null,
+    val logo: String? = null,
     val description: String? = null,
     val releaseInfo: String? = null,
     val released: String? = null,
+    val runtime: String? = null,
     val imdbRating: String? = null,
     val genres: List<String> = emptyList()
 )
@@ -138,6 +140,7 @@ data class StremioMetaDetail(
     val name: String = "",
     val poster: String? = null,
     val background: String? = null,
+    val logo: String? = null,
     val description: String? = null,
     val releaseInfo: String? = null,
     val released: String? = null,

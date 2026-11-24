@@ -49,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,13 +62,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.focus.FocusEventModifierNode
-import androidx.compose.ui.focus.FocusRequesterModifierNode
-import androidx.compose.ui.focus.FocusState
-import androidx.compose.ui.focus.requestFocus
-import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
-import androidx.compose.ui.node.ModifierNodeElement
-import androidx.compose.ui.node.currentValueOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
@@ -76,6 +70,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -86,9 +81,12 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -96,12 +94,19 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.memory.MemoryCache
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.roundToInt
 import com.quern.app.domain.model.CardCornerPreset
 import com.quern.app.domain.model.CardShapePreset
 import com.quern.app.domain.model.CardSizePreset
 import com.quern.app.domain.model.CatalogRow
+import com.quern.app.domain.model.MediaType
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.domain.model.UiModeOverride
+import com.quern.app.domain.model.WatchProgress
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LocalQuernScaledDensity
 import com.quern.app.ui.theme.LocalQuernStrings
@@ -154,42 +159,70 @@ fun quernSwitchColors(onAccentSurface: Boolean = false): SwitchColors {
  * clickable() already registers a focus target that handles both D-Pad focus and OK/Enter!
  * Uses indication = null so Material3's default rectangular focus overlay/ripple node
  * isn't allocated or drawn behind custom TV focus cards.
+ *
+ * When rendered inside [LocalContentFocusMemory], automatically registers a remembered
+ * [FocusRequester] and records it whenever this item gains focus so returning RIGHT (LEFT in RTL)
+ * from the floating TV navigation rail restores this exact item reliably.
  */
+@Composable
 fun Modifier.tvClickable(
     enabled: Boolean = true,
     onFocusChangedState: (Boolean) -> Unit = {},
     onFocused: () -> Unit = {},
     onClick: () -> Unit
-): Modifier = this
-    .onFocusChanged { state ->
-        val focused = state.isFocused
-        onFocusChangedState(focused)
-        if (focused) onFocused()
+): Modifier {
+    val memory = LocalContentFocusMemory.current
+    val rememberRequester = if (memory != null) remember { FocusRequester() } else null
+    if (memory != null && rememberRequester != null) {
+        DisposableEffect(memory, rememberRequester) {
+            onDispose { memory.clear(rememberRequester) }
+        }
     }
-    .then(RememberLastFocusedElement)
-    .clickable(
-        interactionSource = null,
-        indication = null,
-        enabled = enabled,
-        onClick = onClick
-    )
+    return this
+        .then(if (rememberRequester != null) Modifier.focusRequester(rememberRequester) else Modifier)
+        .onFocusChanged { state ->
+            val focused = state.isFocused
+            if (focused && memory != null && rememberRequester != null) {
+                memory.record(rememberRequester)
+            }
+            onFocusChangedState(focused)
+            if (focused) onFocused()
+        }
+        .clickable(
+            interactionSource = null,
+            indication = null,
+            enabled = enabled,
+            onClick = onClick
+        )
+}
 
 /**
- * Remembers the last focused tvClickable inside a content area so focus coming back
- * from the navigation rail (DPAD_RIGHT) lands on that exact item instead of the
- * geometrically nearest one. Provided only around screen content, never around the rail.
+ * Remembers the last focused tvClickable inside a content area via its real [FocusRequester]
+ * so focus coming back from the navigation rail (DPAD_RIGHT / DPAD_LEFT in RTL) always lands on
+ * that exact item instead of a stale node or the geometrically nearest card.
+ * Provided only around screen content, never around the rail.
  */
 class ContentFocusMemory {
-    internal var last: RememberLastFocusedNode? = null
+    private var lastRequester: FocusRequester? = null
+    internal var fallbackEntry: (() -> Boolean)? = null
 
-    /** Requests focus on the remembered item. Returns false if there is nothing to restore. */
+    fun record(requester: FocusRequester) {
+        lastRequester = requester
+    }
+
+    fun clear(requester: FocusRequester) {
+        if (lastRequester === requester) lastRequester = null
+    }
+
+    /** Requests focus on the remembered item, or a screen-registered fallback entry (e.g. Hero CTA). */
     fun restore(): Boolean {
-        val node = last ?: return false
-        if (!node.isAttached) {
-            last = null
-            return false
+        val req = lastRequester
+        if (req != null) {
+            val ok = runCatching { req.requestFocus(); true }.getOrDefault(false)
+            if (ok) return true
+            lastRequester = null
         }
-        return node.requestFocus()
+        return fallbackEntry?.invoke() == true
     }
 }
 
@@ -202,32 +235,33 @@ val LocalContentFocusMemory = staticCompositionLocalOf<ContentFocusMemory?> { nu
  */
 val LocalTvRailInset = staticCompositionLocalOf { 0.dp }
 
-private object RememberLastFocusedElement : ModifierNodeElement<RememberLastFocusedNode>() {
-    override fun create() = RememberLastFocusedNode()
-    override fun update(node: RememberLastFocusedNode) = Unit
-    override fun hashCode(): Int = "RememberLastFocused".hashCode()
-    override fun equals(other: Any?): Boolean = other === this
-}
+/**
+ * Shared Home layout spacing constants used by the hero, Continue Watching, and every catalog
+ * row so horizontal card gaps, title-to-card gaps, inter-row vertical gaps, and left/right edges
+ * stay uniform across all rows at both 100% and smaller Interface Size scales.
+ */
+object QuernHomeSpacing {
+    fun contentStartPadding(isTv: Boolean, railInset: Dp): Dp =
+        if (isTv) railInset + 18.dp else 14.dp
 
-internal class RememberLastFocusedNode :
-    Modifier.Node(),
-    FocusEventModifierNode,
-    FocusRequesterModifierNode,
-    CompositionLocalConsumerModifierNode {
+    fun contentEndPadding(isTv: Boolean): Dp =
+        if (isTv) 24.dp else 14.dp
 
-    private var memory: ContentFocusMemory? = null
+    /** Uniform horizontal gap between sibling cards in Continue Watching and poster rows. */
+    fun cardHorizontalGap(isTv: Boolean): Dp =
+        if (isTv) 15.dp else 10.dp
 
-    override fun onFocusEvent(focusState: FocusState) {
-        if (!focusState.isFocused) return
-        val m = currentValueOf(LocalContentFocusMemory) ?: return
-        memory = m
-        m.last = this
-    }
+    /** Uniform vertical gap between a row header title and its cards (leaves room for 6% focus lift). */
+    fun titleToCardsGap(isTv: Boolean): Dp =
+        if (isTv) 10.dp else 8.dp
 
-    override fun onDetach() {
-        memory?.let { if (it.last === this) it.last = null }
-        memory = null
-    }
+    /** Uniform bottom clearance inside each LazyRow so focus scale/border never clips vertically. */
+    fun rowCardsBottomPadding(isTv: Boolean): Dp =
+        if (isTv) 8.dp else 6.dp
+
+    /** Uniform vertical gap between rows in the Home LazyColumn. */
+    fun rowVerticalGap(isTv: Boolean): Dp =
+        if (isTv) 14.dp else 12.dp
 }
 
 fun isTvHardware(
@@ -391,16 +425,45 @@ fun LumaHeroBanner(
     isFirstRowAttached: () -> Boolean = { false },
     totalSlides: Int = 1,
     activeSlideIndex: Int = 0,
+    heroHeight: Dp = if (isTv) 405.dp else 280.dp,
+    heroAspectRatio: Float = if (isTv) 2.37f else 1.45f,
+    activeProgress: WatchProgress? = null,
+    onResumeDirect: ((WatchProgress) -> Unit)? = null,
+    onHeroFocused: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val palette = LocalQuernPalette.current
     val strings = LocalQuernStrings.current
+    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val railInset = if (isTv) LocalTvRailInset.current else 0.dp
-    val heroHeight = if (isTv) 254.dp else 252.dp
-    val viewDetailsFocus = remember { FocusRequester() }
+    val startPad = QuernHomeSpacing.contentStartPadding(isTv, railInset)
+    val endPad = QuernHomeSpacing.contentEndPadding(isTv)
+    val primaryCtaFocus = remember { FocusRequester() }
+    val contentFocusMemory = LocalContentFocusMemory.current
+    var primaryCtaAttached by remember { mutableStateOf(false) }
+    if (isTv && contentFocusMemory != null) {
+        DisposableEffect(contentFocusMemory, primaryCtaFocus) {
+            val entry: () -> Boolean = {
+                if (primaryCtaAttached) {
+                    runCatching { primaryCtaFocus.requestFocus(); true }.getOrDefault(false)
+                } else {
+                    false
+                }
+            }
+            contentFocusMemory.fallbackEntry = entry
+            onDispose {
+                if (contentFocusMemory.fallbackEntry === entry) {
+                    contentFocusMemory.fallbackEntry = null
+                }
+            }
+        }
+    }
     val isAr = strings.watchNow == "شاهد الآن"
     val viewDetailsLabel = if (isAr) "عرض التفاصيل" else "View Details"
+    val heroTextShadow = remember {
+        Shadow(color = Color.Black.copy(alpha = 0.68f), offset = Offset(0f, 1.5f), blurRadius = 5f)
+    }
     val typeLabel = when (item.type) {
         com.quern.app.domain.model.MediaType.SERIES -> if (isAr) "مسلسل" else "Series"
         com.quern.app.domain.model.MediaType.MOVIE -> if (isAr) "فيلم" else "Movie"
@@ -417,21 +480,24 @@ fun LumaHeroBanner(
     }
 
     val shownBackdropKey = remember { arrayOfNulls<MemoryCache.Key>(1) }
-    val imageModel = remember(item.backdropUrl, item.posterUrl) {
+    val imageModel = remember(item.backdropUrl, item.posterUrl, heroAspectRatio, isTv, isRtl) {
         val url = item.backdropUrl ?: item.posterUrl
         if (url.isNullOrBlank()) null else {
-            ImageRequest.Builder(context)
-                .data(url)
-                .size(960, 540)
-                .placeholderMemoryCacheKey(shownBackdropKey[0])
-                .crossfade(240)
-                .build()
+            buildHeroBackdropRequest(
+                context = context,
+                imageUrl = url,
+                heroAspectRatio = heroAspectRatio,
+                isTv = isTv,
+                isRtl = isRtl,
+                placeholderKey = shownBackdropKey[0],
+                crossfadeMs = 240
+            )
         }
     }
 
-    // Full-bleed edge-to-edge hero: extends all the way behind the floating left rail and
-    // melts smoothly into the app's blurred backdrop using a single hardware-accelerated scrim
-    // (no CompositingStrategy.Offscreen FBO, keeping GPU RenderTarget memory minimal and scrolling silky).
+    // Seamless edge-to-edge hero: buildHeroBackdropRequest bakes both the localized readability
+    // shadow and the bottom/rail alpha melt into one cached 800x450 bitmap off the UI thread
+    // (ZERO duplicate original+transformed bitmaps, ZERO Offscreen FBO, ZERO per-frame radial gradients).
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -447,65 +513,15 @@ fun LumaHeroBanner(
             )
         }
 
-        // Single-pass cinema scrim: blends bottom & left edges smoothly into the blurred theme
-        // backdrop without allocating any offscreen RenderTarget.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithCache {
-                    val meltColor = if (palette.isGlossy) {
-                        palette.background
-                    } else {
-                        Color(
-                            red = (palette.background.red * 0.86f + palette.ambientGlow.red * 0.14f).coerceIn(0f, 1f),
-                            green = (palette.background.green * 0.86f + palette.ambientGlow.green * 0.14f).coerceIn(0f, 1f),
-                            blue = (palette.background.blue * 0.86f + palette.ambientGlow.blue * 0.14f).coerceIn(0f, 1f),
-                            alpha = 1f
-                        )
-                    }
-                    val vertical = Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.0f to palette.background.copy(alpha = 0.34f),
-                            0.24f to Color.Transparent,
-                            0.56f to meltColor.copy(alpha = 0.42f),
-                            0.82f to meltColor.copy(alpha = 0.88f),
-                            1.0f to meltColor
-                        )
-                    )
-                    val horizontal = Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0.0f to meltColor.copy(alpha = 0.86f),
-                            0.24f to palette.background.copy(alpha = 0.56f),
-                            0.54f to palette.background.copy(alpha = 0.12f),
-                            0.78f to Color.Transparent,
-                            1.0f to Color.Transparent
-                        )
-                    )
-                    val ambientWash = if (!palette.isGlossy) {
-                        Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.0f to palette.ambientGlow.copy(alpha = 0.14f),
-                                0.65f to Color.Transparent
-                            )
-                        )
-                    } else null
-                    onDrawBehind {
-                        drawRect(vertical)
-                        drawRect(horizontal)
-                        if (ambientWash != null) drawRect(ambientWash)
-                    }
-                }
-        )
-
         // Top Bar
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopStart)
                 .padding(
-                    start = if (isTv) railInset + 16.dp else 12.dp,
-                    end = if (isTv) 20.dp else 12.dp,
-                    top = if (isTv) 12.dp else 7.dp,
+                    start = startPad,
+                    end = endPad,
+                    top = if (isTv) 14.dp else 8.dp,
                     bottom = 6.dp
                 )
         ) {
@@ -532,7 +548,7 @@ fun LumaHeroBanner(
                             GlassCategoryPill(
                                 label = label,
                                 selected = key == selectedCategory,
-                                modifier = Modifier.focusProperties { down = viewDetailsFocus },
+                                modifier = Modifier.focusProperties { down = primaryCtaFocus },
                                 onClick = { onCategorySelected?.invoke(key) }
                             )
                         }
@@ -541,7 +557,7 @@ fun LumaHeroBanner(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (!activeServiceBadge.isNullOrBlank()) {
                         Surface(
@@ -570,7 +586,7 @@ fun LumaHeroBanner(
                             ),
                             modifier = Modifier
                                 .size(30.dp)
-                                .focusProperties { down = viewDetailsFocus }
+                                .focusProperties { down = primaryCtaFocus }
                                 .clip(CircleShape)
                                 .tvClickable(
                                     onFocusChangedState = { refFocused = it },
@@ -586,6 +602,9 @@ fun LumaHeroBanner(
                                 )
                             }
                         }
+                    }
+                    if (isTv) {
+                        TvTopRightClock()
                     }
                 }
             }
@@ -604,121 +623,245 @@ fun LumaHeroBanner(
             }
         }
 
-        // Bottom Spotlight Info (Matches reference: Title, Type • Year, IMDb badge, Synopsis, View Details pill)
+        // Bottom Spotlight Info: Meta Logo (fallback large text), single metadata line, 2-line synopsis, smart CTA
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(
-                    start = if (isTv) railInset + 16.dp else 14.dp,
-                    end = if (isTv) 20.dp else 14.dp,
-                    bottom = 16.dp
+                    start = startPad,
+                    end = endPad,
+                    bottom = if (isTv) 26.dp else 16.dp
                 )
-                .fillMaxWidth(if (isTv) 0.58f else 0.92f)
+                .fillMaxWidth(if (isTv) 0.54f else 0.92f)
         ) {
-            Text(
-                text = item.title,
-                color = LumaTextPrimary,
-                fontSize = if (isTv) 24.sp else 20.sp,
-                lineHeight = if (isTv) 27.sp else 23.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(5.dp))
-
-            // Type • Year line (e.g. Series • 2026)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = typeLabel,
-                    color = Color.White.copy(alpha = 0.92f),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold
+            val logoUrl = item.logoUrl?.takeIf { it.isNotBlank() }
+            var logoFailed by remember(logoUrl) { mutableStateOf(false) }
+            if (logoUrl != null && !logoFailed) {
+                val logoReq = remember(logoUrl) {
+                    ImageRequest.Builder(context)
+                        .data(logoUrl)
+                        .size(560, 180)
+                        .crossfade(180)
+                        .build()
+                }
+                AsyncImage(
+                    model = logoReq,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.BottomStart,
+                    onError = { logoFailed = true },
+                    modifier = Modifier
+                        .heightIn(max = if (isTv) 72.dp else 50.dp)
+                        .widthIn(max = if (isTv) 300.dp else 210.dp)
                 )
-                item.year?.takeIf { it.isNotBlank() }?.let { yr ->
-                    Text("•", color = Color.White.copy(alpha = 0.65f), fontSize = 11.5.sp)
-                    Text(
-                        text = yr,
-                        color = Color.White.copy(alpha = 0.92f),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+            } else {
+                Text(
+                    text = item.title,
+                    color = LumaTextPrimary,
+                    fontSize = if (isTv) 30.sp else 22.sp,
+                    lineHeight = if (isTv) 34.sp else 26.sp,
+                    fontWeight = FontWeight.Black,
+                    style = TextStyle(shadow = heroTextShadow),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // Single metadata line: type • genre • runtime • year • IMDb
+            val metaParts = remember(typeLabel, item.genres, item.runtime, item.year) {
+                buildList {
+                    add(typeLabel)
+                    item.genres.firstOrNull()?.takeIf { it.isNotBlank() }?.let { add(it) }
+                    item.runtime?.takeIf { it.isNotBlank() }?.let { add(it) }
+                    item.year?.takeIf { it.isNotBlank() }?.let { add(it) }
                 }
             }
-
-            // Authentic Yellow IMDb Badge + Rating
-            item.rating?.takeIf { it.isNotBlank() }?.let { ratingVal ->
-                Spacer(Modifier.height(5.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Surface(
-                        color = Color(0xFFF5C518),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            text = "IMDb",
-                            color = Color.Black,
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
-                        )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                metaParts.forEachIndexed { idx, part ->
+                    if (idx > 0) {
+                        Text("•", color = Color.White.copy(alpha = 0.65f), fontSize = 11.5.sp)
                     }
                     Text(
-                        text = ratingVal,
-                        color = Color(0xFFF5C518),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
+                        text = part,
+                        color = Color.White.copy(alpha = 0.94f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        style = TextStyle(shadow = heroTextShadow),
+                        maxLines = 1
                     )
+                }
+                item.rating?.takeIf { it.isNotBlank() }?.let { ratingVal ->
+                    Text("•", color = Color.White.copy(alpha = 0.65f), fontSize = 11.5.sp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Surface(
+                            color = Color(0xFFF5C518),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "IMDb",
+                                color = Color.Black,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 4.5.dp, vertical = 1.dp)
+                            )
+                        }
+                        Text(
+                            text = ratingVal,
+                            color = Color(0xFFF5C518),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            style = TextStyle(shadow = heroTextShadow)
+                        )
+                    }
                 }
             }
 
             if (!item.overview.isNullOrBlank()) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(7.dp))
                 Text(
                     text = item.overview,
-                    color = Color.White.copy(alpha = 0.86f),
-                    fontSize = 11.sp,
-                    lineHeight = 15.5.sp,
-                    maxLines = 3,
+                    color = Color.White.copy(alpha = 0.90f),
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp,
+                    style = TextStyle(shadow = heroTextShadow),
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            Spacer(Modifier.height(11.dp))
+            Spacer(Modifier.height(14.dp))
 
-            // Sleek White Pill "View Details" CTA
-            var detailsFocused by remember { mutableStateOf(false) }
-            Surface(
-                color = if (detailsFocused) palette.accent else Color.White,
-                shape = RoundedCornerShape(999.dp),
-                border = if (detailsFocused) BorderStroke(2.dp, palette.focusRing) else null,
-                modifier = Modifier
-                    .focusRequester(viewDetailsFocus)
-                    .focusProperties {
-                        // Read at focus-search time, so attaching/detaching the first row never recomposes the hero
-                        down = if (firstRowFocusRequester != null && isFirstRowAttached()) {
-                            firstRowFocusRequester
-                        } else {
-                            FocusRequester.Default
+            // Smart Hero CTA: "Resume S1 E15 · 34 min left" + smaller "View Details" when in Continue Watching;
+            // otherwise a single primary "View Details" pill.
+            val downTargetMod = Modifier.focusProperties {
+                down = if (firstRowFocusRequester != null && isFirstRowAttached()) {
+                    firstRowFocusRequester
+                } else {
+                    FocusRequester.Default
+                }
+            }
+            if (activeProgress != null && onResumeDirect != null) {
+                val resumeLabel = remember(activeProgress, isAr) {
+                    val minsLeft = ((activeProgress.durationMs - activeProgress.positionMs)
+                        .coerceAtLeast(0L) / 60_000L)
+                    val epTag = activeProgress.episodeLabel
+                        ?.substringBefore("•")
+                        ?.trim()
+                        ?.takeIf { tag ->
+                            tag.isNotBlank() &&
+                                activeProgress.type == MediaType.SERIES &&
+                                !tag.all(Char::isDigit)
+                        }
+                    when {
+                        isAr && epTag != null && minsLeft > 0 -> "استئناف $epTag · متبقي $minsLeft د"
+                        isAr && epTag != null -> "استئناف $epTag"
+                        isAr && minsLeft > 0 -> "استئناف · متبقي $minsLeft د"
+                        isAr -> "استئناف"
+                        epTag != null && minsLeft > 0 -> "Resume $epTag · $minsLeft min left"
+                        epTag != null -> "Resume $epTag"
+                        minsLeft > 0 -> "Resume · $minsLeft min left"
+                        else -> "Resume"
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    var resumeFocused by remember { mutableStateOf(false) }
+                    Surface(
+                        color = if (resumeFocused) palette.accent else Color.White,
+                        shape = RoundedCornerShape(999.dp),
+                        border = if (resumeFocused) BorderStroke(2.dp, palette.focusRing) else null,
+                        modifier = Modifier
+                            .focusRequester(primaryCtaFocus)
+                            .onGloballyPositioned { coords -> primaryCtaAttached = coords.isAttached }
+                            .then(downTargetMod)
+                            .clip(RoundedCornerShape(999.dp))
+                            .tvClickable(
+                                onFocusChangedState = { resumeFocused = it },
+                                onFocused = { onHeroFocused?.invoke() },
+                                onClick = { onResumeDirect(activeProgress) }
+                            )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = if (resumeFocused) palette.onAccent else Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = resumeLabel,
+                                color = if (resumeFocused) palette.onAccent else Color.Black,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 11.5.sp,
+                                maxLines = 1
+                            )
                         }
                     }
-                    .clip(RoundedCornerShape(999.dp))
-                    .tvClickable(
-                        onFocusChangedState = { detailsFocused = it },
-                        onClick = { onSelect(item) }
+
+                    var detailsFocused by remember { mutableStateOf(false) }
+                    Surface(
+                        color = if (detailsFocused) palette.accent else Color.Black.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(999.dp),
+                        border = BorderStroke(
+                            width = if (detailsFocused) 2.dp else 1.dp,
+                            color = if (detailsFocused) palette.focusRing else Color.White.copy(alpha = 0.28f)
+                        ),
+                        modifier = Modifier
+                            .then(downTargetMod)
+                            .clip(RoundedCornerShape(999.dp))
+                            .tvClickable(
+                                onFocusChangedState = { detailsFocused = it },
+                                onFocused = { onHeroFocused?.invoke() },
+                                onClick = { onSelect(item) }
+                            )
+                    ) {
+                        Text(
+                            text = viewDetailsLabel,
+                            color = if (detailsFocused) palette.onAccent else Color.White.copy(alpha = 0.92f),
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.5.dp)
+                        )
+                    }
+                }
+            } else {
+                var detailsFocused by remember { mutableStateOf(false) }
+                Surface(
+                    color = if (detailsFocused) palette.accent else Color.White,
+                    shape = RoundedCornerShape(999.dp),
+                    border = if (detailsFocused) BorderStroke(2.dp, palette.focusRing) else null,
+                    modifier = Modifier
+                        .focusRequester(primaryCtaFocus)
+                        .onGloballyPositioned { coords -> primaryCtaAttached = coords.isAttached }
+                        .then(downTargetMod)
+                        .clip(RoundedCornerShape(999.dp))
+                        .tvClickable(
+                            onFocusChangedState = { detailsFocused = it },
+                            onFocused = { onHeroFocused?.invoke() },
+                            onClick = { onSelect(item) }
+                        )
+                ) {
+                    Text(
+                        text = viewDetailsLabel,
+                        color = if (detailsFocused) palette.onAccent else Color.Black,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 11.5.sp,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
                     )
-            ) {
-                Text(
-                    text = viewDetailsLabel,
-                    color = if (detailsFocused) palette.onAccent else Color.Black,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 11.5.sp,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
-                )
+                }
             }
         }
 
@@ -729,7 +872,7 @@ fun LumaHeroBanner(
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(horizontal = if (isTv) 20.dp else 14.dp, vertical = 18.dp),
+                    .padding(horizontal = endPad, vertical = if (isTv) 26.dp else 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -753,6 +896,32 @@ fun LumaHeroBanner(
             }
         }
     }
+}
+
+/**
+ * Isolated low-contrast HH:mm clock for top-right of TV Home; updates only at minute boundaries so
+ * neither HomeScreen nor LumaHeroBanner recomposes.
+ */
+@Composable
+private fun TvTopRightClock() {
+    val formatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    var timeText by remember { mutableStateOf(formatter.format(Date())) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            timeText = formatter.format(Date(now))
+            val msToNextMinute = 60_000L - (now % 60_000L) + 150L
+            delay(msToNextMinute)
+        }
+    }
+    Text(
+        text = timeText,
+        color = Color.White.copy(alpha = 0.52f),
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.8.sp,
+        style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 1f), 3f))
+    )
 }
 
 @Composable
@@ -807,38 +976,37 @@ fun LumaMediaCarouselRow(
     showPosterLabels: Boolean = true,
     onItemClick: (MediaItem) -> Unit,
     onItemFocused: ((MediaItem, Int) -> Unit)? = null,
+    onPreloadNextItems: ((List<MediaItem>) -> Unit)? = null,
     firstItemFocusRequester: FocusRequester? = null,
     onFirstItemAttachedChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalQuernPalette.current
     val railInset = if (isTv) LocalTvRailInset.current else 0.dp
+    val startPad = QuernHomeSpacing.contentStartPadding(isTv, railInset)
+    val endPad = QuernHomeSpacing.contentEndPadding(isTv)
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(
-                    start = if (isTv) railInset + 16.dp else 12.dp,
-                    end = if (isTv) 20.dp else 12.dp,
-                    top = 2.dp,
-                    bottom = 2.dp
-                ),
+                .padding(start = startPad, end = endPad),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Box(
                     modifier = Modifier
-                        .size(width = 2.5.dp, height = 12.dp)
+                        .size(width = 3.dp, height = if (isTv) 15.dp else 13.dp)
                         .clip(RoundedCornerShape(99.dp))
                         .background(palette.focusRing)
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(7.dp))
                 Text(
                     text = row.title,
                     color = LumaTextPrimary,
-                    fontSize = if (isTv) 12.5.sp else 12.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = if (isTv) 16.sp else 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.55f), Offset(0f, 1f), 4f)),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -846,8 +1014,8 @@ fun LumaMediaCarouselRow(
             Spacer(Modifier.width(6.dp))
             Text(
                 text = row.origin.displayName.uppercase(),
-                color = palette.focusRing,
-                fontSize = 8.sp,
+                color = palette.focusRing.copy(alpha = 0.85f),
+                fontSize = 8.5.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.8.sp
             )
@@ -856,12 +1024,12 @@ fun LumaMediaCarouselRow(
         val uniqueItems = remember(row.items) { row.items.distinctBy { "${it.type}_${it.id}" } }
         LazyRow(
             contentPadding = PaddingValues(
-                start = if (isTv) railInset + 16.dp else 12.dp,
-                end = if (isTv) 20.dp else 12.dp,
-                top = 8.dp,
-                bottom = 10.dp
+                start = startPad,
+                end = endPad,
+                top = QuernHomeSpacing.titleToCardsGap(isTv),
+                bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
             ),
-            horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 8.dp)
+            horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(isTv))
         ) {
             itemsIndexed(
                 items = uniqueItems,
@@ -882,8 +1050,17 @@ fun LumaMediaCarouselRow(
                     cardCorner = cardCorner,
                     showPosterLabels = showPosterLabels,
                     onClick = { onItemClick(item) },
-                    onFocused = if (onItemFocused != null) {
-                        { onItemFocused(item, index) }
+                    onFocused = if (onItemFocused != null || onPreloadNextItems != null) {
+                        {
+                            onItemFocused?.invoke(item, index)
+                            if (onPreloadNextItems != null) {
+                                val nextTwo = buildList(2) {
+                                    uniqueItems.getOrNull(index + 1)?.let(::add)
+                                    uniqueItems.getOrNull(index + 2)?.let(::add)
+                                }
+                                if (nextTwo.isNotEmpty()) onPreloadNextItems(nextTwo)
+                            }
+                        }
                     } else null,
                     modifier = if (isFirst && firstItemFocusRequester != null) {
                         Modifier
@@ -922,6 +1099,7 @@ fun LumaPosterCard(
         label = "posterFocus"
     )
     val focusBorderColor = if (palette.isGlossy) palette.focusRing else Color.White
+    val focusGlowColor = palette.focusRing
     val isGlossy = palette.isGlossy
     val density = LocalDensity.current
     val baseWidth = if (isTv) cardSize.tvWidthDp else cardSize.phoneWidthDp
@@ -975,7 +1153,8 @@ fun LumaPosterCard(
                 .background(fallbackBg)
                 .drawWithCache {
                     val outline = cornerShape.createOutline(size, layoutDirection, this)
-                    val thick = 2.5.dp.toPx()
+                    val thick = 2.dp.toPx()
+                    val glowWidth = 7.dp.toPx()
                     val glossBrush = if (isGlossy) {
                         Brush.verticalGradient(
                             colorStops = arrayOf(
@@ -989,11 +1168,16 @@ fun LumaPosterCard(
                     onDrawWithContent {
                         drawContent()
                         val p = focusProgress.value
-                        // Draw specular gloss and crisp focus ring only while focused (zero extra GPU work on idle cards)
+                        // Draw soft accent glow + crisp focus ring only while focused (zero GPU work on idle cards)
                         if (p > 0.01f) {
                             if (glossBrush != null) {
                                 drawRect(brush = glossBrush, alpha = 0.85f * p)
                             }
+                            drawOutline(
+                                outline = outline,
+                                color = focusGlowColor.copy(alpha = 0.28f * p),
+                                style = Stroke(width = glowWidth * p)
+                            )
                             drawOutline(
                                 outline = outline,
                                 color = focusBorderColor.copy(alpha = p),
@@ -1031,19 +1215,36 @@ fun LumaPosterCard(
                 }
             }
 
-            if (!item.rating.isNullOrBlank()) {
-                // Plain Row + background: no Surface (no elevation/semantics/content-color providers)
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .background(Color.Black.copy(alpha = 0.78f), PillShape)
-                        .padding(horizontal = 4.dp, vertical = 1.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Star, null, tint = LumaAmber, modifier = Modifier.size(8.dp))
-                    Spacer(Modifier.width(1.5.dp))
-                    Text(item.rating, color = Color.White, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
+            // Show rating and primary genre on focused cards ONLY (zero extra nodes on idle cards)
+            if (isFocused) {
+                if (!item.rating.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(5.dp)
+                            .background(Color.Black.copy(alpha = 0.80f), PillShape)
+                            .padding(horizontal = 5.dp, vertical = 1.5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Star, null, tint = LumaAmber, modifier = Modifier.size(8.5.dp))
+                        Spacer(Modifier.width(2.dp))
+                        Text(item.rating, color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                item.genres.firstOrNull()?.takeIf { it.isNotBlank() }?.let { genre ->
+                    Text(
+                        text = genre,
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(5.dp)
+                            .background(Color.Black.copy(alpha = 0.78f), PillShape)
+                            .padding(horizontal = 6.dp, vertical = 1.5.dp)
+                    )
                 }
             }
         }

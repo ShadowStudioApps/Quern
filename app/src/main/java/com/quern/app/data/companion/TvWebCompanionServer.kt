@@ -1,5 +1,6 @@
 package com.quern.app.data.companion
 
+import android.util.Log
 import com.quern.app.data.QuernRepository
 import com.quern.app.data.local.PinHasher
 import com.quern.app.data.local.SettingsStore
@@ -7,6 +8,7 @@ import com.quern.app.data.sync.AccountCrypto
 import com.quern.app.data.sync.AccountError
 import com.quern.app.data.sync.AccountException
 import com.quern.app.data.sync.CloudSyncManager
+import com.quern.app.data.sync.DeviceLinkCrypto
 import com.quern.app.data.sync.QuernAccount
 import com.quern.app.domain.model.AppLanguage
 import com.quern.app.domain.model.AppThemePreset
@@ -36,12 +38,41 @@ import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import java.net.URLEncoder
+import java.security.KeyPair
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+
+data class DeviceLinkSessionState(
+    val sessionId: String = "",
+    val publicKeyB64: String = "",
+    val code6: String = "",
+    val deviceName: String = "",
+    val expiresAtMs: Long = 0L,
+    val isActive: Boolean = false,
+    val failedAttempts: Int = 0,
+    val maxFailedAttempts: Int = 5,
+    val isLocked: Boolean = false,
+    val isCompleted: Boolean = false,
+    val isSigningIn: Boolean = false,
+    val lastError: String? = null
+) {
+    fun remainingSeconds(nowMs: Long = System.currentTimeMillis()): Long =
+        ((expiresAtMs - nowMs) / 1000L).coerceAtLeast(0L)
+
+    fun isExpired(nowMs: Long = System.currentTimeMillis()): Boolean =
+        expiresAtMs == 0L || nowMs >= expiresAtMs
+}
 
 data class CompanionSessionState(
     val shortCode: String,
@@ -94,6 +125,15 @@ class TvWebCompanionServer(
     private val authLock = Any()
     private val ipThrottleMap = mutableMapOf<String, IpThrottleState>()
 
+    // Ephemeral QR device-linking session (active ONLY while the TV account QR is on screen).
+    private val linkSessionTtlMs = 5 * 60 * 1000L
+    private val linkMaxFailedAttempts = 5
+    private val linkLock = Any()
+    private val linkJson = Json { ignoreUnknownKeys = true }
+    private var linkKeyPair: KeyPair? = null
+    private val _deviceLinkState = MutableStateFlow(DeviceLinkSessionState())
+    val deviceLinkState: StateFlow<DeviceLinkSessionState> = _deviceLinkState.asStateFlow()
+
     private val _sessionState = MutableStateFlow(createFreshSession(isRunning = false))
     val sessionState: StateFlow<CompanionSessionState> = _sessionState.asStateFlow()
 
@@ -128,6 +168,64 @@ class TvWebCompanionServer(
         return if (anchor.isBlank()) "http://$ip:$port" else "http://$ip:$port/#$anchor"
     }
 
+    /** Starts or reuses an active 5-minute ECDH device-linking session while the TV QR is shown. */
+    fun startDeviceLinkSession(deviceName: String) {
+        synchronized(linkLock) {
+            val curr = _deviceLinkState.value
+            if (curr.isActive && !curr.isExpired() && !curr.isLocked && !curr.isCompleted && linkKeyPair != null) {
+                return
+            }
+        }
+        refreshDeviceLinkSession(deviceName)
+    }
+
+    /** Generates a fresh ephemeral EC P-256 key pair, session id, and 6-digit code (5-minute TTL). */
+    fun refreshDeviceLinkSession(deviceName: String) {
+        val kp = DeviceLinkCrypto.generateEphemeralKeyPair()
+        val pubB64 = DeviceLinkCrypto.encodePublicKey(kp.public)
+        val sessionId = DeviceLinkCrypto.generateSessionId()
+        val code6 = DeviceLinkCrypto.generateCode6()
+        val cleanName = deviceName.trim().take(60).ifBlank { "Quern TV" }
+        synchronized(linkLock) {
+            linkKeyPair = kp
+            _deviceLinkState.value = DeviceLinkSessionState(
+                sessionId = sessionId,
+                publicKeyB64 = pubB64,
+                code6 = code6,
+                deviceName = cleanName,
+                expiresAtMs = System.currentTimeMillis() + linkSessionTtlMs,
+                isActive = true,
+                failedAttempts = 0,
+                maxFailedAttempts = linkMaxFailedAttempts,
+                isLocked = false,
+                isCompleted = false,
+                isSigningIn = false,
+                lastError = null
+            )
+        }
+        Log.i(TAG, "Device link session refreshed (5m TTL)")
+    }
+
+    /** Immediately closes the device-linking endpoint and wipes the ephemeral key pair from memory. */
+    fun stopDeviceLinkSession() {
+        synchronized(linkLock) {
+            linkKeyPair = null
+            _deviceLinkState.value = DeviceLinkSessionState(isActive = false)
+        }
+    }
+
+    /**
+     * Returns the public QR link `http://<tv-ip>:<port>/link#pk=<pub>&s=<session>&n=<name>`.
+     * Contains ONLY the ephemeral public key, session id, and TV name — never anything secret.
+     */
+    fun getDeviceLinkUrl(): String {
+        val st = _deviceLinkState.value
+        if (!st.isActive || st.publicKeyB64.isBlank() || st.sessionId.isBlank()) return ""
+        val ip = findLocalIpv4() ?: "127.0.0.1"
+        val encodedName = URLEncoder.encode(st.deviceName, "UTF-8")
+        return "http://$ip:$port/link#pk=${st.publicKeyB64}&s=${st.sessionId}&n=$encodedName"
+    }
+
     fun start(scope: CoroutineScope) {
         synchronized(authLock) {
             if (serverJob?.isActive == true) return
@@ -155,6 +253,7 @@ class TvWebCompanionServer(
         serverSocket = null
         serverJob?.cancel()
         serverJob = null
+        stopDeviceLinkSession()
         synchronized(authLock) {
             // Rotate session code on close so any previously issued session cookie is immediately invalidated
             _sessionState.value = createFreshSession(isRunning = false)
@@ -234,6 +333,7 @@ class TvWebCompanionServer(
 
     private suspend fun handleClient(socket: Socket) {
         socket.use { s ->
+            runCatching { s.soTimeout = 10_000 }
             val reader = BufferedReader(InputStreamReader(s.getInputStream()))
             val requestLine = reader.readLine() ?: return
             val parts = requestLine.split(" ")
@@ -241,6 +341,7 @@ class TvWebCompanionServer(
             val method = parts[0]
             val rawPath = parts[1]
             val path = rawPath.substringBefore("?")
+            val queryString = rawPath.substringAfter("?", "")
 
             if (path.equals("/favicon.ico", ignoreCase = true)) {
                 writeHttpResponse(s, "404 Not Found", "")
@@ -267,7 +368,7 @@ class TvWebCompanionServer(
             }
 
             val remoteIp = s.inetAddress?.hostAddress
-            val form = if (method.equals("POST", ignoreCase = true) && contentLength > 0 && contentLength <= 2_000_000) {
+            val rawBody = if (method.equals("POST", ignoreCase = true) && contentLength > 0 && contentLength <= 2_000_000) {
                 val buf = CharArray(contentLength)
                 var read = 0
                 while (read < contentLength) {
@@ -275,10 +376,40 @@ class TvWebCompanionServer(
                     if (r == -1) break
                     read += r
                 }
-                parseForm(String(buf, 0, read))
+                String(buf, 0, read)
             } else {
-                emptyMap()
+                ""
             }
+
+            // Dedicated QR device-linking endpoints (active ONLY while TV QR is on screen; zero secrets exposed).
+            when {
+                path == "/link" && method.equals("GET", ignoreCase = true) -> {
+                    val st = _deviceLinkState.value
+                    val active = st.isActive && !st.isExpired() && !st.isLocked && !st.isCompleted
+                    val html = buildDeviceLinkLandingHtml(
+                        deviceName = st.deviceName.ifBlank { "Quern TV" },
+                        isActive = active,
+                        errorMsg = null,
+                        successMsg = null
+                    )
+                    writeHttpResponse(s, "200 OK", html)
+                    return
+                }
+                path == "/api/link/info" && method.equals("GET", ignoreCase = true) -> {
+                    handleDeviceLinkInfo(s, parseForm(queryString)["s"].orEmpty())
+                    return
+                }
+                path == "/api/link/complete" && method.equals("POST", ignoreCase = true) -> {
+                    handleDeviceLinkComplete(s, rawBody)
+                    return
+                }
+                path == "/link-fallback" && method.equals("POST", ignoreCase = true) -> {
+                    handleDeviceLinkFallback(s, parseForm(rawBody))
+                    return
+                }
+            }
+
+            val form = if (rawBody.isNotEmpty()) parseForm(rawBody) else emptyMap()
 
             // Strictly prefer X-Quern-Code header or POST form field (or HttpOnly session cookie on GET); never read ?code= from URLs
             val submittedCode = headerCode.takeIf { it.isNotBlank() }
@@ -350,6 +481,393 @@ class TvWebCompanionServer(
             flush()
         }
     }
+
+    private fun writeJsonResponse(socket: Socket, status: String, jsonBody: String) {
+        val bodyBytes = jsonBody.toByteArray(Charsets.UTF_8)
+        val response = buildString {
+            append("HTTP/1.1 $status\r\n")
+            append("Content-Type: application/json; charset=utf-8\r\n")
+            append("Cache-Control: no-store\r\n")
+            append("Content-Length: ${bodyBytes.size}\r\n")
+            append("Connection: close\r\n\r\n")
+        }
+        socket.getOutputStream().apply {
+            write(response.toByteArray(Charsets.UTF_8))
+            write(bodyBytes)
+            flush()
+        }
+    }
+
+    private fun handleDeviceLinkInfo(socket: Socket, submittedSession: String) {
+        val (st, matches) = synchronized(linkLock) {
+            val curr = _deviceLinkState.value
+            val eq = curr.sessionId.isNotBlank() && submittedSession.isNotBlank() && MessageDigest.isEqual(
+                curr.sessionId.toByteArray(Charsets.UTF_8),
+                submittedSession.toByteArray(Charsets.UTF_8)
+            )
+            curr to eq
+        }
+        val now = System.currentTimeMillis()
+        if (!matches || !st.isActive) {
+            val body = buildJsonObject {
+                put("active", false)
+                put("locked", st.isLocked)
+                put("completed", st.isCompleted)
+                put("error", if (st.isCompleted) "already_used" else if (st.isLocked) "locked" else "inactive")
+            }.toString()
+            writeJsonResponse(socket, "404 Not Found", body)
+            return
+        }
+        val expired = st.isExpired(now)
+        val body = buildJsonObject {
+            put("active", !expired && !st.isLocked && !st.isCompleted)
+            put("deviceName", st.deviceName)
+            put("expiresInSec", st.remainingSeconds(now))
+            put("locked", st.isLocked)
+            put("completed", st.isCompleted)
+        }.toString()
+        writeJsonResponse(socket, if (expired) "410 Gone" else "200 OK", body)
+    }
+
+    private suspend fun handleDeviceLinkComplete(socket: Socket, rawBody: String) {
+        if (rawBody.length > 16_384) {
+            writeJsonResponse(socket, "413 Payload Too Large", """{"ok":false,"error":"too_large"}""")
+            return
+        }
+        val obj = runCatching { linkJson.parseToJsonElement(rawBody).jsonObject }.getOrNull()
+        if (obj == null) {
+            writeJsonResponse(socket, "400 Bad Request", """{"ok":false,"error":"bad_json"}""")
+            return
+        }
+        val envelope = DeviceLinkCrypto.SealedLinkEnvelope(
+            sessionId = obj["s"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            phonePublicKeyB64 = obj["pk"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            ivB64 = obj["iv"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            cipherTextB64 = obj["ct"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        )
+
+        var errorStatus = ""
+        var errorJson = ""
+        var decrypted: DeviceLinkCrypto.LinkCredentialBundle? = null
+
+        synchronized(linkLock) {
+            val now = System.currentTimeMillis()
+            val curr = _deviceLinkState.value
+            when {
+                curr.isCompleted -> {
+                    errorStatus = "409 Conflict"
+                    errorJson = """{"ok":false,"error":"already_used"}"""
+                }
+                curr.isLocked || curr.failedAttempts >= curr.maxFailedAttempts -> {
+                    errorStatus = "423 Locked"
+                    errorJson = """{"ok":false,"error":"locked"}"""
+                }
+                !curr.isActive || linkKeyPair == null -> {
+                    errorStatus = "403 Forbidden"
+                    errorJson = """{"ok":false,"error":"inactive"}"""
+                }
+                curr.isExpired(now) -> {
+                    linkKeyPair = null
+                    _deviceLinkState.value = curr.copy(isActive = false)
+                    errorStatus = "410 Gone"
+                    errorJson = """{"ok":false,"error":"expired"}"""
+                }
+                !MessageDigest.isEqual(
+                    curr.sessionId.toByteArray(Charsets.UTF_8),
+                    envelope.sessionId.toByteArray(Charsets.UTF_8)
+                ) -> {
+                    errorStatus = "404 Not Found"
+                    errorJson = """{"ok":false,"error":"invalid_session"}"""
+                }
+                else -> {
+                    val kp = linkKeyPair!!
+                    val bundle = DeviceLinkCrypto.openOnTv(
+                        tvKeyPair = kp,
+                        tvPublicKeyB64 = curr.publicKeyB64,
+                        sessionId = curr.sessionId,
+                        code6 = curr.code6,
+                        envelope = envelope
+                    )
+                    if (bundle == null) {
+                        val nextFails = curr.failedAttempts + 1
+                        val locked = nextFails >= curr.maxFailedAttempts
+                        val attemptsLeft = (curr.maxFailedAttempts - nextFails).coerceAtLeast(0)
+                        if (locked) linkKeyPair = null
+                        _deviceLinkState.value = curr.copy(
+                            failedAttempts = nextFails,
+                            isLocked = locked,
+                            isActive = !locked
+                        )
+                        Log.w(TAG, "Device link rejected: wrong code ($nextFails/${curr.maxFailedAttempts})")
+                        errorStatus = if (locked) "423 Locked" else "403 Forbidden"
+                        errorJson = buildJsonObject {
+                            put("ok", false)
+                            put("error", "wrong_code")
+                            put("attemptsLeft", attemptsLeft)
+                            put("locked", locked)
+                        }.toString()
+                    } else {
+                        // Single-use guarantee: consume session and wipe ephemeral private key BEFORE network I/O.
+                        linkKeyPair = null
+                        _deviceLinkState.value = curr.copy(
+                            isCompleted = true,
+                            isActive = false,
+                            isSigningIn = true,
+                            lastError = null
+                        )
+                        decrypted = bundle
+                    }
+                }
+            }
+        }
+
+        val bundle = decrypted
+        if (bundle == null) {
+            writeJsonResponse(socket, errorStatus, errorJson)
+            return
+        }
+
+        val signInRes = quernAccount.signInWithDerivedKeys(
+            email = bundle.email,
+            authSecret = bundle.authSecret,
+            encKeyB64 = bundle.encKeyB64
+        )
+        signInRes.fold(
+            onSuccess = {
+                synchronized(linkLock) {
+                    _deviceLinkState.value = _deviceLinkState.value.copy(isSigningIn = false, lastError = null)
+                }
+                Log.i(TAG, "Device link completed and TV signed in")
+                onDataChanged()
+                val okBody = buildJsonObject {
+                    put("ok", true)
+                    put("email", quernAccount.state.value.email)
+                }.toString()
+                writeJsonResponse(socket, "200 OK", okBody)
+            },
+            onFailure = { err ->
+                val msg = accountErrorText(err)
+                synchronized(linkLock) {
+                    _deviceLinkState.value = _deviceLinkState.value.copy(isSigningIn = false, lastError = msg)
+                }
+                Log.w(TAG, "Device link auth grant failed")
+                writeJsonResponse(socket, "502 Bad Gateway", """{"ok":false,"error":"auth_failed"}""")
+            }
+        )
+    }
+
+    private suspend fun handleDeviceLinkFallback(socket: Socket, form: Map<String, String>) {
+        val submittedSession = form["s"].orEmpty().trim()
+        val submittedCode = DeviceLinkCrypto.normalizeCode6(form["code6"].orEmpty())
+        val email = form["email"].orEmpty().trim()
+        val password = form["password"].orEmpty()
+
+        var tvName = "Quern TV"
+        var errMsg: String? = null
+        var allowed = false
+
+        synchronized(linkLock) {
+            val now = System.currentTimeMillis()
+            val curr = _deviceLinkState.value
+            tvName = curr.deviceName.ifBlank { "Quern TV" }
+            when {
+                curr.isCompleted -> errMsg = "This QR code has already been used."
+                curr.isLocked || curr.failedAttempts >= curr.maxFailedAttempts ->
+                    errMsg = "Too many wrong codes. Refresh the QR code on your TV."
+                !curr.isActive || linkKeyPair == null ->
+                    errMsg = "Sign-in QR is no longer active on this TV."
+                curr.isExpired(now) -> {
+                    linkKeyPair = null
+                    _deviceLinkState.value = curr.copy(isActive = false)
+                    errMsg = "This QR code expired. Refresh it on your TV and scan again."
+                }
+                !MessageDigest.isEqual(
+                    curr.sessionId.toByteArray(Charsets.UTF_8),
+                    submittedSession.toByteArray(Charsets.UTF_8)
+                ) -> errMsg = "Session mismatch. Scan the latest QR code on your TV."
+                submittedCode.length != 6 || !MessageDigest.isEqual(
+                    curr.code6.toByteArray(Charsets.UTF_8),
+                    submittedCode.toByteArray(Charsets.UTF_8)
+                ) -> {
+                    val nextFails = curr.failedAttempts + 1
+                    val locked = nextFails >= curr.maxFailedAttempts
+                    if (locked) linkKeyPair = null
+                    _deviceLinkState.value = curr.copy(
+                        failedAttempts = nextFails,
+                        isLocked = locked,
+                        isActive = !locked
+                    )
+                    errMsg = if (locked) {
+                        "Too many wrong codes. Refresh the QR code on your TV."
+                    } else {
+                        "Wrong 6-digit code (${curr.maxFailedAttempts - nextFails} attempts left)."
+                    }
+                }
+                else -> {
+                    linkKeyPair = null
+                    _deviceLinkState.value = curr.copy(
+                        isCompleted = true,
+                        isActive = false,
+                        isSigningIn = true,
+                        lastError = null
+                    )
+                    allowed = true
+                }
+            }
+        }
+
+        if (!allowed) {
+            val html = buildDeviceLinkLandingHtml(
+                deviceName = tvName,
+                isActive = _deviceLinkState.value.isActive,
+                errorMsg = errMsg,
+                successMsg = null,
+                initialSessionId = submittedSession,
+                expandFallback = true
+            )
+            writeHttpResponse(socket, "403 Forbidden", html)
+            return
+        }
+
+        val res = quernAccount.signIn(email, password)
+        res.fold(
+            onSuccess = {
+                synchronized(linkLock) {
+                    _deviceLinkState.value = _deviceLinkState.value.copy(isSigningIn = false, lastError = null)
+                }
+                onDataChanged()
+                val html = buildDeviceLinkLandingHtml(
+                    deviceName = tvName,
+                    isActive = false,
+                    errorMsg = null,
+                    successMsg = "Signed in as ${quernAccount.state.value.email}. Your TV is now syncing."
+                )
+                writeHttpResponse(socket, "200 OK", html)
+            },
+            onFailure = { err ->
+                val msg = accountErrorText(err)
+                synchronized(linkLock) {
+                    _deviceLinkState.value = _deviceLinkState.value.copy(isSigningIn = false, lastError = msg)
+                }
+                val html = buildDeviceLinkLandingHtml(
+                    deviceName = tvName,
+                    isActive = false,
+                    errorMsg = "$msg Refresh the QR code on your TV to try again.",
+                    successMsg = null
+                )
+                writeHttpResponse(socket, "400 Bad Request", html)
+            }
+        )
+    }
+
+    private fun buildDeviceLinkLandingHtml(
+        deviceName: String,
+        isActive: Boolean,
+        errorMsg: String?,
+        successMsg: String?,
+        initialSessionId: String = "",
+        expandFallback: Boolean = false
+    ): String = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <title>Sign in to ${escapeHtml(deviceName)} — Quern</title>
+        <style>
+          body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+            background:#000; color:#F8FAFC; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:20px; }
+          .box { width:100%; max-width:430px; background:#0A121B; border:1px solid #28425C; border-radius:18px; padding:26px; }
+          h1 { margin:0 0 6px; font-size:21px; }
+          .sub { color:#94A3B8; font-size:13.5px; margin-bottom:18px; line-height:1.5; }
+          .err { background:rgba(239,68,68,.15); border:1px solid rgba(239,68,68,.45); color:#FCA5A5;
+            padding:10px 12px; border-radius:10px; font-size:13px; margin-bottom:14px; }
+          .ok { background:rgba(16,185,129,.16); border:1px solid rgba(16,185,129,.45); color:#6EE7B7;
+            padding:12px 14px; border-radius:10px; font-size:13.5px; margin-bottom:14px; }
+          .btn { display:block; width:100%; box-sizing:border-box; text-align:center; text-decoration:none;
+            padding:13px 16px; border-radius:12px; border:none; background:#345372; color:#FFF;
+            font-size:15px; font-weight:700; cursor:pointer; }
+          .btn-sec { background:#132131; border:1px solid #28425C; margin-top:10px; font-size:13.5px; font-weight:600; }
+          .divider { text-align:center; color:#64748B; font-size:12px; margin:18px 0 14px; }
+          label { display:block; color:#94A3B8; font-size:12px; margin:10px 0 4px; }
+          input { width:100%; box-sizing:border-box; padding:11px 12px; border-radius:10px; border:1px solid #28425C;
+            background:#132131; color:#FFF; font-size:15px; }
+          input.code { font-family:monospace; letter-spacing:4px; text-align:center; font-size:18px; }
+          .note { color:#64748B; font-size:11.5px; margin-top:14px; line-height:1.45; }
+          .hidden { display:none; }
+        </style>
+        </head>
+        <body>
+          <div class="box">
+            <h1 id="tvTitle">Sign in to ${escapeHtml(deviceName)}</h1>
+            ${if (!successMsg.isNullOrBlank()) """<div class="ok">${escapeHtml(successMsg)}</div>""" else ""}
+            ${if (!errorMsg.isNullOrBlank()) """<div class="err">${escapeHtml(errorMsg)}</div>""" else ""}
+            ${if (isActive && successMsg.isNullOrBlank()) """
+            <div class="sub" id="introText">If Quern is installed and signed in on this phone, open it to approve this TV with end-to-end encryption — no password typing needed.</div>
+            <a id="openAppBtn" class="btn" href="#">Open in Quern</a>
+            <div class="divider">Don't have the Quern app on this phone?</div>
+            <button type="button" id="toggleFallbackBtn" class="btn btn-sec" onclick="document.getElementById('fallbackForm').classList.toggle('hidden')">Sign in with email &amp; password</button>
+            <form id="fallbackForm" class="${if (expandFallback) "" else "hidden"}" method="POST" action="/link-fallback">
+              <input type="hidden" name="s" id="sessionField" value="${escapeHtml(initialSessionId)}"/>
+              <label>6-digit code shown on TV</label>
+              <input class="code" name="code6" inputmode="numeric" maxlength="7" placeholder="000 000" autocomplete="off" required/>
+              <label>Quern account email</label>
+              <input name="email" type="email" autocomplete="email" placeholder="you@example.com" required/>
+              <label>Password</label>
+              <input name="password" type="password" autocomplete="current-password" minlength="${AccountCrypto.MIN_PASSWORD_LENGTH}" required/>
+              <button type="submit" class="btn" style="margin-top:14px">Sign In TV</button>
+            </form>
+            <div class="note">Local Wi-Fi connection. When using the Quern app, your credentials are encrypted end-to-end with the TV's ephemeral public key and the 6-digit code.</div>
+            """ else if (successMsg.isNullOrBlank()) """
+            <div class="sub">The sign-in QR code is no longer active on this TV. Open Settings &rarr; Accounts &amp; Sync on your TV to show a new QR code.</div>
+            <a class="btn btn-sec" href="/#account">Open TV Companion</a>
+            """ else ""}
+          </div>
+          <script>
+            (function () {
+              var hash = (location.hash || '').replace(/^#/, '');
+              var params = new URLSearchParams(hash);
+              var pk = params.get('pk') || '';
+              var s = params.get('s') || '';
+              var n = params.get('n') || '';
+              if (n) {
+                var titleEl = document.getElementById('tvTitle');
+                if (titleEl) titleEl.textContent = 'Sign in to ' + n;
+              }
+              var sf = document.getElementById('sessionField');
+              if (sf && s) sf.value = s;
+              var isFallback = location.search.indexOf('fallback=1') !== -1;
+              if (isFallback) {
+                var ff0 = document.getElementById('fallbackForm');
+                if (ff0) ff0.classList.remove('hidden');
+                var intro = document.getElementById('introText');
+                if (intro) intro.textContent = 'Quern app was not found on this phone. Enter the 6-digit code shown on your TV and your Quern account below.';
+              }
+              var btn = document.getElementById('openAppBtn');
+              if (btn && pk && s) {
+                var qs = 'host=' + encodeURIComponent(location.origin)
+                  + '&pk=' + encodeURIComponent(pk)
+                  + '&s=' + encodeURIComponent(s)
+                  + '&n=' + encodeURIComponent(n || '${escapeHtml(deviceName)}');
+                var fallbackUrl = location.origin + '/link?fallback=1' + location.hash;
+                var isAndroid = /Android/i.test(navigator.userAgent || '');
+                if (isAndroid) {
+                  btn.href = 'intent://link?' + qs
+                    + '#Intent;scheme=quern;package=com.quern.app;'
+                    + 'S.browser_fallback_url=' + encodeURIComponent(fallbackUrl) + ';end';
+                } else {
+                  btn.href = 'quern://link?' + qs;
+                }
+              } else if (btn) {
+                btn.classList.add('hidden');
+                var ff = document.getElementById('fallbackForm');
+                if (ff) ff.classList.remove('hidden');
+              }
+            })();
+          </script>
+        </body>
+        </html>
+    """.trimIndent()
 
     private fun buildPairingGateHtml(errorMsg: String, isError: Boolean): String = """
         <!DOCTYPE html>
@@ -1302,4 +1820,8 @@ class TvWebCompanionServer(
             .firstOrNull { it is Inet4Address && !it.isLoopbackAddress }
             ?.hostAddress
     }.getOrNull()
+
+    companion object {
+        private const val TAG = "TvCompanion"
+    }
 }

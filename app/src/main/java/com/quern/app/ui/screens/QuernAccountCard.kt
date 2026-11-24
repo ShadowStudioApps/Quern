@@ -1,45 +1,67 @@
 package com.quern.app.ui.screens
 
+import android.os.Build
+import android.provider.Settings
+import android.text.format.DateUtils
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
-import com.quern.app.ui.components.QuernAlertDialog as AlertDialog
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.quern.app.R
+import com.quern.app.data.companion.DeviceLinkSessionState
 import com.quern.app.data.sync.AccountCrypto
 import com.quern.app.data.sync.AccountError
 import com.quern.app.data.sync.AccountUiMessage
+import com.quern.app.data.sync.DeviceLinkCrypto
 import com.quern.app.data.sync.QuernAccountState
 import com.quern.app.data.sync.SyncStatus
-import com.quern.app.ui.theme.LumaRed
-import android.text.format.DateUtils
+import com.quern.app.ui.components.QrCodeCard
+import com.quern.app.ui.components.QuernAlertDialog as AlertDialog
+import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaGreen
+import com.quern.app.ui.theme.LumaRed
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
 import com.quern.app.ui.theme.qString
+import kotlinx.coroutines.delay
+import java.util.Locale
 
 /** Everything the account card needs, bundled so it can pass through the settings layers. */
 class AccountUi(
@@ -52,7 +74,12 @@ class AccountUi(
     val onSignOut: () -> Unit,
     val onDelete: () -> Unit,
     val sync: SyncStatus = SyncStatus(),
-    val onSyncNow: () -> Unit = {}
+    val onSyncNow: () -> Unit = {},
+    val deviceLink: DeviceLinkSessionState = DeviceLinkSessionState(),
+    val deviceLinkUrl: () -> String = { "" },
+    val onStartDeviceLink: (deviceName: String) -> Unit = {},
+    val onStopDeviceLink: () -> Unit = {},
+    val onRefreshDeviceLink: (deviceName: String) -> Unit = {}
 )
 
 @Composable
@@ -88,9 +115,9 @@ private fun accountMessageText(message: AccountUiMessage, state: QuernAccountSta
     }
 }
 
-/** Quern account on Shadow Studio's server: sign up / sign in / sign out / delete. */
+/** Quern account on Shadow Studio's server: QR sign-in on TV, sign up / sign in / sign out / delete. */
 @Composable
-internal fun QuernAccountCard(account: AccountUi) {
+internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
     val palette = LocalQuernPalette.current
     val state = account.state
     val fieldColors = OutlinedTextFieldDefaults.colors(
@@ -107,6 +134,7 @@ internal fun QuernAccountCard(account: AccountUi) {
     }
     var password by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
+    var showManualEmailFormOnTv by remember { mutableStateOf(false) }
 
     SettingSectionCard(title = qString(R.string.qa_title)) {
         if (state.isSignedIn) {
@@ -144,50 +172,69 @@ internal fun QuernAccountCard(account: AccountUi) {
             Text(qString(R.string.qa_desc_signed_out), color = LumaTextSecondary, fontSize = 13.sp)
             Spacer(Modifier.height(4.dp))
             Text(qString(R.string.qa_privacy_note), color = LumaTextSecondary, fontSize = 12.sp)
-            state.awaitingEmailConfirmation?.let { pending ->
+
+            if (isTv) {
+                Spacer(Modifier.height(12.dp))
+                TvDeviceLinkQrPanel(account = account)
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    qString(R.string.qa_awaiting, pending),
-                    color = palette.focusRing,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                SelectablePillOption(
+                    label = qString(
+                        if (showManualEmailFormOnTv) R.string.qr_link_hide_email else R.string.qr_link_use_email
+                    ),
+                    selected = false
+                ) {
+                    showManualEmailFormOnTv = !showManualEmailFormOnTv
+                }
             }
-            Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
-                value = email,
-                onValueChange = { email = it },
-                label = { Text(qString(R.string.qa_email)) },
-                singleLine = true,
-                colors = fieldColors,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text(qString(R.string.qa_password, AccountCrypto.MIN_PASSWORD_LENGTH)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                colors = fieldColors,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SelectablePillOption(label = qString(R.string.qa_sign_in), selected = true) {
-                    if (!account.busy) account.onSignIn(email, password)
+
+            if (!isTv || showManualEmailFormOnTv || state.awaitingEmailConfirmation != null) {
+                state.awaitingEmailConfirmation?.let { pending ->
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        qString(R.string.qa_awaiting, pending),
+                        color = palette.focusRing,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
-                SelectablePillOption(label = qString(R.string.qa_create), selected = false) {
-                    if (!account.busy) account.onSignUp(email, password)
-                }
-                if (state.awaitingEmailConfirmation != null) {
-                    SelectablePillOption(label = qString(R.string.qa_resend), selected = false) {
-                        if (!account.busy) account.onResend(email)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text(qString(R.string.qa_email)) },
+                    singleLine = true,
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(qString(R.string.qa_password, AccountCrypto.MIN_PASSWORD_LENGTH)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SelectablePillOption(label = qString(R.string.qa_sign_in), selected = true) {
+                        if (!account.busy) account.onSignIn(email, password)
+                    }
+                    SelectablePillOption(label = qString(R.string.qa_create), selected = false) {
+                        if (!account.busy) account.onSignUp(email, password)
+                    }
+                    if (state.awaitingEmailConfirmation != null) {
+                        SelectablePillOption(label = qString(R.string.qa_resend), selected = false) {
+                            if (!account.busy) account.onResend(email)
+                        }
                     }
                 }
+                if (!isTv) {
+                    Spacer(Modifier.height(10.dp))
+                    HelpTextLine(qString(R.string.qa_phone_hint))
+                }
             }
-            Spacer(Modifier.height(10.dp))
-            HelpTextLine(qString(R.string.qa_phone_hint))
         }
 
         val message = account.message
@@ -226,5 +273,197 @@ internal fun QuernAccountCard(account: AccountUi) {
                 }
             }
         )
+    }
+}
+
+/**
+ * TV-only QR sign-in panel inside the signed-out Account card:
+ * - Opens a 5-minute ephemeral EC P-256 session while this composable is on screen (closes and wipes
+ *   the private key immediately on dispose or after successful sign-in).
+ * - Auto-refreshes after 5 minutes; locks after 5 wrong 6-digit codes until manually refreshed.
+ */
+@Composable
+private fun TvDeviceLinkQrPanel(account: AccountUi) {
+    val context = LocalContext.current
+    val palette = LocalQuernPalette.current
+    val link = account.deviceLink
+    val tvDeviceName = remember {
+        runCatching { Settings.Global.getString(context.contentResolver, "device_name") }.getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: Build.MODEL.orEmpty().ifBlank { "Quern TV" }
+    }
+
+    DisposableEffect(Unit) {
+        account.onStartDeviceLink(tvDeviceName)
+        onDispose { account.onStopDeviceLink() }
+    }
+
+    var nowMs by remember(link.sessionId, link.expiresAtMs) { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(link.sessionId, link.expiresAtMs, link.isActive, link.isLocked, link.isCompleted) {
+        if (!link.isActive || link.isLocked || link.isCompleted || link.expiresAtMs <= 0L) return@LaunchedEffect
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            if (nowMs >= link.expiresAtMs) break
+            delay(1000L)
+        }
+        // Automatically rotate expired QR after 5 minutes so the QR on screen always works.
+        account.onRefreshDeviceLink(tvDeviceName)
+    }
+
+    val isExpired = link.isExpired(nowMs)
+    val remainingSec = link.remainingSeconds(nowMs)
+    val countdown = String.format(Locale.US, "%02d:%02d", remainingSec / 60, remainingSec % 60)
+    val qrUrl = remember(link.sessionId, link.publicKeyB64, link.isActive) { account.deviceLinkUrl() }
+    val dimmed = link.isLocked || isExpired || !link.isActive
+
+    val statusColor = when {
+        link.isSigningIn -> LumaGreen
+        link.isLocked || isExpired -> LumaRed
+        else -> palette.focusRing
+    }
+    val statusText = when {
+        link.isSigningIn -> qString(R.string.qr_link_signing_in)
+        link.isLocked -> qString(R.string.qr_link_locked)
+        isExpired -> qString(R.string.qr_link_expired)
+        else -> qString(R.string.qr_link_waiting, countdown)
+    }
+
+    Surface(
+        color = palette.surface,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.2.dp, palette.border),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left: QR code (holds ONLY public key, session id, and device name)
+            Box(contentAlignment = Alignment.Center) {
+                if (qrUrl.isNotBlank()) {
+                    QrCodeCard(
+                        content = qrUrl,
+                        size = 156.dp,
+                        modifier = Modifier.alpha(if (dimmed) 0.25f else 1f)
+                    )
+                }
+            }
+
+            // Right: 6-digit confirmation code + instructions + live status + Refresh action
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Icon(Icons.Default.QrCode2, null, tint = palette.focusRing, modifier = Modifier.size(20.dp))
+                        Text(
+                            text = qString(R.string.qr_link_title),
+                            color = LumaTextPrimary,
+                            fontSize = 15.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Surface(
+                        color = statusColor.copy(alpha = 0.16f),
+                        shape = RoundedCornerShape(999.dp),
+                        border = BorderStroke(1.dp, statusColor.copy(alpha = 0.65f))
+                    ) {
+                        Text(
+                            text = statusText,
+                            color = statusColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                // 6-digit confirmation code shown next to the QR (never embedded in the QR URL)
+                Surface(
+                    color = palette.surfaceElevated,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.2.dp, palette.focusRing.copy(alpha = 0.8f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Text(
+                            text = qString(R.string.qr_link_code_label).uppercase(),
+                            color = LumaTextSecondary,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = DeviceLinkCrypto.formatCode6ForDisplay(link.code6),
+                            color = LumaTextPrimary,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 4.sp
+                        )
+                    }
+                }
+
+                Text(
+                    text = qString(R.string.qr_link_steps),
+                    color = LumaTextSecondary,
+                    fontSize = 12.5.sp,
+                    lineHeight = 17.sp
+                )
+
+                link.lastError?.let { err ->
+                    Text(
+                        text = err,
+                        color = Color(0xFFFF8A80),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                var refreshFocused by remember { mutableStateOf(false) }
+                Surface(
+                    color = if (refreshFocused || link.isLocked || isExpired) palette.accent else palette.surfaceElevated,
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(
+                        width = if (refreshFocused) 2.5.dp else 1.dp,
+                        color = if (refreshFocused) palette.focusRing else palette.border
+                    ),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .tvClickable(
+                            onFocusChangedState = { refreshFocused = it },
+                            onClick = { account.onRefreshDeviceLink(tvDeviceName) }
+                        )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val fg = if (refreshFocused || link.isLocked || isExpired) palette.onAccent else LumaTextPrimary
+                        Icon(Icons.Default.Refresh, null, tint = fg, modifier = Modifier.size(14.dp))
+                        Text(
+                            text = qString(R.string.qr_link_refresh),
+                            color = fg,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
     }
 }

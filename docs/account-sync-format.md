@@ -127,3 +127,50 @@ Items are per profile: `(profileId, contentId)` is the key. `favorites` items al
   - `addons`, `settings`, `settings_tv`, `settings_phone`, `profiles` and `secrets`: the whole section, last writer wins. The website and the TV both edit these deliberately, so the newest edit is the intended one.
 - Each device keeps its own `device_<id>` row up to date and never writes another device's row.
 - **Sign-out** keeps local data and stops syncing. "Delete account" calls `rpc/quern_delete_my_account`, which removes the user and every row.
+
+## Device linking
+
+Signing in on an Android TV without typing an email or password uses an ephemeral, end-to-end encrypted LAN handshake between a signed-in phone (or, later, a signed-in `quern.pages.dev` browser session) and the TV's local companion server.
+
+### Goals and security properties
+
+- Neither the raw password, `authSecret`, `encKey`, nor the 6-digit confirmation code ever travels in plaintext over the LAN, appears in URLs, or is written to logs.
+- A photo of the TV's QR code contains **nothing secret** (only the TV's ephemeral public key, random session id, and device name).
+- Each device keeps its own Supabase session (own rotating refresh token): the phone sends `{ email, authSecret, encKey }` inside the encrypted envelope, and the TV calls Supabase `POST /auth/v1/token?grant_type=password` with `authSecret` to obtain its own independent session.
+- On the phone, `authSecret` is stored alongside `encKey` in Android Keystore-backed `SecureVault` (AES-256-GCM) and cleared on sign-out.
+
+### Handshake steps
+
+1. **TV opens the QR** (while signed out on Settings → Accounts & Sync):
+   - Generates an ephemeral EC P-256 key pair (`secp256r1`), a 128-bit random `sessionId` (base64url, 22 chars), and a random 6-digit confirmation code `code6` (`000000`–`999999`).
+   - Displays the QR encoding:
+     ```text
+     http://<tv-ip>:8787/link#pk=<tvPublicKeySpkiB64Url>&s=<sessionId>&n=<urlEncodedDeviceName>
+     ```
+     and shows `code6` next to the QR (`XXX XXX`).
+   - Session TTL is **5 minutes** and auto-refreshes when expired. The `/api/link/*` endpoints only accept requests while the QR is actually on screen; closing the card wipes the ephemeral private key immediately.
+2. **Phone scans the QR**:
+   - The TV's `GET /link` page reads the URL fragment in JS and offers **"Open in Quern"** via an Android `intent://link?host=...&pk=...&s=...&n=...#Intent;scheme=quern;package=com.quern.app;S.browser_fallback_url=...;end` link (handled by `MainActivity`'s `quern://link` intent filter).
+   - If the Quern app is not installed on the phone, the page falls back to a browser email + password + 6-digit code form (`POST /link-fallback`, enforcing the same 5-minute TTL, active-QR gate, single-use rule, and 5-attempt lockout).
+3. **Phone confirms and encrypts**:
+   - The app validates that `host` is a private LAN origin (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`, `localhost`, or `*.local`), queries `GET /api/link/info?s=<sessionId>`, and shows `"Sign in TV '<device name>'?"` asking for the 6-digit code shown on the TV.
+   - On **Allow**, the phone generates its own ephemeral EC P-256 key pair, computes `sharedSecret = ECDH(phonePriv, tvPub)`, and derives a 32-byte AES-256-GCM key with HKDF-SHA256 (RFC 5869):
+     - `salt = UTF-8("quern-link-v1:" + sessionId + ":" + code6)`
+     - `info = UTF-8("quern-link-aes256gcm-v1:" + tvPublicKeyB64 + ":" + phonePublicKeyB64)`
+     - `aad  = UTF-8("quern-link-v1:" + sessionId)`
+   - Encrypts `{ "v": 1, "email": "...", "authSecret": "...", "encKey": "<base64url 32 bytes>" }` with AES-256-GCM (random 12-byte IV, 128-bit tag) and POSTs to `POST http://<tv-ip>:8787/api/link/complete`:
+     ```json
+     {
+       "s": "<sessionId>",
+       "pk": "<phonePublicKeySpkiB64Url>",
+       "iv": "<base64url 12 bytes>",
+       "ct": "<base64url ciphertext + 16-byte tag>"
+     }
+     ```
+4. **TV verifies, signs in, and wipes**:
+   - Checks the session is active, unexpired, unlocked, unused, and matches `sessionId` (constant-time).
+   - Derives the same HKDF-SHA256 key using its ephemeral private key and displayed `code6`, and attempts AES-256-GCM decryption.
+   - A wrong 6-digit code fails AEAD authentication (`403 wrong_code`); **5 wrong attempts lock the session** (`423 locked`) and wipe the ephemeral key.
+   - On success, the TV **immediately marks the session completed and wipes the ephemeral key** (single-use; any replay returns `409 already_used`), calls Supabase password grant with `authSecret` for its own session, stores `encKey` and `authSecret` in `SecureVault`, closes the QR, and starts the initial sync (showing "Who's watching?" if multiple profiles are pulled).
+
+Reference: `app/src/main/java/com/quern/app/data/sync/DeviceLinkCrypto.kt`, `DeviceLinkClient.kt`, and `data/companion/TvWebCompanionServer.kt`. All primitives (`P-256` SPKI, `ECDH`, `HKDF-SHA256`, `AES-256-GCM`) map 1:1 to browser WebCrypto for the future `quern.pages.dev` phone-browser flow.

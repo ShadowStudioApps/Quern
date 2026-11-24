@@ -87,6 +87,30 @@ class QuernAccount(
     fun encryptionKey(): ByteArray? =
         vault.getString(KEY_ENC_KEY).takeIf { it.isNotBlank() }?.let { AccountCrypto.unb64url(it) }
 
+    /** True when this signed-in device holds both authSecret and encKey in SecureVault for TV QR linking. */
+    fun canApproveDeviceLink(): Boolean =
+        _state.value.isSignedIn &&
+            vault.getString(KEY_AUTH_SECRET).isNotBlank() &&
+            vault.getString(KEY_ENC_KEY).isNotBlank()
+
+    /**
+     * Exports the derived credentials stored in SecureVault for sealing into an ECDH TV link envelope.
+     * Returns null when signed out or when signed in before authSecret persistence existed. Never log.
+     */
+    fun exportLinkBundle(): DeviceLinkCrypto.LinkCredentialBundle? {
+        val email = vault.getString(KEY_EMAIL)
+        val authSecret = vault.getString(KEY_AUTH_SECRET)
+        val encKeyB64 = vault.getString(KEY_ENC_KEY)
+        if (!_state.value.isSignedIn || email.isBlank() || authSecret.isBlank() || encKeyB64.isBlank()) {
+            return null
+        }
+        return DeviceLinkCrypto.LinkCredentialBundle(
+            email = email,
+            authSecret = authSecret,
+            encKeyB64 = encKeyB64
+        )
+    }
+
     /** When this device signed in, by the server's clock (epoch ms), or 0 if unknown. */
     fun signedInAtMs(): Long = parseServerTime(vault.getString(KEY_SIGNED_IN_AT))
 
@@ -103,10 +127,11 @@ class QuernAccount(
         )
         if (root["access_token"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()) {
             // Email confirmation is on: no session until the link in the email is opened.
+            keys.encKey.fill(0)
             vault.putString(KEY_PENDING_EMAIL, cleanEmail)
             _state.value = loadState()
         } else {
-            saveSession(root, cleanEmail, keys.encKey)
+            saveSession(root, cleanEmail, keys.authSecret, keys.encKey)
         }
     }
 
@@ -118,7 +143,37 @@ class QuernAccount(
             put("password", keys.authSecret)
         }
         val root = post("$baseUrl/auth/v1/token?grant_type=password", body)
-        saveSession(root, cleanEmail, keys.encKey)
+        saveSession(root, cleanEmail, keys.authSecret, keys.encKey)
+    }
+
+    /**
+     * Signs in this TV using derived credentials received over an ECDH-encrypted LAN link.
+     * Issues a brand-new Supabase session (own refresh token) so phone and TV never log each other out.
+     */
+    suspend fun signInWithDerivedKeys(
+        email: String,
+        authSecret: String,
+        encKeyB64: String
+    ): Result<Unit> = runAccount {
+        val cleanEmail = AccountCrypto.normalizeEmail(email)
+        if (!EMAIL_REGEX.matches(cleanEmail)) throw AccountException(AccountError.INVALID_EMAIL, "Invalid email")
+        if (authSecret.isBlank()) throw AccountException(AccountError.WRONG_CREDENTIALS, "Missing authSecret")
+        val encKey = runCatching { AccountCrypto.unb64url(encKeyB64) }.getOrNull()
+        if (encKey == null || encKey.size != 32) {
+            encKey?.fill(0)
+            throw AccountException(AccountError.SERVER, "Invalid encryption key")
+        }
+        try {
+            val body = buildJsonObject {
+                put("email", cleanEmail)
+                put("password", authSecret)
+            }
+            val root = post("$baseUrl/auth/v1/token?grant_type=password", body)
+            saveSession(root, cleanEmail, authSecret, encKey)
+        } catch (t: Throwable) {
+            encKey.fill(0)
+            throw t
+        }
     }
 
     suspend fun resendConfirmation(email: String): Result<Unit> = runAccount {
@@ -205,7 +260,7 @@ class QuernAccount(
         newToken
     }
 
-    private fun saveSession(root: JsonObject, email: String, encKey: ByteArray) {
+    private fun saveSession(root: JsonObject, email: String, authSecret: String, encKey: ByteArray) {
         val token = root["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
         val refresh = root["refresh_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
         val userId = root["user"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull.orEmpty()
@@ -214,6 +269,7 @@ class QuernAccount(
         vault.putString(KEY_REFRESH_TOKEN, refresh)
         vault.putString(KEY_USER_ID, userId)
         vault.putString(KEY_EMAIL, email)
+        vault.putString(KEY_AUTH_SECRET, authSecret)
         vault.putString(KEY_ENC_KEY, AccountCrypto.b64url(encKey))
         // Server clock, so it can be compared with row timestamps (see QuernSyncEngine key mismatch).
         val signedInAt = root["user"]?.jsonObject?.get("last_sign_in_at")?.jsonPrimitive?.contentOrNull
@@ -224,8 +280,16 @@ class QuernAccount(
     }
 
     private fun clearSession() {
-        listOf(KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN, KEY_USER_ID, KEY_EMAIL, KEY_ENC_KEY, KEY_PENDING_EMAIL, KEY_SIGNED_IN_AT)
-            .forEach(vault::remove)
+        listOf(
+            KEY_ACCESS_TOKEN,
+            KEY_REFRESH_TOKEN,
+            KEY_USER_ID,
+            KEY_EMAIL,
+            KEY_AUTH_SECRET,
+            KEY_ENC_KEY,
+            KEY_PENDING_EMAIL,
+            KEY_SIGNED_IN_AT
+        ).forEach(vault::remove)
         _state.value = loadState()
     }
 
@@ -304,6 +368,7 @@ class QuernAccount(
         private const val KEY_REFRESH_TOKEN = "acct_refresh_token"
         private const val KEY_USER_ID = "acct_user_id"
         private const val KEY_EMAIL = "acct_email"
+        private const val KEY_AUTH_SECRET = "acct_auth_secret"
         private const val KEY_ENC_KEY = "acct_enc_key"
         private const val KEY_PENDING_EMAIL = "acct_pending_email"
         private const val KEY_DEVICE_ID = "acct_device_id"

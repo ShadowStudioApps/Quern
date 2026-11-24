@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -184,6 +185,49 @@ class QuernRepository(
 
         (serverTask.await() + tmdbTask.await() + addonTask.await())
             .distinctBy { "${it.origin}_${it.type}_${it.id}" }
+    }
+
+    private val heroMetaCache = ConcurrentHashMap<String, MediaItem>()
+
+    /**
+     * Enriches a hero item with its transparent title logo, runtime, and genres from Stremio meta
+     * addons (or TMDB `/images` if the user configured a TMDB key). Cached per session.
+     */
+    suspend fun resolveHeroMeta(item: MediaItem): MediaItem {
+        val key = "${item.type.stremioValue}_${item.id}"
+        heroMetaCache[key]?.let { return it }
+        if (!item.logoUrl.isNullOrBlank() && !item.runtime.isNullOrBlank() && item.genres.isNotEmpty()) {
+            heroMetaCache[key] = item
+            return item
+        }
+        var enriched = item
+        // 1. Stremio meta resource (gives `logo`, `runtime`, `genres`, `description`, `background`)
+        if (item.origin == SourceOrigin.ADDON || !item.imdbId.isNullOrBlank()) {
+            val lookupId = item.imdbId ?: item.id
+            val detail = runCatching { addonRepository.fetchMeta(item.type, lookupId) }.getOrNull()
+            if (detail != null) {
+                val m = detail.item
+                enriched = enriched.copy(
+                    logoUrl = enriched.logoUrl ?: m.logoUrl,
+                    runtime = enriched.runtime ?: detail.runtime ?: m.runtime,
+                    genres = if (enriched.genres.isNotEmpty()) enriched.genres else m.genres,
+                    overview = enriched.overview?.takeIf { it.isNotBlank() } ?: m.overview,
+                    backdropUrl = enriched.backdropUrl?.takeIf { it.isNotBlank() } ?: m.backdropUrl,
+                    rating = enriched.rating?.takeIf { it.isNotBlank() } ?: m.rating,
+                    year = enriched.year?.takeIf { it.isNotBlank() } ?: m.year
+                )
+            }
+        }
+        // 2. TMDB `/images` fallback when a user TMDB key is configured and logo is still missing
+        if (enriched.logoUrl.isNullOrBlank()) {
+            val tmdbLogo = tmdbClient.fetchLogoUrl(enriched.tmdbId, enriched.imdbId, enriched.type)
+            if (!tmdbLogo.isNullOrBlank()) {
+                enriched = enriched.copy(logoUrl = tmdbLogo)
+            }
+        }
+        if (heroMetaCache.size > 120) heroMetaCache.clear()
+        heroMetaCache[key] = enriched
+        return enriched
     }
 
     suspend fun loadDetail(item: MediaItem): MediaDetail {

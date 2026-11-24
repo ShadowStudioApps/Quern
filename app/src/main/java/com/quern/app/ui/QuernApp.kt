@@ -64,30 +64,40 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import com.quern.app.ui.components.SoftGlowBackground
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.annotation.ExperimentalCoilApi
 import coil.imageLoader
 import com.quern.app.data.local.AppIconManager
+import com.quern.app.data.sync.PendingDeviceLink
 import com.quern.app.domain.model.ContinueWatchingAction
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.domain.model.NavigationStyle
 import com.quern.app.player.QuernPlayerScreen
 import com.quern.app.ui.components.ContentFocusMemory
+import com.quern.app.ui.components.DeviceLinkApproveDialog
 import com.quern.app.ui.components.LocalContentFocusMemory
 import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.QuernBrandMark
@@ -131,7 +141,9 @@ fun QuernApp(
     viewModel: QuernViewModel,
     okHttpClient: OkHttpClient,
     pendingDeepLinkAddonUrl: String? = null,
-    onDeepLinkConsumed: () -> Unit = {}
+    onDeepLinkConsumed: () -> Unit = {},
+    pendingDeviceLink: PendingDeviceLink? = null,
+    onDeviceLinkDismissed: () -> Unit = {}
 ) {
     val settings by viewModel.appSettings.collectAsState()
     val pinMigrationState by viewModel.pinMigrationState.collectAsState()
@@ -203,6 +215,26 @@ fun QuernApp(
                 viewModel.installAddon(pendingDeepLinkAddonUrl)
                 onDeepLinkConsumed()
             }
+        }
+
+        if (pendingDeviceLink != null) {
+            val linkAccountState by viewModel.accountState.collectAsState()
+            DeviceLinkApproveDialog(
+                request = pendingDeviceLink,
+                accountState = linkAccountState,
+                canApprove = viewModel.canApproveDeviceLink(),
+                httpClient = okHttpClient,
+                onApprove = { req, code6 ->
+                    viewModel.approveDeviceLink(req, code6, okHttpClient)
+                },
+                onOpenAccountSettings = {
+                    profilePickerOpen = false
+                    settingsInitialGroup = SettingsGroup.ACCOUNTS_SYNC
+                    showingDetail = false
+                    currentTab = QuernTab.SETTINGS
+                },
+                onDismiss = onDeviceLinkDismissed
+            )
         }
 
         if (profilePickerOpen && activePlayback == null) {
@@ -300,6 +332,20 @@ fun QuernApp(
                                         )
                                     }
                                 },
+                                onResumeDirect = { progress ->
+                                    if (!viewModel.resumeWatchProgress(progress)) {
+                                        openItemDetail(
+                                            MediaItem(
+                                                id = progress.contentId.substringBefore(":"),
+                                                title = progress.title,
+                                                type = progress.type,
+                                                posterUrl = progress.posterUrl,
+                                                backdropUrl = progress.backdropUrl
+                                            )
+                                        )
+                                    }
+                                },
+                                onResolveHeroMeta = { item -> viewModel.resolveHeroMeta(item) },
                                 onOpenAddons = {
                                     settingsInitialGroup = SettingsGroup.ADDONS
                                     currentTab = QuernTab.SETTINGS
@@ -371,6 +417,7 @@ fun QuernApp(
 
                         QuernTab.SETTINGS -> {
                             val companionSession by viewModel.companionSession.collectAsState()
+                            val deviceLinkState by viewModel.deviceLinkState.collectAsState()
                             val accountState by viewModel.accountState.collectAsState()
                             val accountBusy by viewModel.accountBusy.collectAsState()
                             val accountMessage by viewModel.accountMessage.collectAsState()
@@ -403,7 +450,12 @@ fun QuernApp(
                                     onSignOut = { viewModel.accountSignOut() },
                                     onDelete = { viewModel.accountDelete() },
                                     sync = syncStatus,
-                                    onSyncNow = { viewModel.syncNow() }
+                                    onSyncNow = { viewModel.syncNow() },
+                                    deviceLink = deviceLinkState,
+                                    deviceLinkUrl = { viewModel.deviceLinkUrl },
+                                    onStartDeviceLink = { name -> viewModel.startDeviceLink(name) },
+                                    onStopDeviceLink = { viewModel.stopDeviceLink() },
+                                    onRefreshDeviceLink = { name -> viewModel.refreshDeviceLink(name) }
                                 ),
                                 addons = addons,
                                 debridStatuses = debridStatuses,
@@ -538,8 +590,8 @@ fun QuernApp(
                                     // nothing is remembered, the request fails and focus stays stuck in the rail.
                                     .padding(start = railInset)
                                     .restoreLastContentFocus(contentFocusMemory)
-                                    // Drawing: shift the content back so it still fills the screen from x=0 and
-                                    // the hero and backgrounds run behind the rail (screens pad by LocalTvRailInset).
+                                    // Drawing: shift the content back toward the start edge so it fills
+                                    // the screen edge-to-edge behind the floating rail in both LTR and RTL.
                                     .layout { measurable, constraints ->
                                         val insetPx = railInset.roundToPx()
                                         val fullWidth = constraints.maxWidth + insetPx
@@ -547,7 +599,7 @@ fun QuernApp(
                                             constraints.copy(minWidth = fullWidth, maxWidth = fullWidth)
                                         )
                                         layout(constraints.maxWidth, placeable.height) {
-                                            placeable.place(-insetPx, 0)
+                                            placeable.placeRelative(-insetPx, 0)
                                         }
                                     }
                             ) {
@@ -559,7 +611,7 @@ fun QuernApp(
                                 }
                             }
 
-                            // Smooth cinema left-fade scrim when auto-hide rail expands so rail labels never clash with page text
+                            // Smooth cinema start-fade scrim when auto-hide rail expands so rail labels never clash with page text
                             if (autoHide && !showingDetail) {
                                 Box(
                                     modifier = Modifier
@@ -567,6 +619,7 @@ fun QuernApp(
                                         .drawBehind {
                                             val a = scrimAlphaState.value
                                             if (a > 0.01f) {
+                                                val isRtl = layoutDirection == LayoutDirection.Rtl
                                                 drawRect(
                                                     Brush.horizontalGradient(
                                                         colorStops = arrayOf(
@@ -575,7 +628,9 @@ fun QuernApp(
                                                             0.42f to palette.background.copy(alpha = 0.36f * a),
                                                             0.66f to Color.Transparent,
                                                             1.0f to Color.Transparent
-                                                        )
+                                                        ),
+                                                        startX = if (isRtl) size.width else 0f,
+                                                        endX = if (isRtl) 0f else size.width
                                                     )
                                                 )
                                             }
@@ -595,6 +650,7 @@ fun QuernApp(
                                     hasSettingsUpdateDot = updateState.showSettingsDot,
                                     focusSyncSignal = railFocusSyncSignal,
                                     onRailFocusChanged = { collapsedRailFocused = it },
+                                    onExitToContent = { contentFocusMemory.restore() },
                                     onSelectTab = { currentTab = it }
                                 )
                             }
@@ -848,9 +904,15 @@ fun QuernTvNavigationRail(
     hasSettingsUpdateDot: Boolean = false,
     focusSyncSignal: Int = 0,
     onRailFocusChanged: ((Boolean) -> Unit)? = null,
+    onExitToContent: (() -> Boolean)? = null,
     onSelectTab: (QuernTab) -> Unit
 ) {
     val palette = LocalQuernPalette.current
+    val toContentKey = if (LocalLayoutDirection.current == LayoutDirection.Rtl) {
+        Key.DirectionLeft
+    } else {
+        Key.DirectionRight
+    }
     // One requester per tab so focus entering the rail lands on the selected tab, not the geometrically nearest one
     val tabFocusRequesters = remember { QuernTab.entries.associateWith { FocusRequester() } }
     val profileFocusRequester = remember { FocusRequester() }
@@ -904,28 +966,41 @@ fun QuernTvNavigationRail(
             }
             .fillMaxHeight()
             .clipToBounds()
-            // Whisper-soft left edge vignette only (zero solid column or seam); expanded readability
-            // in auto-hide mode is handled by the wide smooth cinema scrim behind the rail.
+            // Whisper-soft neutral left edge feather only (zero solid column, zero color seam
+            // against the blurred ambient backdrop); expanded readability in auto-hide mode is
+            // handled by the wide smooth cinema scrim behind the rail.
             .drawWithCache {
+                val isRtl = layoutDirection == LayoutDirection.Rtl
                 val veil = Brush.horizontalGradient(
                     colorStops = if (autoHideCollapsed) {
                         arrayOf(
-                            0.0f to palette.background.copy(alpha = 0.34f),
-                            0.65f to palette.background.copy(alpha = 0.14f),
+                            0.0f to Color.Black.copy(alpha = 0.22f),
+                            0.55f to Color.Black.copy(alpha = 0.06f),
                             1.0f to Color.Transparent
                         )
                     } else {
                         arrayOf(
-                            0.0f to palette.background.copy(alpha = 0.56f),
-                            0.65f to palette.background.copy(alpha = 0.24f),
+                            0.0f to Color.Black.copy(alpha = 0.42f),
+                            0.62f to Color.Black.copy(alpha = 0.14f),
                             1.0f to Color.Transparent
                         )
-                    }
+                    },
+                    startX = if (isRtl) size.width else 0f,
+                    endX = if (isRtl) 0f else size.width
                 )
                 onDrawBehind { drawRect(veil) }
             }
             // Single focusGroup spanning both the tab column and the bottom profile button so LEFT
             // from any content row (even lower rows) always enters on the selected tab, never the profile button.
+            // Pressing RIGHT (LEFT in RTL) hands focus directly to ContentFocusMemory (last focused item
+            // or Home Hero CTA), falling back to normal geometric search if nothing is registered.
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyDown && ev.key == toContentKey) {
+                    onExitToContent?.invoke() == true
+                } else {
+                    false
+                }
+            }
             .focusProperties { enter = { tabFocusRequesters.getValue(latestTab) } }
             .focusGroup()
             .onFocusChanged {

@@ -76,7 +76,8 @@ data class QuernPalette(
     val onAccent: Color,
     val border: Color,
     val ambientGlow: Color = Color(0xFF294E7A),
-    val isGlossy: Boolean = false
+    val isGlossy: Boolean = false,
+    val isMonochrome: Boolean = false
 ) {
     /** Frosted translucent card surface that lets the blurred theme backdrop breathe through. */
     val glassSurface: Color
@@ -258,6 +259,7 @@ fun QuernTheme(
     }
 
     val isGlossy = themePreset == AppThemePreset.GLOSSY_BLACK
+    val isMonochrome = isGlossy || themePreset == AppThemePreset.LIGHT_GRAY
     val bg = if (isGlossy || amoledPureBlack) Color(0xFF000000) else themePreset.backgroundColor
     val surf = themePreset.surfaceTint
     val elev = themePreset.surfaceElevatedTint
@@ -272,7 +274,8 @@ fun QuernTheme(
         onAccent = resolvedOnAccent,
         border = border,
         ambientGlow = themePreset.ambientGlowColor,
-        isGlossy = isGlossy
+        isGlossy = isGlossy,
+        isMonochrome = isMonochrome
     )
 
     val scaledTypography = remember(fontScaleMultiplier, fontFamilyChoice) {

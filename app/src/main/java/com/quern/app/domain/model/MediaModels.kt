@@ -43,9 +43,11 @@ data class MediaItem(
     val type: MediaType,
     val posterUrl: String? = null,
     val backdropUrl: String? = null,
+    val logoUrl: String? = null,
     val overview: String? = null,
     val year: String? = null,
     val releaseDate: String? = null, // ISO YYYY-MM-DD when available from TMDB/addons
+    val runtime: String? = null,
     val rating: String? = null,
     val imdbId: String? = null,
     val tmdbId: Int? = null,

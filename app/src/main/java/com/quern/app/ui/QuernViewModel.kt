@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.quern.app.data.QuernRepository
 import com.quern.app.data.addons.AddonHealthResult
 import com.quern.app.data.companion.CompanionSessionState
+import com.quern.app.data.companion.DeviceLinkSessionState
 import com.quern.app.data.companion.TvWebCompanionServer
 import com.quern.app.data.local.PinMigrationState
 import com.quern.app.data.local.SettingsStore
@@ -15,6 +16,9 @@ import com.quern.app.data.sync.CloudSyncManager
 import com.quern.app.data.sync.AccountError
 import com.quern.app.data.sync.AccountException
 import com.quern.app.data.sync.AccountUiMessage
+import com.quern.app.data.sync.DeviceLinkClient
+import com.quern.app.data.sync.DeviceLinkSubmitResult
+import com.quern.app.data.sync.PendingDeviceLink
 import com.quern.app.data.sync.QuernAccount
 import com.quern.app.data.sync.QuernAccountState
 import com.quern.app.data.sync.QuernSyncEngine
@@ -166,6 +170,10 @@ class QuernViewModel(
         get() = companionServer.getLocalUrl("addons")
 
     val companionSession: StateFlow<CompanionSessionState> = companionServer.sessionState
+    val deviceLinkState: StateFlow<DeviceLinkSessionState> = companionServer.deviceLinkState
+
+    val deviceLinkUrl: String
+        get() = companionServer.getDeviceLinkUrl()
 
     private var companionHolders = 0
 
@@ -200,6 +208,37 @@ class QuernViewModel(
 
     fun refreshCompanionSession() {
         companionServer.refreshSession()
+    }
+
+    /** Starts the TV QR device-linking session (5m TTL) and binds the local HTTP server. */
+    fun startDeviceLink(deviceName: String) {
+        acquireCompanionServer()
+        companionServer.startDeviceLinkSession(deviceName)
+    }
+
+    /** Immediately closes the device-linking endpoint, wipes the ephemeral key, and releases the server. */
+    fun stopDeviceLink() {
+        companionServer.stopDeviceLinkSession()
+        releaseCompanionServer()
+    }
+
+    /** Rotates ephemeral key pair, session id, and 6-digit confirmation code for the TV QR. */
+    fun refreshDeviceLink(deviceName: String) {
+        companionServer.refreshDeviceLinkSession(deviceName)
+    }
+
+    /** True when this signed-in phone has both authSecret and encKey in SecureVault to approve a TV. */
+    fun canApproveDeviceLink(): Boolean = quernAccount.canApproveDeviceLink()
+
+    /** Phone side: seals credentials with ECDH + HKDF-SHA256 + AES-GCM and POSTs to the TV. */
+    suspend fun approveDeviceLink(
+        request: PendingDeviceLink,
+        code6: String,
+        httpClient: okhttp3.OkHttpClient
+    ): DeviceLinkSubmitResult {
+        val bundle = quernAccount.exportLinkBundle()
+            ?: return DeviceLinkSubmitResult.Failed("Not signed in with linking keys")
+        return DeviceLinkClient.approveTvLink(httpClient, request, code6, bundle)
     }
 
     val addons: StateFlow<List<InstalledAddon>> = repository.addonRepository.addons
@@ -322,6 +361,9 @@ class QuernViewModel(
                 _toastMessage.value = it.message ?: "Invalid settings code"
             }
     }
+
+    suspend fun resolveHeroMeta(item: MediaItem): MediaItem =
+        repository.resolveHeroMeta(item)
 
     fun refreshHome() {
         homeJob?.cancel()

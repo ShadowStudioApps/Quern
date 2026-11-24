@@ -54,25 +54,37 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.size.Precision
 import com.quern.app.R
 import com.quern.app.domain.model.Episode
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.domain.model.MediaType
 import com.quern.app.domain.model.StreamSource
 import com.quern.app.ui.DetailUiState
+import com.quern.app.ui.components.AmbientBlurredBackdrop
+import com.quern.app.ui.components.HERO_DECODE_HEIGHT_PX
+import com.quern.app.ui.components.HERO_DECODE_WIDTH_PX
+import com.quern.app.ui.components.HeroMeltTransformation
 import com.quern.app.ui.components.LumaBadgeChip
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
@@ -104,7 +116,7 @@ fun DetailScreen(
     val context = LocalContext.current
     val detail = state.detail
     if (detail == null) {
-        Box(modifier = Modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = palette.focusRing)
         }
         return
@@ -139,10 +151,30 @@ fun DetailScreen(
         }
     }
 
-    val backdropReq = remember(item.backdropUrl, item.posterUrl) {
-        val url = item.backdropUrl ?: item.posterUrl
-        if (url.isNullOrBlank()) null else {
-            ImageRequest.Builder(context).data(url).size(1280, 720).crossfade(true).build()
+    val artworkUrl = item.backdropUrl ?: item.posterUrl
+    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val detailMelt = remember(isTv, isRtl) {
+        HeroMeltTransformation(
+            aspectBucket = if (isTv) 26 else 16,
+            fadeStartEdge = true,
+            isRtl = isRtl,
+            bottomFadeStart = 0.44f,
+            startFadeEnd = 0.48f,
+            bakeTextShadow = true,
+            textShadowCenterY = 0.48f,
+            textShadowRadiusFrac = if (isTv) 0.50f else 0.85f,
+            bakeTopWhisper = false
+        )
+    }
+    val backdropReq = remember(artworkUrl, detailMelt) {
+        if (artworkUrl.isNullOrBlank()) null else {
+            ImageRequest.Builder(context)
+                .data(artworkUrl)
+                .size(HERO_DECODE_WIDTH_PX, HERO_DECODE_HEIGHT_PX)
+                .precision(Precision.INEXACT)
+                .transformations(detailMelt)
+                .crossfade(true)
+                .build()
         }
     }
 
@@ -150,16 +182,10 @@ fun DetailScreen(
         formatRuntimeReadable(detail.runtime)
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // Full-bleed atmospheric movie/series backdrop shared cleanly across both stages
-        if (backdropReq != null) {
-            AsyncImage(
-                model = backdropReq,
-                contentDescription = item.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
+    // Transparent root: falls back to QuernApp's SoftGlowBackground when artworkUrl is null.
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Blurred ambient title backdrop (48x27 bilinear stretch + dark veil + vignette) behind both stages.
+        AmbientBlurredBackdrop(imageUrl = artworkUrl)
 
         AnimatedContent(
             targetState = showStreamsOverlay,
@@ -190,10 +216,9 @@ fun DetailScreen(
                             .background(
                                 Brush.horizontalGradient(
                                     colorStops = arrayOf(
-                                        0.0f to Color.Black.copy(alpha = 0.55f),
-                                        0.35f to Color.Black.copy(alpha = 0.38f),
-                                        0.55f to Color.Black.copy(alpha = 0.85f),
-                                        1.0f to Color.Black.copy(alpha = 0.94f)
+                                        0.0f to Color.Black.copy(alpha = 0.20f),
+                                        0.45f to Color.Black.copy(alpha = 0.28f),
+                                        1.0f to Color.Black.copy(alpha = 0.54f)
                                     )
                                 )
                             )
@@ -361,35 +386,20 @@ fun DetailScreen(
                 }
 
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Soft atmospheric gradient so full-bleed backdrop shines clearly
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.horizontalGradient(
-                                    colorStops = arrayOf(
-                                        0.0f to Color(0xCC0D1117),
-                                        0.48f to Color(0x880D1117),
-                                        0.85f to Color(0x280D1117),
-                                        1.0f to Color(0x220D1117)
-                                    )
-                                )
-                            )
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colorStops = arrayOf(
-                                        0.0f to Color(0x330D1117),
-                                        0.45f to Color(0x400D1117),
-                                        0.78f to Color(0xCC0D1117),
-                                        1.0f to Color(0xF20B0E14)
-                                    )
-                                )
-                            )
-                    )
+                    // Crisp upper hero artwork melting smoothly to transparent into the blurred
+                    // ambient backdrop (both readability shadow and alpha melt baked once via
+                    // HeroMeltTransformation — zero offscreen FBO and zero per-frame radial gradients).
+                    if (backdropReq != null) {
+                        AsyncImage(
+                            model = backdropReq,
+                            contentDescription = item.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .fillMaxHeight(if (isTv) 0.68f else 0.50f)
+                                .align(Alignment.TopCenter)
+                        )
+                    }
 
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),

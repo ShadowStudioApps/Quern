@@ -21,7 +21,8 @@ class QuernApplication : Application(), ImageLoaderFactory {
         .okHttpClient { container.httpClient }
         .memoryCache {
             MemoryCache.Builder(this)
-                .maxSizePercent(0.22)
+                // 36 MB cap avoids poster eviction during 85% scrolling while bounding TV Native Heap + GL mtrack.
+                .maxSizeBytes(36 * 1024 * 1024)
                 .build()
         }
         .diskCache {
