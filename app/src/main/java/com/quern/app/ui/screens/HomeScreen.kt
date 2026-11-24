@@ -61,6 +61,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -579,9 +580,18 @@ private fun ContinueWatchingRow(
     onFirstItemAttachedChanged: ((Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val palette = LocalQuernPalette.current
     val strings = LocalQuernStrings.current
     val railInset = if (isTv) LocalTvRailInset.current else 0.dp
+    val cwWidth = if (isTv) 156.dp else 136.dp
+    val cwThumbHeight = if (isTv) 78.dp else 68.dp
+    val cwDecodeW = remember(cwWidth, density.density) {
+        with(density) { (cwWidth.toPx() * 1.1f).toInt().coerceIn(180, 420) }
+    }
+    val cwDecodeH = remember(cwThumbHeight, density.density) {
+        with(density) { (cwThumbHeight.toPx() * 1.1f).toInt().coerceIn(100, 240) }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -633,10 +643,10 @@ private fun ContinueWatchingRow(
                     label = "cwFocusScale"
                 )
                 val remainingMins = ((progress.durationMs - progress.positionMs).coerceAtLeast(0L) / 60_000L)
-                val imgReq = remember(progress.backdropUrl, progress.posterUrl) {
+                val imgReq = remember(progress.backdropUrl, progress.posterUrl, cwDecodeW, cwDecodeH) {
                     val url = progress.backdropUrl ?: progress.posterUrl
                     if (url.isNullOrBlank()) null else {
-                        ImageRequest.Builder(context).data(url).size(320, 180).crossfade(false).build()
+                        ImageRequest.Builder(context).data(url).size(cwDecodeW, cwDecodeH).crossfade(false).build()
                     }
                 }
 

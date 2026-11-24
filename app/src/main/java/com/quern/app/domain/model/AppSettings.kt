@@ -426,6 +426,7 @@ data class AppSettings(
     val cardShape: CardShapePreset = CardShapePreset.PORTRAIT,
     val cardCorner: CardCornerPreset = CardCornerPreset.ROUNDED,
     val uiModeOverride: UiModeOverride = UiModeOverride.AUTO,
+    val screenScalePercent: Int = 100,
     val hiddenCatalogKeys: Set<String> = emptySet(),
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val crashReportingOptIn: Boolean = false,

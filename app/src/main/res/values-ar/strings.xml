@@ -368,4 +368,6 @@
     <string name="update_installer_unavailable">لم يفتح مثبّت الحزم على هذا الجهاز. اسمح بتثبيت التطبيقات من إعدادات النظام أو ثبّت الملف يدوياً.</string>
     <string name="update_unknown_sources_blocked">التلفزيون يمنع التثبيت من مصادر غير معروفة. اسمح لـ Quern من الإعدادات ← التطبيقات ← الوصول الخاص ← تثبيت التطبيقات المجهولة، ثم اضغط تنزيل وتثبيت مرة أخرى.</string>
     <string name="update_no_notes">لا توجد ملاحظات لهذا الإصدار.</string>
+    <string name="appearance_screen_size_title">حجم الواجهة</string>
+    <string name="appearance_screen_size_help">صغّر الواجهة بالكامل لعرض المزيد من البوسترات والصفوف على الشاشة. يتزامن بشكل منفصل للتلفزيون والهاتف.</string>
 </resources>

@@ -15,6 +15,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,7 +68,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.AlertDialog
+import com.quern.app.ui.components.QuernAlertDialog as AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -85,14 +86,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -214,6 +218,7 @@ private fun isGroupModified(group: SettingsGroup, settings: AppSettings): Boolea
             settings.navigationStyle != d.navigationStyle ||
             settings.fontChoice != d.fontChoice ||
             settings.fontScale != d.fontScale ||
+            settings.screenScalePercent != d.screenScalePercent ||
             settings.language != d.language ||
             settings.appIcon != d.appIcon
         SettingsGroup.HOME_LAYOUT -> settings.showHeroBanner != d.showHeroBanner ||
@@ -384,6 +389,7 @@ fun SettingsScreen(
         SettingsSearchEntry(qString(R.string.appearance_accent_title), "accent color swatch highlight لون التمييز", SettingsGroup.APPEARANCE),
         SettingsSearchEntry(qString(R.string.appearance_nav_title), "navigation sidebar top bar التنقل الشريط الجانبي", SettingsGroup.APPEARANCE),
         SettingsSearchEntry(qString(R.string.appearance_font_title), "font text scale size خط حجم النص", SettingsGroup.APPEARANCE),
+        SettingsSearchEntry(qString(R.string.appearance_screen_size_title), "interface screen size scale 75 80 85 90 95 100 حجم الواجهة", SettingsGroup.APPEARANCE),
         SettingsSearchEntry(qString(R.string.appearance_lang_title), "language arabic english rtl اللغة عربي", SettingsGroup.APPEARANCE),
         SettingsSearchEntry(qString(R.string.appearance_icon_title), "icon banner launcher ايقونة", SettingsGroup.APPEARANCE),
         SettingsSearchEntry(qString(R.string.group_home), "hero poster card size labels unreleased row order continue watching الرئيسية بطاقات", SettingsGroup.HOME_LAYOUT),
@@ -461,6 +467,7 @@ fun SettingsScreen(
                                 navigationStyle = d.navigationStyle,
                                 fontChoice = d.fontChoice,
                                 fontScale = d.fontScale,
+                                screenScalePercent = d.screenScalePercent,
                                 language = d.language,
                                 appIcon = d.appIcon
                             )
@@ -926,7 +933,7 @@ internal fun HelpTextLine(text: String) {
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalComposeUiApi::class)
 @Composable
 private fun AppearanceSectionPane(
     settings: AppSettings,
@@ -1117,6 +1124,46 @@ private fun AppearanceSectionPane(
                             label = if (isAr) fs.labelAr else fs.labelEn,
                             selected = settings.fontScale == fs,
                             onClick = { onUpdateSettings { it.copy(fontScale = fs) } }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4b. Interface Size (Full-screen LocalDensity scale, synced per device class)
+        item(key = "screen_size") {
+            val steps = remember { listOf(75, 80, 85, 90, 95, 100) }
+            val stepRequesters = remember { steps.associateWith { FocusRequester() } }
+            val activeStep by rememberUpdatedState(
+                steps.minByOrNull { kotlin.math.abs(it - settings.screenScalePercent) } ?: 100
+            )
+            SettingSectionCard(title = qString(R.string.appearance_screen_size_title)) {
+                HelpTextLine(qString(R.string.appearance_screen_size_help))
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // Entering this row lands on the currently selected step so scrolling past
+                        // vertically never changes it, while moving LEFT/RIGHT applies live immediately.
+                        .focusProperties { enter = { stepRequesters.getValue(activeStep) } }
+                        .focusGroup(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    steps.forEach { pct ->
+                        SelectablePillOption(
+                            label = "$pct%",
+                            selected = settings.screenScalePercent == pct,
+                            modifier = Modifier.focusRequester(stepRequesters.getValue(pct)),
+                            onFocused = {
+                                if (settings.screenScalePercent != pct) {
+                                    onUpdateSettings { it.copy(screenScalePercent = pct) }
+                                }
+                            },
+                            onClick = {
+                                if (settings.screenScalePercent != pct) {
+                                    onUpdateSettings { it.copy(screenScalePercent = pct) }
+                                }
+                            }
                         )
                     }
                 }
@@ -3120,6 +3167,8 @@ internal fun SettingSectionCard(
 internal fun SelectablePillOption(
     label: String,
     selected: Boolean,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
     onClick: () -> Unit
 ) {
     val palette = LocalQuernPalette.current
@@ -3135,10 +3184,11 @@ internal fun SelectablePillOption(
         color = bg,
         shape = RoundedCornerShape(999.dp),
         border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .tvClickable(
                 onFocusChangedState = { focused = it },
+                onFocused = onFocused,
                 onClick = onClick
             )
     ) {

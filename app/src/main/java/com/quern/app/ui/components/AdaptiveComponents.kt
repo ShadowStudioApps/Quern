@@ -22,9 +22,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -36,12 +38,16 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwitchColors
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,11 +85,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.memory.MemoryCache
@@ -94,6 +103,7 @@ import com.quern.app.domain.model.CatalogRow
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.domain.model.UiModeOverride
 import com.quern.app.ui.theme.LocalQuernPalette
+import com.quern.app.ui.theme.LocalQuernScaledDensity
 import com.quern.app.ui.theme.LocalQuernStrings
 import com.quern.app.ui.theme.LumaAmber
 import com.quern.app.ui.theme.LumaGlassBorder
@@ -238,6 +248,74 @@ fun rememberIsTvMode(override: UiModeOverride): Boolean {
             UiModeOverride.TV -> true
             UiModeOverride.PHONE -> false
             UiModeOverride.AUTO -> isTvHardware(context, configuration)
+        }
+    }
+}
+
+@Composable
+fun QuernAlertDialog(
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    dismissButton: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+    containerColor: Color = AlertDialogDefaults.containerColor,
+    properties: DialogProperties = DialogProperties()
+) {
+    // Android's Dialog creates its own ComposeView that resets LocalDensity to the system default.
+    // Re-apply the app's root scaled density (LocalQuernScaledDensity) so dialogs match Interface Size.
+    val scaledDensity = LocalQuernScaledDensity.current
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            dismissOnBackPress = properties.dismissOnBackPress,
+            dismissOnClickOutside = properties.dismissOnClickOutside,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        val effectiveDensity = scaledDensity ?: LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides effectiveDensity) {
+            val defaultWidthMod = if (properties.usePlatformDefaultWidth) {
+                Modifier.widthIn(min = 280.dp, max = 560.dp)
+            } else {
+                Modifier
+            }
+            Surface(
+                color = containerColor,
+                shape = AlertDialogDefaults.shape,
+                tonalElevation = AlertDialogDefaults.TonalElevation,
+                modifier = defaultWidthMod.then(modifier)
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    if (title != null) {
+                        ProvideTextStyle(MaterialTheme.typography.headlineSmall) {
+                            Box(modifier = Modifier.padding(bottom = 16.dp)) {
+                                title()
+                            }
+                        }
+                    }
+                    if (text != null) {
+                        ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .padding(bottom = 20.dp)
+                            ) {
+                                text()
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        dismissButton?.invoke()
+                        confirmButton()
+                    }
+                }
+            }
         }
     }
 }
@@ -845,16 +923,23 @@ fun LumaPosterCard(
     )
     val focusBorderColor = if (palette.isGlossy) palette.focusRing else Color.White
     val isGlossy = palette.isGlossy
+    val density = LocalDensity.current
     val baseWidth = if (isTv) cardSize.tvWidthDp else cardSize.phoneWidthDp
     val cardWidth = if (cardShape == CardShapePreset.LANDSCAPE) (baseWidth * 1.45f).toInt().dp else baseWidth.dp
     val cornerShape = remember(cardCorner) { RoundedCornerShape(cardCorner.radiusDp.dp) }
+    val decodeWidthPx = remember(cardWidth, density.density) {
+        with(density) { (cardWidth.toPx() * 1.15f).toInt().coerceIn(140, 480) }
+    }
+    val decodeHeightPx = remember(decodeWidthPx, cardShape) {
+        (decodeWidthPx / cardShape.aspectRatio).toInt().coerceIn(140, 640)
+    }
 
-    val imageModel = remember(item.posterUrl, item.backdropUrl, cardShape) {
+    val imageModel = remember(item.posterUrl, item.backdropUrl, cardShape, decodeWidthPx, decodeHeightPx) {
         val url = if (cardShape == CardShapePreset.LANDSCAPE) (item.backdropUrl ?: item.posterUrl) else item.posterUrl
         if (url.isNullOrBlank()) null else {
             ImageRequest.Builder(context)
                 .data(url)
-                .size(if (cardShape == CardShapePreset.LANDSCAPE) 420 else 260, if (cardShape == CardShapePreset.LANDSCAPE) 236 else 390)
+                .size(decodeWidthPx, decodeHeightPx)
                 .crossfade(false)
                 // No allowRgb565 here: Coil only applies it to ARGB_8888 decodes, which means turning off
                 // hardware bitmaps. Measured on the TV, that cost +24 MB PSS and more jank (STEP 5).

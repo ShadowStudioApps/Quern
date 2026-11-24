@@ -31,7 +31,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.AlertDialog
+import com.quern.app.ui.components.QuernAlertDialog as AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip

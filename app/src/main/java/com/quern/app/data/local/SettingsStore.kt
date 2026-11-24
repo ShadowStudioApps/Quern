@@ -43,6 +43,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -267,6 +268,7 @@ class SettingsStore(context: Context) {
             put("preferredExternalPlayerPackage", s.preferredExternalPlayerPackage)
             put("appIcon", s.appIcon.name)
             put("uiModeOverride", s.uiModeOverride.name)
+            put("screenScalePercent", s.screenScalePercent)
         }
     }
 
@@ -311,7 +313,10 @@ class SettingsStore(context: Context) {
                     ?: curr.appIcon,
                 uiModeOverride = str("uiModeOverride")
                     ?.let { runCatching { UiModeOverride.valueOf(it) }.getOrNull() }
-                    ?: curr.uiModeOverride
+                    ?: curr.uiModeOverride,
+                screenScalePercent = values["screenScalePercent"]?.jsonPrimitive?.intOrNull
+                    ?.coerceIn(75, 100)
+                    ?: curr.screenScalePercent
             )
         }
     }
@@ -491,6 +496,7 @@ class SettingsStore(context: Context) {
             ?.let { runCatching { CardCornerPreset.valueOf(it) }.getOrNull() } ?: defaults.cardCorner
         val uiMode = prefs.getString("ui_mode", defaults.uiModeOverride.name)
             ?.let { runCatching { UiModeOverride.valueOf(it) }.getOrNull() } ?: defaults.uiModeOverride
+        val screenScalePercent = prefs.getInt("screen_scale_pct", defaults.screenScalePercent).coerceIn(75, 100)
         val hiddenCatalogs = prefs.getStringSet("hidden_catalog_keys", emptySet())?.toSet() ?: emptySet()
         val updateChannel = prefs.getString("update_channel", defaults.updateChannel.name)
             ?.let { runCatching { UpdateChannel.valueOf(it) }.getOrNull() } ?: defaults.updateChannel
@@ -536,6 +542,7 @@ class SettingsStore(context: Context) {
             cardShape = cardShape,
             cardCorner = cardCorner,
             uiModeOverride = uiMode,
+            screenScalePercent = screenScalePercent,
             hiddenCatalogKeys = hiddenCatalogs,
             updateChannel = updateChannel,
             crashReportingOptIn = crashOptIn,
@@ -581,6 +588,7 @@ class SettingsStore(context: Context) {
             .putString("card_shape", s.cardShape.name)
             .putString("card_corner", s.cardCorner.name)
             .putString("ui_mode", s.uiModeOverride.name)
+            .putInt("screen_scale_pct", s.screenScalePercent)
             .putStringSet("hidden_catalog_keys", s.hiddenCatalogKeys)
             .putString("update_channel", s.updateChannel.name)
             .putBoolean("crash_reporting_opt_in", s.crashReportingOptIn)
@@ -602,7 +610,8 @@ class SettingsStore(context: Context) {
             "preferExternalPlayer",
             "preferredExternalPlayerPackage",
             "appIcon",
-            "uiModeOverride"
+            "uiModeOverride",
+            "screenScalePercent"
         )
     }
 }

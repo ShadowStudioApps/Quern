@@ -74,8 +74,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.annotation.ExperimentalCoilApi
@@ -135,14 +137,25 @@ fun QuernApp(
     val pinMigrationState by viewModel.pinMigrationState.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
 
-    QuernTheme(
-        themePreset = settings.theme,
-        amoledPureBlack = settings.amoledPureBlack,
-        language = settings.language,
-        accentOverrideHex = settings.accentColor.colorHex,
-        fontScaleMultiplier = settings.fontScale.multiplier,
-        fontFamilyChoice = settings.fontChoice.fontFamily
-    ) {
+    // Interface size: scale LocalDensity by `scale` (fontScale unchanged relative to it) across the
+    // full edge-to-edge screen so more posters and rows fit with sharp vector text and exact focus
+    // rects (never graphicsLayer scaling). Covers Home, Settings, profile picker, and player.
+    val screenScale = settings.screenScalePercent.coerceIn(75, 100) / 100f
+    val rootDensity = LocalDensity.current
+    val scaledRootDensity = remember(rootDensity, screenScale) {
+        if (screenScale >= 0.999f) rootDensity
+        else Density(density = rootDensity.density * screenScale, fontScale = rootDensity.fontScale)
+    }
+
+    CompositionLocalProvider(LocalDensity provides scaledRootDensity) {
+        QuernTheme(
+            themePreset = settings.theme,
+            amoledPureBlack = settings.amoledPureBlack,
+            language = settings.language,
+            accentOverrideHex = settings.accentColor.colorHex,
+            fontScaleMultiplier = settings.fontScale.multiplier,
+            fontFamilyChoice = settings.fontChoice.fontFamily
+        ) {
         val context = LocalContext.current
         val isTv = rememberIsTvMode(settings.uiModeOverride)
         val palette = LocalQuernPalette.current
@@ -613,6 +626,7 @@ fun QuernApp(
                     }
                 }
             }
+        }
         }
     }
 }

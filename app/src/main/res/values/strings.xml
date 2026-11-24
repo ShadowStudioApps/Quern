@@ -368,4 +368,6 @@
     <string name="update_installer_unavailable">This device didn\'t open the package installer. Install the APK manually or allow app installs in system settings.</string>
     <string name="update_unknown_sources_blocked">This TV blocks installs from unknown sources. Allow Quern under Settings → Apps → Special app access → Install unknown apps, then press Download &amp; Install again.</string>
     <string name="update_no_notes">No release notes provided.</string>
+    <string name="appearance_screen_size_title">Interface Size</string>
+    <string name="appearance_screen_size_help">Make the whole interface smaller so more posters and rows fit on screen. Syncs separately for TV and phone.</string>
 </resources>

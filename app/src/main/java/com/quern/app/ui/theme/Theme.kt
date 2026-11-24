@@ -164,6 +164,8 @@ val LocalQuernPalette = staticCompositionLocalOf {
 
 val LocalQuernAccent = staticCompositionLocalOf { Color(0xFF345372) }
 val LocalQuernThemePreset = staticCompositionLocalOf { AppThemePreset.LIGHT_DARK_BLUE }
+/** Effective root-scaled + font-scaled Density so Dialog windows can re-apply it. */
+val LocalQuernScaledDensity = staticCompositionLocalOf<Density?> { null }
 val LocalQuernResources = staticCompositionLocalOf<Resources?> { null }
 
 @Composable
@@ -316,7 +318,8 @@ fun QuernTheme(
         LocalQuernStrings provides stringsFor(effectiveLang),
         LocalQuernResources provides localizedResources,
         LocalLayoutDirection provides layoutDir,
-        LocalDensity provides scaledDensity
+        LocalDensity provides scaledDensity,
+        LocalQuernScaledDensity provides scaledDensity
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
