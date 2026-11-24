@@ -71,7 +71,7 @@ class AccountUi(
     val onSignIn: (email: String, password: String) -> Unit,
     val onSignUp: (email: String, password: String) -> Unit,
     val onResend: (email: String) -> Unit,
-    val onSignOut: () -> Unit,
+    val onSignOut: (discardUnsynced: Boolean) -> Unit,
     val onDelete: () -> Unit,
     val sync: SyncStatus = SyncStatus(),
     val onSyncNow: () -> Unit = {},
@@ -102,6 +102,8 @@ private fun accountMessageText(message: AccountUiMessage, state: QuernAccountSta
     AccountUiMessage.SignedUp ->
         if (state.isSignedIn) qString(R.string.qa_msg_signed_up) else qString(R.string.qa_msg_signed_up_confirm)
     AccountUiMessage.ConfirmationResent -> qString(R.string.qa_msg_resent)
+    AccountUiMessage.SavingBeforeSignOut -> qString(R.string.qa_saving_before_sign_out)
+    AccountUiMessage.SignOutSaveFailed -> qString(R.string.qa_sign_out_save_failed)
     AccountUiMessage.SignedOut -> qString(R.string.qa_msg_signed_out)
     AccountUiMessage.Deleted -> qString(R.string.qa_msg_deleted)
     is AccountUiMessage.Failed -> when (message.reason) {
@@ -134,7 +136,9 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
     }
     var password by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
-    var showManualEmailFormOnTv by remember { mutableStateOf(false) }
+    var confirmSignOut by remember { mutableStateOf(false) }
+    var showPhoneEmailHelp by remember { mutableStateOf(false) }
+    var dismissedSaveWarning by remember(account.message) { mutableStateOf(false) }
 
     SettingSectionCard(title = qString(R.string.qa_title)) {
         if (state.isSignedIn) {
@@ -162,7 +166,7 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
                     if (!account.sync.running) account.onSyncNow()
                 }
                 SelectablePillOption(label = qString(R.string.qa_sign_out), selected = false) {
-                    if (!account.busy) account.onSignOut()
+                    if (!account.busy) confirmSignOut = true
                 }
                 SelectablePillOption(label = qString(R.string.qa_delete), selected = false) {
                     if (!account.busy) confirmDelete = true
@@ -177,17 +181,15 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
                 Spacer(Modifier.height(12.dp))
                 TvDeviceLinkQrPanel(account = account)
                 Spacer(Modifier.height(10.dp))
-                SelectablePillOption(
-                    label = qString(
-                        if (showManualEmailFormOnTv) R.string.qr_link_hide_email else R.string.qr_link_use_email
-                    ),
-                    selected = false
-                ) {
-                    showManualEmailFormOnTv = !showManualEmailFormOnTv
+                TextButton(onClick = { showPhoneEmailHelp = !showPhoneEmailHelp }) {
+                    Text(qString(R.string.qa_phone_email_link), color = palette.focusRing, fontSize = 13.sp)
+                }
+                if (showPhoneEmailHelp) {
+                    HelpTextLine(qString(R.string.qa_phone_email_help))
                 }
             }
 
-            if (!isTv || showManualEmailFormOnTv || state.awaitingEmailConfirmation != null) {
+            if (!isTv) {
                 state.awaitingEmailConfirmation?.let { pending ->
                     Spacer(Modifier.height(10.dp))
                     Text(
@@ -241,9 +243,14 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
         when {
             account.busy -> {
                 Spacer(Modifier.height(10.dp))
-                Text(qString(R.string.qa_working), color = LumaTextSecondary, fontSize = 13.sp)
+                Text(
+                    if (message == AccountUiMessage.SavingBeforeSignOut)
+                        qString(R.string.qa_saving_before_sign_out) else qString(R.string.qa_working),
+                    color = LumaTextSecondary,
+                    fontSize = 13.sp
+                )
             }
-            message != null -> {
+            message != null && message != AccountUiMessage.SignOutSaveFailed -> {
                 Spacer(Modifier.height(10.dp))
                 Text(
                     accountMessageText(message, state),
@@ -253,6 +260,43 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
                 )
             }
         }
+    }
+
+    val saveFailed = account.message == AccountUiMessage.SignOutSaveFailed && !dismissedSaveWarning
+    if (confirmSignOut || saveFailed) {
+        val dismiss = {
+            confirmSignOut = false
+            dismissedSaveWarning = true
+        }
+        AlertDialog(
+            onDismissRequest = dismiss,
+            containerColor = palette.surfaceElevated,
+            title = { Text(qString(R.string.qa_sign_out), color = Color.White) },
+            text = {
+                Text(
+                    qString(when {
+                        saveFailed -> R.string.qa_sign_out_save_failed
+                        isTv -> R.string.qa_sign_out_tv_confirm_body
+                        else -> R.string.qa_sign_out_confirm_body
+                    }),
+                    color = LumaTextSecondary
+                )
+            },
+            confirmButton = {
+                SelectablePillOption(
+                    label = qString(if (saveFailed) R.string.qa_sign_out_anyway else R.string.qa_sign_out),
+                    selected = false
+                ) {
+                    dismiss()
+                    account.onSignOut(saveFailed)
+                }
+            },
+            dismissButton = {
+                SelectablePillOption(label = qString(R.string.common_cancel), selected = false) {
+                    dismiss()
+                }
+            }
+        )
     }
 
     if (confirmDelete) {
@@ -360,9 +404,10 @@ private fun TvDeviceLinkQrPanel(account: AccountUi) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
@@ -382,6 +427,7 @@ private fun TvDeviceLinkQrPanel(account: AccountUi) {
                         Text(
                             text = statusText,
                             color = statusColor,
+                            softWrap = false,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)

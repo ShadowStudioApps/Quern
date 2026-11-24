@@ -9,6 +9,7 @@ import android.util.Log
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import java.io.IOException
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
@@ -66,6 +67,7 @@ class SecureVault(context: Context) {
     /** Emits the name (never the value) of every key that was written or removed. */
     val changes: SharedFlow<String> = _changes.asSharedFlow()
 
+    @Synchronized
     fun putString(key: String, value: String) {
         if (value.isBlank()) {
             valueCache.remove(key)
@@ -84,6 +86,7 @@ class SecureVault(context: Context) {
         _changes.tryEmit(key)
     }
 
+    @Synchronized
     fun getString(key: String, default: String = ""): String {
         valueCache[key]?.let { return it }
         val raw = prefs.getString(key, null) ?: return default
@@ -115,10 +118,36 @@ class SecureVault(context: Context) {
         }.getOrNull()?.also { valueCache[key] = it } ?: default
     }
 
+    @Synchronized
     fun remove(key: String) {
         valueCache.remove(key)
         prefs.edit().remove(key).apply()
         _changes.tryEmit(key)
+    }
+
+    /** Persist related encrypted values together before reporting a session change. */
+    @Synchronized
+    fun commitStrings(values: Map<String, String>) {
+        val edit = prefs.edit()
+        for ((key, value) in values) {
+            if (value.isBlank()) {
+                edit.remove(key)
+            } else {
+                val encrypted = getOrCreateKey()?.let { encrypt(value, it) }
+                    ?: throw IOException("Could not encrypt vault entry")
+                edit.putString(key, encrypted)
+            }
+        }
+        if (!edit.commit()) throw IOException("Could not persist vault entries")
+        values.forEach { (key, _) ->
+            valueCache.remove(key)
+            _changes.tryEmit(key)
+        }
+    }
+
+    @Synchronized
+    fun commitRemoveExcept(keep: Set<String>) {
+        commitStrings(prefs.all.keys.filterNot(keep::contains).associateWith { "" })
     }
 
     companion object {

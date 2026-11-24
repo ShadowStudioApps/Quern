@@ -6,6 +6,7 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.quern.app.di.AppContainer
+import kotlinx.coroutines.runBlocking
 
 class QuernApplication : Application(), ImageLoaderFactory {
     lateinit var container: AppContainer
@@ -14,6 +15,9 @@ class QuernApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        if (container.syncEngine.hasPendingAccountReset()) {
+            runBlocking { container.syncEngine.finishPendingAccountReset() }
+        }
         container.syncEngine.start()
     }
 

@@ -106,6 +106,7 @@ class AppContainer(context: Context) {
     val syncEngine = QuernSyncEngine(
         context = context.applicationContext,
         account = quernAccount,
+        database = database,
         settingsStore = settingsStore,
         addonDao = database.addonDao(),
         addonRepository = addonRepository,

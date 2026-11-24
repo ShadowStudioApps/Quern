@@ -4,7 +4,7 @@ The shared contract between the Android app and the Quern website. Both read and
 
 ## Accounts and keys
 
-Users sign up with email + password. **The raw password never leaves the device.** Both the app and the website derive two values from it:
+Users sign up with email + password. **The raw password is derived locally for direct sign-in and is never sent to Supabase. The separate local browser fallback is described below.** Both the app and the website derive two values from it:
 
 | Value | How | Used for |
 |---|---|---|
@@ -126,7 +126,7 @@ Items are per profile: `(profileId, contentId)` is the key. `favorites` items al
   - `favorites` and `progress`: per item, the newest `updatedAt` wins (deletions included).
   - `addons`, `settings`, `settings_tv`, `settings_phone`, `profiles` and `secrets`: the whole section, last writer wins. The website and the TV both edit these deliberately, so the newest edit is the intended one.
 - Each device keeps its own `device_<id>` row up to date and never writes another device's row.
-- **Sign-out** keeps local data and stops syncing. "Delete account" calls `rpc/quern_delete_my_account`, which removes the user and every row.
+- **Sign-out** on Android asks for confirmation, then flushes pending changes across every section this device owns. If the server is unreachable, the credentials are stale, or a changed section conflicts, the user can cancel or confirm losing unsynced edits on this device. After confirmation and any save, Android clears its local account data, including the current device class's settings (including interface size), storage for all profiles, secrets, tombstones, and sync revisions and hashes. It keeps the installation's device ID. The next sign-in restores server sections without merging in the default placeholder profile. "Delete account" calls `rpc/quern_delete_my_account`, which removes the user and every row, then clears the same local data.
 
 ## Device linking
 
@@ -134,7 +134,7 @@ Signing in on an Android TV without typing an email or password uses an ephemera
 
 ### Goals and security properties
 
-- Neither the raw password, `authSecret`, `encKey`, nor the 6-digit confirmation code ever travels in plaintext over the LAN, appears in URLs, or is written to logs.
+- In the native-app handshake, the password and derived credentials never travel in plaintext over the LAN, and the confirmation code is only entered in the phone UI. No credentials or confirmation code appear in URLs or logs.
 - A photo of the TV's QR code contains **nothing secret** (only the TV's ephemeral public key, random session id, and device name).
 - Each device keeps its own Supabase session (own rotating refresh token): the phone sends `{ email, authSecret, encKey }` inside the encrypted envelope, and the TV calls Supabase `POST /auth/v1/token?grant_type=password` with `authSecret` to obtain its own independent session.
 - On the phone, `authSecret` is stored alongside `encKey` in Android Keystore-backed `SecureVault` (AES-256-GCM) and cleared on sign-out.
@@ -151,7 +151,7 @@ Signing in on an Android TV without typing an email or password uses an ephemera
    - Session TTL is **5 minutes** and auto-refreshes when expired. The `/api/link/*` endpoints only accept requests while the QR is actually on screen; closing the card wipes the ephemeral private key immediately.
 2. **Phone scans the QR**:
    - The TV's `GET /link` page reads the URL fragment in JS and offers **"Open in Quern"** via an Android `intent://link?host=...&pk=...&s=...&n=...#Intent;scheme=quern;package=com.quern.app;S.browser_fallback_url=...;end` link (handled by `MainActivity`'s `quern://link` intent filter).
-   - If the Quern app is not installed on the phone, the page falls back to a browser email + password + 6-digit code form (`POST /link-fallback`, enforcing the same 5-minute TTL, active-QR gate, single-use rule, and 5-attempt lockout).
+   - If the app does not open, the page suggests opening it in Chrome and offers a browser email + password + 6-digit code form. The form sends those fields to the TV over local HTTP without transport encryption (`POST /link-fallback`, enforcing the same 5-minute TTL, active-QR gate, single-use rule, and 5-attempt lockout).
 3. **Phone confirms and encrypts**:
    - The app validates that `host` is a private LAN origin (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`, `localhost`, or `*.local`), queries `GET /api/link/info?s=<sessionId>`, and shows `"Sign in TV '<device name>'?"` asking for the 6-digit code shown on the TV.
    - On **Allow**, the phone generates its own ephemeral EC P-256 key pair, computes `sharedSecret = ECDH(phonePriv, tvPub)`, and derives a 32-byte AES-256-GCM key with HKDF-SHA256 (RFC 5869):

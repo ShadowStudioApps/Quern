@@ -21,6 +21,9 @@ import com.quern.app.domain.model.PlayerEngine
 import com.quern.app.domain.model.SubtitleLanguage
 import com.quern.app.domain.model.TmdbConfig
 import com.quern.app.domain.model.UserProfile
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,6 +36,7 @@ import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.Inet4Address
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
@@ -113,6 +117,7 @@ class TvWebCompanionServer(
     private val onDataChanged: () -> Unit
 ) {
     private var serverSocket: ServerSocket? = null
+    private val clientSockets = mutableSetOf<Socket>()
     private var serverJob: Job? = null
     val port: Int = 8787
 
@@ -226,6 +231,7 @@ class TvWebCompanionServer(
         return "http://$ip:$port/link#pk=${st.publicKeyB64}&s=${st.sessionId}&n=$encodedName"
     }
 
+    @Synchronized
     fun start(scope: CoroutineScope) {
         synchronized(authLock) {
             if (serverJob?.isActive == true) return
@@ -233,26 +239,53 @@ class TvWebCompanionServer(
             // to running, so opening the QR card minutes after launch/close doesn't show a stale timer.
             _sessionState.value = createFreshSession(isRunning = true)
         }
-        serverJob = scope.launch(Dispatchers.IO) {
-            runCatching {
-                val socket = ServerSocket().apply {
-                    reuseAddress = true
-                    bind(InetSocketAddress(port))
+        val errorHandler = CoroutineExceptionHandler { _, error ->
+            Log.w("QuernCompanion", "Server task failed: ${error.javaClass.simpleName}")
+        }
+        serverJob = scope.launch(Dispatchers.IO + errorHandler) {
+            try {
+                ServerSocket().use { socket ->
+                    synchronized(this@TvWebCompanionServer) {
+                        if (!isActive) return@launch
+                        socket.reuseAddress = true
+                        socket.bind(InetSocketAddress(port))
+                        serverSocket = socket
+                    }
+                    supervisorScope {
+                        while (isActive && !socket.isClosed) {
+                            val client = socket.accept()
+                            synchronized(this@TvWebCompanionServer) {
+                                if (!isActive) {
+                                    runCatching { client.close() }
+                                } else {
+                                    clientSockets.add(client)
+                                    launch { handleClient(client) }.invokeOnCompletion {
+                                        runCatching { client.close() }
+                                        synchronized(this@TvWebCompanionServer) { clientSockets.remove(client) }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-                serverSocket = socket
-                while (isActive && !socket.isClosed) {
-                    val client = runCatching { socket.accept() }.getOrNull() ?: break
-                    launch(Dispatchers.IO) { handleClient(client) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (isActive) {
+                    Log.w("QuernCompanion", "Listener failed: ${e.javaClass.simpleName}")
                 }
             }
         }
     }
 
+    @Synchronized
     fun stop() {
-        runCatching { serverSocket?.close() }
-        serverSocket = null
         serverJob?.cancel()
         serverJob = null
+        runCatching { serverSocket?.close() }
+        serverSocket = null
+        clientSockets.forEach { runCatching { it.close() } }
+        clientSockets.clear()
         stopDeviceLinkSession()
         synchronized(authLock) {
             // Rotate session code on close so any previously issued session cookie is immediately invalidated
@@ -332,8 +365,22 @@ class TvWebCompanionServer(
     }
 
     private suspend fun handleClient(socket: Socket) {
+        try {
+            serveClient(socket)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: IOException) {
+            // Browsers can drop speculative connections or time out mid-request.
+        } catch (e: Exception) {
+            Log.w("QuernCompanion", "Client request failed: ${e.javaClass.simpleName}")
+        } finally {
+            runCatching { socket.close() }
+        }
+    }
+
+    private suspend fun serveClient(socket: Socket) {
         socket.use { s ->
-            runCatching { s.soTimeout = 10_000 }
+            s.soTimeout = 10_000
             val reader = BufferedReader(InputStreamReader(s.getInputStream()))
             val requestLine = reader.readLine() ?: return
             val parts = requestLine.split(" ")
@@ -805,7 +852,7 @@ class TvWebCompanionServer(
             ${if (isActive && successMsg.isNullOrBlank()) """
             <div class="sub" id="introText">If Quern is installed and signed in on this phone, open it to approve this TV with end-to-end encryption — no password typing needed.</div>
             <a id="openAppBtn" class="btn" href="#">Open in Quern</a>
-            <div class="divider">Don't have the Quern app on this phone?</div>
+            <div class="divider">App not opening? Open this page in Chrome from your camera's browser menu, then tap Open in Quern. You can also sign in below.</div>
             <button type="button" id="toggleFallbackBtn" class="btn btn-sec" onclick="document.getElementById('fallbackForm').classList.toggle('hidden')">Sign in with email &amp; password</button>
             <form id="fallbackForm" class="${if (expandFallback) "" else "hidden"}" method="POST" action="/link-fallback">
               <input type="hidden" name="s" id="sessionField" value="${escapeHtml(initialSessionId)}"/>
@@ -817,7 +864,7 @@ class TvWebCompanionServer(
               <input name="password" type="password" autocomplete="current-password" minlength="${AccountCrypto.MIN_PASSWORD_LENGTH}" required/>
               <button type="submit" class="btn" style="margin-top:14px">Sign In TV</button>
             </form>
-            <div class="note">Local Wi-Fi connection. When using the Quern app, your credentials are encrypted end-to-end with the TV's ephemeral public key and the 6-digit code.</div>
+            <div class="note">Email sign-in below sends your credentials over local Wi-Fi without HTTPS. Use the Quern app option for encrypted device linking.</div>
             """ else if (successMsg.isNullOrBlank()) """
             <div class="sub">The sign-in QR code is no longer active on this TV. Open Settings &rarr; Accounts &amp; Sync on your TV to show a new QR code.</div>
             <a class="btn btn-sec" href="/#account">Open TV Companion</a>
@@ -841,19 +888,19 @@ class TvWebCompanionServer(
                 var ff0 = document.getElementById('fallbackForm');
                 if (ff0) ff0.classList.remove('hidden');
                 var intro = document.getElementById('introText');
-                if (intro) intro.textContent = 'Quern app was not found on this phone. Enter the 6-digit code shown on your TV and your Quern account below.';
+                if (intro) intro.textContent = 'If Quern did not open, try Chrome or sign in here. Enter the 6-digit code shown on your TV and your Quern account below.';
               }
               var btn = document.getElementById('openAppBtn');
               if (btn && pk && s) {
                 var qs = 'host=' + encodeURIComponent(location.origin)
                   + '&pk=' + encodeURIComponent(pk)
                   + '&s=' + encodeURIComponent(s)
-                  + '&n=' + encodeURIComponent(n || '${escapeHtml(deviceName)}');
+                  + '&n=' + encodeURIComponent(n);
                 var fallbackUrl = location.origin + '/link?fallback=1' + location.hash;
                 var isAndroid = /Android/i.test(navigator.userAgent || '');
                 if (isAndroid) {
                   btn.href = 'intent://link?' + qs
-                    + '#Intent;scheme=quern;package=com.quern.app;'
+                    + '#Intent;scheme=quern;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;package=com.quern.app;'
                     + 'S.browser_fallback_url=' + encodeURIComponent(fallbackUrl) + ';end';
                 } else {
                   btn.href = 'quern://link?' + qs;
@@ -1021,10 +1068,7 @@ class TvWebCompanionServer(
                     { "Confirmation email sent again. Check your inbox and spam folder." },
                     { accountErrorText(it) }
                 )
-                "signout" -> {
-                    quernAccount.signOut()
-                    "Signed out on this TV. Your data on the TV stays."
-                }
+                "signout" -> "To sign out, use Settings → Accounts & Sync on your TV."
                 else -> "Account updated."
             }
         }
@@ -1741,11 +1785,7 @@ class TvWebCompanionServer(
                 </div>
                 ${if (account.isSignedIn) """
                 <div class="page-sub">This TV is linked to <b>${escapeHtml(account.email)}</b>. Your addons, settings and watch history follow you to every TV signed in to this account.</div>
-                <form method="POST" action="/sync-account">
-                  $pairField
-                  <input type="hidden" name="tab" value="account"/>
-                  <button type="submit" name="action" value="signout" class="btn-sm">Sign Out on This TV</button>
-                </form>
+                <div class="page-sub">To sign out, use Settings &rarr; Accounts &amp; Sync on your TV.</div>
                 """ else """
                 <div class="page-sub">One free account for all your TVs. Sign in on each TV and everything stays in sync. Your password never leaves your devices, and private data is encrypted before it's uploaded.</div>
                 ${account.awaitingEmailConfirmation?.let { pending -> "<div class=\"warn\">We sent a confirmation link to <b>${escapeHtml(pending)}</b>. Open it, then sign in below.</div>" }.orEmpty()}

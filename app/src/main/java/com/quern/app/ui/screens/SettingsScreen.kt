@@ -2949,8 +2949,7 @@ private fun SettingsSubPageContent(
                     }
                 }
 
-                // Redesigned Original Companion QR Sign-In Card
-                item(key = "qr_phone_setup") {
+                if (!isTv || account.state.isSignedIn) item(key = "qr_phone_setup") {
                     QuernCompanionSignInCard(
                         url = companionUrl,
                         session = companionSession,

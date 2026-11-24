@@ -127,12 +127,18 @@ class QuernViewModel(
         viewModelScope.launch {
             _accountBusy.value = true
             _accountMessage.value = null
-            val result = action()
-            _accountMessage.value = result.fold(
-                onSuccess = { onSuccess },
-                onFailure = { AccountUiMessage.Failed((it as? AccountException)?.reason ?: AccountError.SERVER) }
-            )
-            _accountBusy.value = false
+            try {
+                _accountMessage.value = action().fold(
+                    onSuccess = { onSuccess },
+                    onFailure = { AccountUiMessage.Failed((it as? AccountException)?.reason ?: AccountError.SERVER) }
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _accountMessage.value = AccountUiMessage.Failed(AccountError.SERVER)
+            } finally {
+                _accountBusy.value = false
+            }
         }
     }
 
@@ -145,11 +151,39 @@ class QuernViewModel(
     fun accountResendConfirmation(email: String) =
         runAccountAction(AccountUiMessage.ConfirmationResent) { quernAccount.resendConfirmation(email) }
 
-    fun accountSignOut() =
-        runAccountAction(AccountUiMessage.SignedOut) { quernAccount.signOut(); Result.success(Unit) }
+    fun accountSignOut(discardUnsynced: Boolean) {
+        if (_accountBusy.value) return
+        _accountBusy.value = true
+        _accountMessage.value = AccountUiMessage.SavingBeforeSignOut
+        viewModelScope.launch {
+            try {
+                companionServer.stop()
+                _accountMessage.value = syncEngine.signOut(discardUnsynced)
+                if (_accountMessage.value == AccountUiMessage.SignedOut) onAccountDataCleared()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _accountMessage.value = AccountUiMessage.Failed(AccountError.SERVER)
+            } finally {
+                _accountBusy.value = false
+            }
+        }
+    }
 
-    fun accountDelete() =
-        runAccountAction(AccountUiMessage.Deleted) { quernAccount.deleteAccount() }
+    fun accountDelete() = runAccountAction(AccountUiMessage.Deleted) {
+        companionServer.stop()
+        syncEngine.deleteAccount().onSuccess { onAccountDataCleared() }
+    }
+
+    private fun onAccountDataCleared() {
+        searchJob?.cancel()
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+        _isSearching.value = false
+        _tmdbConfig.value = repository.tmdbClient.getConfig()
+        _homeRows.value = emptyList()
+        refreshHome()
+    }
 
     fun retryPinMigrationIfNeeded() {
         settingsStore.retryPinMigrationIfNeeded()

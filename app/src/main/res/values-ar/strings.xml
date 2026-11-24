@@ -326,7 +326,7 @@
     <string name="qa_sign_out">تسجيل الخروج</string>
     <string name="qa_delete">حذف الحساب</string>
     <string name="qa_delete_confirm_title">تحذف حساب Quern؟</string>
-    <string name="qa_delete_confirm_body">هذا يحذف حسابك وكل شي متزامن عليه من السيرفر نهائياً، لكل تلفزيوناتك. البيانات اللي على هذا التلفزيون تبقى. ما يمكن التراجع عنه.</string>
+    <string name="qa_delete_confirm_body">هذا يحذف حسابك والبيانات المتزامنة نهائياً ويمسح بيانات الحساب من هذا الجهاز. ما يمكن التراجع عنه.</string>
     <string name="qa_delete_confirm_btn">احذف نهائياً</string>
     <string name="qa_working">جاري التنفيذ…</string>
     <string name="qa_not_signed_in">غير مسجّل</string>
@@ -334,7 +334,7 @@
     <string name="qa_msg_signed_up">انعمل الحساب وتم تسجيل الدخول.</string>
     <string name="qa_msg_signed_up_confirm">انعمل الحساب. افتح رابط التأكيد اللي وصلك بالإيميل، وبعدين سجّل دخول.</string>
     <string name="qa_msg_resent">انرسل إيميل التأكيد مرة ثانية. شيّك على مجلد الرسائل غير المرغوبة (Spam) بعد.</string>
-    <string name="qa_msg_signed_out">تم تسجيل الخروج. البيانات اللي على هذا التلفزيون تبقى.</string>
+    <string name="qa_msg_signed_out">تم تسجيل الخروج ومسح بيانات الحساب من هذا الجهاز.</string>
     <string name="qa_msg_deleted">انحذف الحساب.</string>
     <string name="qa_err_invalid_email">الإيميل مكتوب غلط.</string>
     <string name="qa_err_weak_password">كلمة السر لازم تكون %1$d أحرف على الأقل.</string>
@@ -396,4 +396,11 @@
     <string name="qr_link_approve_inactive">رمز QR لم يعد مفتوحاً على التلفاز.</string>
     <string name="qr_link_approve_network">تعذّر الوصول للتلفاز عبر الواي فاي. تأكد أن الجهازين على نفس الشبكة.</string>
     <string name="qr_link_approve_open_settings">فتح إعدادات الحساب</string>
+    <string name="qa_sign_out_confirm_body">راح ينسى هذا الجهاز إضافاتك وبروفايلاتك وسجل المشاهدة. ترجع من تسجّل دخول مرة ثانية.</string>
+    <string name="qa_saving_before_sign_out">جارٍ الحفظ بحسابك…</string>
+    <string name="qa_sign_out_save_failed">تعذر حفظ التغييرات بحسابك. إذا طلعت هسه، راح تفقد التغييرات اللي ما تزامنت على هذا الجهاز.</string>
+    <string name="qa_sign_out_anyway">تسجيل الخروج على أي حال</string>
+    <string name="qa_phone_email_link">سجّل الدخول بالإيميل من هاتفك</string>
+    <string name="qa_phone_email_help">امسح نفس رمز QR واختر تسجيل الدخول بالإيميل بصفحة الهاتف.</string>
+    <string name="qa_sign_out_tv_confirm_body">راح ينسى هذا التلفزيون إضافاتك وبروفايلاتك وسجل المشاهدة. ترجع من تسجّل دخول مرة ثانية.</string>
 </resources>

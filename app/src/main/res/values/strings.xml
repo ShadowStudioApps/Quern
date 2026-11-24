@@ -326,7 +326,7 @@
     <string name="qa_sign_out">Sign Out</string>
     <string name="qa_delete">Delete Account</string>
     <string name="qa_delete_confirm_title">Delete your Quern account?</string>
-    <string name="qa_delete_confirm_body">This permanently deletes your account and everything synced to it on the server, for all your TVs. Data on this TV stays. This can\'t be undone.</string>
+    <string name="qa_delete_confirm_body">This permanently deletes your account and synced data, and clears account data from this device. This can\'t be undone.</string>
     <string name="qa_delete_confirm_btn">Delete Forever</string>
     <string name="qa_working">Working…</string>
     <string name="qa_not_signed_in">Not signed in</string>
@@ -334,7 +334,7 @@
     <string name="qa_msg_signed_up">Account created and signed in.</string>
     <string name="qa_msg_signed_up_confirm">Account created. Open the confirmation link we emailed you, then sign in.</string>
     <string name="qa_msg_resent">Confirmation email sent again. Check your spam folder too.</string>
-    <string name="qa_msg_signed_out">Signed out. Data on this TV stays.</string>
+    <string name="qa_msg_signed_out">Signed out. Account data was cleared from this device.</string>
     <string name="qa_msg_deleted">Account deleted.</string>
     <string name="qa_err_invalid_email">That email address doesn\'t look right.</string>
     <string name="qa_err_weak_password">The password needs at least %1$d characters.</string>
@@ -396,4 +396,11 @@
     <string name="qr_link_approve_inactive">The QR code is no longer open on the TV.</string>
     <string name="qr_link_approve_network">Could not reach the TV on Wi-Fi. Make sure both devices are on the same network.</string>
     <string name="qr_link_approve_open_settings">Open Account Settings</string>
+    <string name="qa_sign_out_confirm_body">This device will forget your addons, profiles and history. They come back when you sign in again.</string>
+    <string name="qa_saving_before_sign_out">Saving to your account…</string>
+    <string name="qa_sign_out_save_failed">Could not save to your account. Unsynced changes on this device will be lost if you sign out anyway.</string>
+    <string name="qa_sign_out_anyway">Sign out anyway</string>
+    <string name="qa_phone_email_link">Sign in with email on your phone</string>
+    <string name="qa_phone_email_help">Scan this same QR code and choose the email sign-in option on your phone.</string>
+    <string name="qa_sign_out_tv_confirm_body">This TV will forget your addons, profiles and history. They come back when you sign in again.</string>
 </resources>

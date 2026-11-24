@@ -51,6 +51,8 @@ sealed interface AccountUiMessage {
     data object SignedUp : AccountUiMessage
     data object ConfirmationResent : AccountUiMessage
     data object SignedOut : AccountUiMessage
+    data object SavingBeforeSignOut : AccountUiMessage
+    data object SignOutSaveFailed : AccountUiMessage
     data object Deleted : AccountUiMessage
     data class Failed(val reason: AccountError) : AccountUiMessage
 }
@@ -190,23 +192,23 @@ class QuernAccount(
         post("$baseUrl/auth/v1/recover?redirect_to=${QuernCloudConfig.WEBSITE_URL}/reset", body)
     }
 
-    /** Ends the session on the server (best effort) and forgets it locally. Local app data stays. */
+    /** Revoke only this device session, then forget its local credentials. */
     suspend fun signOut() {
         withContext(Dispatchers.IO) {
             runCatching {
                 authorizedCall { token ->
                     Request.Builder()
-                        .url("$baseUrl/auth/v1/logout")
+                        .url("$baseUrl/auth/v1/logout?scope=local")
                         .header("Authorization", "Bearer $token")
                         .post(EMPTY_BODY)
                         .build()
                 }.close()
             }
         }
-        clearSession()
+        forgetSession()
     }
 
-    /** Deletes the account and every synced row on the server. Local app data stays. */
+    /** Deletes the account and every synced row on the server. The caller clears local data. */
     suspend fun deleteAccount(): Result<Unit> = runAccount {
         authorizedCall { token ->
             Request.Builder()
@@ -217,7 +219,10 @@ class QuernAccount(
         }.use { resp ->
             if (!resp.isSuccessful) throw serverError(resp.code, resp.body?.string().orEmpty())
         }
-        clearSession()
+    }
+
+    suspend fun forgetSession() = withContext(Dispatchers.IO) {
+        refreshLock.withLock { clearSession() }
     }
 
     /**
@@ -242,7 +247,6 @@ class QuernAccount(
 
         val refreshToken = vault.getString(KEY_REFRESH_TOKEN)
         if (refreshToken.isBlank()) {
-            clearSession()
             throw AccountException(AccountError.WRONG_CREDENTIALS, "Session expired")
         }
         val body = buildJsonObject { put("refresh_token", refreshToken) }
@@ -255,32 +259,43 @@ class QuernAccount(
         val newToken = root["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
         val newRefresh = root["refresh_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (newToken.isBlank()) throw AccountException(AccountError.SERVER, "Refresh returned no token")
-        vault.putString(KEY_ACCESS_TOKEN, newToken)
-        if (newRefresh.isNotBlank()) vault.putString(KEY_REFRESH_TOKEN, newRefresh)
+        val tokens = buildMap {
+            put(KEY_ACCESS_TOKEN, newToken)
+            if (newRefresh.isNotBlank()) put(KEY_REFRESH_TOKEN, newRefresh)
+        }
+        vault.commitStrings(tokens)
         newToken
     }
 
-    private fun saveSession(root: JsonObject, email: String, authSecret: String, encKey: ByteArray) {
-        val token = root["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        val refresh = root["refresh_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        val userId = root["user"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (token.isBlank() || userId.isBlank()) throw AccountException(AccountError.SERVER, "Incomplete session")
-        vault.putString(KEY_ACCESS_TOKEN, token)
-        vault.putString(KEY_REFRESH_TOKEN, refresh)
-        vault.putString(KEY_USER_ID, userId)
-        vault.putString(KEY_EMAIL, email)
-        vault.putString(KEY_AUTH_SECRET, authSecret)
-        vault.putString(KEY_ENC_KEY, AccountCrypto.b64url(encKey))
-        // Server clock, so it can be compared with row timestamps (see QuernSyncEngine key mismatch).
-        val signedInAt = root["user"]?.jsonObject?.get("last_sign_in_at")?.jsonPrimitive?.contentOrNull
-        vault.putString(KEY_SIGNED_IN_AT, signedInAt.orEmpty())
-        vault.remove(KEY_PENDING_EMAIL)
-        encKey.fill(0)
-        _state.value = loadState()
+    private suspend fun saveSession(root: JsonObject, email: String, authSecret: String, encKey: ByteArray) = withContext(Dispatchers.IO) {
+        try {
+            val token = root["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val refresh = root["refresh_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val userId = root["user"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (token.isBlank() || refresh.isBlank() || userId.isBlank()) {
+                throw AccountException(AccountError.SERVER, "Incomplete session")
+            }
+            val signedInAt = root["user"]?.jsonObject?.get("last_sign_in_at")?.jsonPrimitive?.contentOrNull
+            refreshLock.withLock {
+                vault.commitStrings(mapOf(
+                    KEY_ACCESS_TOKEN to token,
+                    KEY_REFRESH_TOKEN to refresh,
+                    KEY_USER_ID to userId,
+                    KEY_EMAIL to email,
+                    KEY_AUTH_SECRET to authSecret,
+                    KEY_ENC_KEY to AccountCrypto.b64url(encKey),
+                    KEY_SIGNED_IN_AT to signedInAt.orEmpty(),
+                    KEY_PENDING_EMAIL to ""
+                ))
+                _state.value = loadState()
+            }
+        } finally {
+            encKey.fill(0)
+        }
     }
 
     private fun clearSession() {
-        listOf(
+        vault.commitStrings(listOf(
             KEY_ACCESS_TOKEN,
             KEY_REFRESH_TOKEN,
             KEY_USER_ID,
@@ -289,7 +304,7 @@ class QuernAccount(
             KEY_ENC_KEY,
             KEY_PENDING_EMAIL,
             KEY_SIGNED_IN_AT
-        ).forEach(vault::remove)
+        ).associateWith { "" })
         _state.value = loadState()
     }
 
@@ -371,7 +386,7 @@ class QuernAccount(
         private const val KEY_AUTH_SECRET = "acct_auth_secret"
         private const val KEY_ENC_KEY = "acct_enc_key"
         private const val KEY_PENDING_EMAIL = "acct_pending_email"
-        private const val KEY_DEVICE_ID = "acct_device_id"
+        internal const val KEY_DEVICE_ID = "acct_device_id"
         private const val KEY_SIGNED_IN_AT = "acct_signed_in_at"
 
         /** Parses Supabase/PostgreSQL timestamps such as `2026-11-23T10:15:30.123456+00:00`; 0 when invalid. */

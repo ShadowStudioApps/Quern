@@ -447,7 +447,7 @@ fun QuernApp(
                                     onSignIn = { e, p -> viewModel.accountSignIn(e, p) },
                                     onSignUp = { e, p -> viewModel.accountSignUp(e, p) },
                                     onResend = { e -> viewModel.accountResendConfirmation(e) },
-                                    onSignOut = { viewModel.accountSignOut() },
+                                    onSignOut = viewModel::accountSignOut,
                                     onDelete = { viewModel.accountDelete() },
                                     sync = syncStatus,
                                     onSyncNow = { viewModel.syncNow() },

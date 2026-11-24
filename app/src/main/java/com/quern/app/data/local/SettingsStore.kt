@@ -196,6 +196,11 @@ class SettingsStore(context: Context) {
         }
     }
 
+    fun reset() = synchronized(stateLock) {
+        check(prefs.edit().clear().commit()) { "Could not reset settings" }
+        _settings.value = AppSettings()
+    }
+
     fun applyPreset(preset: QuernDevicePreset) {
         update { curr ->
             when (preset) {

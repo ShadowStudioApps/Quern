@@ -10,6 +10,7 @@ import com.quern.app.data.debrid.DebridManager
 import com.quern.app.data.KIND_FAVORITE
 import com.quern.app.data.KIND_PROGRESS
 import com.quern.app.data.local.AddonDao
+import com.quern.app.data.local.QuernDatabase
 import com.quern.app.data.local.AppIconManager
 import com.quern.app.data.local.FavoriteDao
 import com.quern.app.data.local.FavoriteEntity
@@ -23,6 +24,7 @@ import com.quern.app.data.local.SettingsStore
 import com.quern.app.data.metadata.TmdbClient
 import com.quern.app.data.metadata.TraktClient
 import com.quern.app.data.servers.MediaServerManager
+import com.quern.app.domain.model.AppSettings
 import com.quern.app.domain.model.DebridServiceType
 import com.quern.app.domain.model.MediaServerConfig
 import com.quern.app.domain.model.MediaServerType
@@ -31,7 +33,10 @@ import com.quern.app.domain.model.TraktAuthState
 import com.quern.app.domain.model.UserProfile
 import com.quern.app.ui.components.isTvHardware
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
@@ -99,6 +104,7 @@ class QuernSyncEngine(
     private val context: Context,
     private val account: QuernAccount,
     private val settingsStore: SettingsStore,
+    private val database: QuernDatabase,
     private val addonDao: AddonDao,
     private val addonRepository: AddonRepository,
     private val debridManager: DebridManager,
@@ -176,7 +182,11 @@ class QuernSyncEngine(
                         _status.value = SyncStatus()
                         return@collectLatest
                     }
-                    if (vault.getString(KEY_SYNC_USER) != userId) resetSyncState(userId)
+                    lock.withLock {
+                        if (account.state.value.userId == userId && vault.getString(KEY_SYNC_USER) != userId) {
+                            resetSyncState(userId)
+                        }
+                    }
                     syncNow()
                     coroutineScope {
                         launch {
@@ -215,15 +225,73 @@ class QuernSyncEngine(
         if (account.state.value.isSignedIn) scope.launch { syncNow() }
     }
 
+    /** Flush dirty sections and prevent sync from uploading the local reset. */
+    suspend fun signOut(discardUnsynced: Boolean): AccountUiMessage = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if (!discardUnsynced) {
+                val error = runStep {
+                    // Check reachability even when every section is already clean.
+                    fetchRows("section,revision,encrypted", null)
+                    activeSections.forEach { pushIfChanged(it, requireSaved = true) }
+                }
+                if (error != null) return@withLock AccountUiMessage.SignOutSaveFailed
+            }
+            withContext(NonCancellable) {
+                vault.commitStrings(mapOf(KEY_RESET_PENDING to "true"))
+                account.signOut()
+                clearLocalAccountData()
+            }
+            AccountUiMessage.SignedOut
+        }
+    }
+
+    suspend fun deleteAccount(): Result<Unit> = withContext(Dispatchers.IO) {
+        lock.withLock {
+            withContext(NonCancellable) {
+                account.deleteAccount().onSuccess {
+                    vault.commitStrings(mapOf(KEY_RESET_PENDING to "true"))
+                    account.forgetSession()
+                    clearLocalAccountData()
+                }
+            }
+        }
+    }
+
+    fun hasPendingAccountReset(): Boolean = vault.getString(KEY_RESET_PENDING).isNotBlank()
+
+    /** Also run at startup if a process death interrupted the local reset. */
+    suspend fun finishPendingAccountReset() = withContext(Dispatchers.IO) {
+        if (hasPendingAccountReset()) {
+            account.forgetSession()
+            clearLocalAccountData()
+        }
+    }
+
+    private fun clearLocalAccountData() {
+        database.clearAllTables()
+        debridManager.applySyncedKeys(emptyMap())
+        settingsStore.reset()
+        AppIconManager.applyIcon(context, settingsStore.settings.value.appIcon)
+        vault.commitStrings(mapOf(KEY_RESTORE_PENDING to "true"))
+        // Finish by atomically removing credentials, metadata and the reset marker.
+        vault.commitRemoveExcept(setOf(QuernAccount.KEY_DEVICE_ID, KEY_RESTORE_PENDING))
+        _status.value = SyncStatus()
+        _addonsApplied.tryEmit(Unit)
+    }
+
     /** Pull everything newer from the server, then upload local changes and refresh this device's row. */
     suspend fun syncNow() {
         if (!account.state.value.isSignedIn) return
         lock.withLock {
+            if (!account.state.value.isSignedIn || hasPendingAccountReset()) return
             _status.value = _status.value.copy(running = true)
             val error = runStep {
                 pullAll()
                 activeSections.forEach { pushIfChanged(it) }
                 writeDeviceRow()
+                if (!_status.value.keyMismatch && vault.getString(KEY_RESTORE_PENDING).isNotBlank()) {
+                    vault.commitStrings(mapOf(KEY_RESTORE_PENDING to ""))
+                }
             }
             finish(error)
         }
@@ -232,6 +300,7 @@ class QuernSyncEngine(
     private suspend fun pushChangesNow() {
         if (!account.state.value.isSignedIn) return
         lock.withLock {
+            if (!account.state.value.isSignedIn || hasPendingAccountReset()) return
             val error = runStep { activeSections.forEach { pushIfChanged(it) } }
             if (error != null) _status.value = _status.value.copy(lastError = error)
         }
@@ -240,6 +309,8 @@ class QuernSyncEngine(
     private suspend fun runStep(block: suspend () -> Unit): AccountError? = try {
         block()
         null
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: AccountException) {
         Log.w(TAG, "Sync failed: ${e.reason}")
         e.reason
@@ -312,27 +383,26 @@ class QuernSyncEngine(
         }
         val obj = runCatching { json.parseToJsonElement(plain).jsonObject }.getOrNull() ?: return
         // First time this device meets the account: keep what it already has next to the server copy.
-        val firstLink = lastRevision(s) == 0L && localHash(s).isBlank()
+        val firstLink = lastRevision(s) == 0L && localHash(s).isBlank() &&
+            vault.getString(KEY_RESTORE_PENDING).isBlank()
         // True when this device holds something newer than the server copy and must upload after applying.
         var needsUpload = firstLink && s != Section.SETTINGS && !s.isDeviceSettings
-        runCatching {
-            when (s) {
-                Section.ADDONS -> {
-                    applyAddons(obj, union = firstLink)
-                    _addonsApplied.tryEmit(Unit)
-                }
-                Section.SETTINGS -> obj["values"]?.jsonObject?.let(settingsStore::applySyncSettingsValues)
-                Section.SETTINGS_TV, Section.SETTINGS_PHONE -> obj["values"]?.jsonObject?.let { vals ->
-                    val prevIcon = settingsStore.settings.value.appIcon
-                    settingsStore.applySyncDeviceSettingsValues(vals)
-                    val nextIcon = settingsStore.settings.value.appIcon
-                    if (nextIcon != prevIcon) runCatching { AppIconManager.applyIcon(context, nextIcon) }
-                }
-                Section.PROFILES -> applyProfiles(obj, union = firstLink)
-                Section.SECRETS -> applySecrets(obj, union = firstLink)
-                Section.FAVORITES, Section.PROGRESS -> needsUpload = mergeItems(s, obj)
+        when (s) {
+            Section.ADDONS -> {
+                applyAddons(obj, union = firstLink)
+                _addonsApplied.tryEmit(Unit)
             }
-        }.onFailure { Log.w(TAG, "Could not apply ${s.key}: ${it.javaClass.simpleName}") }
+            Section.SETTINGS -> obj["values"]?.jsonObject?.let(settingsStore::applySyncSettingsValues)
+            Section.SETTINGS_TV, Section.SETTINGS_PHONE -> obj["values"]?.jsonObject?.let { vals ->
+                val prevIcon = settingsStore.settings.value.appIcon
+                settingsStore.applySyncDeviceSettingsValues(vals)
+                val nextIcon = settingsStore.settings.value.appIcon
+                if (nextIcon != prevIcon) runCatching { AppIconManager.applyIcon(context, nextIcon) }
+            }
+            Section.PROFILES -> applyProfiles(obj, union = firstLink)
+            Section.SECRETS -> applySecrets(obj, union = firstLink)
+            Section.FAVORITES, Section.PROGRESS -> needsUpload = mergeItems(s, obj)
+        }
 
         setLastRevision(s, row.revision)
         Log.i(TAG, "Applied ${s.key} revision ${row.revision}")
@@ -431,7 +501,7 @@ class QuernSyncEngine(
      */
     private fun handleUndecryptable(s: Section, row: RemoteRow) {
         val signedInAt = account.signedInAtMs()
-        if (signedInAt > 0L && row.updatedAtMs in 1 until signedInAt) {
+        if (vault.getString(KEY_RESTORE_PENDING).isBlank() && signedInAt > 0L && row.updatedAtMs in 1 until signedInAt) {
             Log.i(TAG, "${s.key} was encrypted with an older password; re-uploading with the current key")
             setLastRevision(s, row.revision)
             setLocalHash(s, "")
@@ -585,8 +655,11 @@ class QuernSyncEngine(
 
     // ---------------------------------------------------------------- push
 
-    private suspend fun pushIfChanged(s: Section) {
-        if (s.encrypted && _status.value.keyMismatch) return
+    private suspend fun pushIfChanged(s: Section, requireSaved: Boolean = false) {
+        if (s.encrypted && _status.value.keyMismatch) {
+            if (requireSaved) throw AccountException(AccountError.WRONG_CREDENTIALS, "Cannot save encrypted data")
+            return
+        }
         val local = buildLocal(s)
         val h = hash(local)
         if (h == localHash(s)) return
@@ -595,7 +668,9 @@ class QuernSyncEngine(
             setLastRevision(s, newRevision)
             setLocalHash(s, h)
             Log.i(TAG, "Uploaded ${s.key} -> revision $newRevision")
-        } catch (_: ConflictException) {
+        } catch (e: ConflictException) {
+            // Preserve unsaved local edits so the user can cancel and resolve the conflict.
+            if (requireSaved) throw e
             // Another device wrote first. Last writer wins per section, and theirs is newer.
             pullSection(s)
         }
@@ -905,6 +980,8 @@ class QuernSyncEngine(
 
         private const val KEY_REV = "sync_rev_"
         private const val KEY_HASH = "sync_hash_"
+        private const val KEY_RESET_PENDING = "account_reset_pending"
+        private const val KEY_RESTORE_PENDING = "account_restore_pending"
         private const val KEY_SYNC_USER = "sync_user"
         private const val KEY_LAST_SYNC = "sync_last_at"
     }
