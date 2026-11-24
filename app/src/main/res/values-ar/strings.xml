@@ -59,6 +59,10 @@
     <string name="addons_dialog_tip">الصق رابط manifest.json أو stremio:// أو امسح رمز QR من هاتفك.</string>
     <string name="addons_check_all">فحص جميع الإضافات</string>
     <string name="addons_checking">جاري الفحص…</string>
+    <string name="addons_refresh_btn">تحديث الإضافات</string>
+    <string name="addons_refreshing">جاري التحديث…</string>
+    <string name="addons_refreshed_toast">تم تحديث %1$d من %2$d إضافات</string>
+    <string name="addons_refresh_empty_toast">لا توجد إضافات مثبتة لتحديثها</string>
     <string name="addons_installed_count">الإضافات المثبتة (%1$d)</string>
     <string name="addons_empty_state">لا توجد إضافات مثبتة. أضف رابط manifest.json أو امسح رمز QR من هاتفك.</string>
     <string name="addons_health_ok">متاح • صالح • %1$dms</string>

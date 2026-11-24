@@ -120,7 +120,9 @@ import com.quern.app.ui.components.ProfileAvatarCircle
 import com.quern.app.domain.model.AppLanguage
 import com.quern.app.domain.model.UserProfile
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.quern.app.R
 import com.quern.app.ui.theme.LocalQuernPalette
+import com.quern.app.ui.theme.LocalQuernResources
 import com.quern.app.ui.theme.LocalQuernStrings
 import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaTextPrimary
@@ -437,7 +439,9 @@ fun QuernApp(
                             val traktDeviceCode by viewModel.traktDeviceCode.collectAsState()
                             val addonHealthMap by viewModel.addonHealthMap.collectAsState()
                             val checkingHealthUrls by viewModel.checkingHealthUrls.collectAsState()
+                            val isRefreshingAddons by viewModel.isRefreshingAddons.collectAsState()
                             val syncStatus by viewModel.syncStatus.collectAsState()
+                            val quernRes = LocalQuernResources.current ?: context.resources
                             SettingsScreen(
                                 settings = settings,
                                 pinMigrationState = pinMigrationState,
@@ -476,6 +480,7 @@ fun QuernApp(
                                 initialGroup = settingsInitialGroup,
                                 addonHealthMap = addonHealthMap,
                                 checkingHealthUrls = checkingHealthUrls,
+                                isRefreshingAddons = isRefreshingAddons,
                                 onUpdateSettings = { viewModel.updateSettings(it) },
                                 onApplyAppIcon = { iconOpt ->
                                     runCatching { AppIconManager.applyIcon(context, iconOpt) }
@@ -490,6 +495,14 @@ fun QuernApp(
                                 onRemoveAddon = { url -> viewModel.removeAddon(url) },
                                 onCheckAddonHealth = { url -> viewModel.checkAddonHealth(url) },
                                 onCheckAllAddonsHealth = { viewModel.checkAllAddonsHealth() },
+                                onRefreshAddons = {
+                                    viewModel.refreshInstalledAddons(
+                                        formatToast = { ok, total ->
+                                            quernRes.getString(R.string.addons_refreshed_toast, ok, total)
+                                        },
+                                        emptyToast = quernRes.getString(R.string.addons_refresh_empty_toast)
+                                    )
+                                },
                                 onToggleCatalogVisibility = { key -> viewModel.toggleCatalogVisibility(key) },
                                 onRefreshHome = { viewModel.refreshHome() },
                                 onShowToast = { viewModel.showToast(it) },

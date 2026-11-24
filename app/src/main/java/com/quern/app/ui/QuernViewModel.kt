@@ -338,6 +338,9 @@ class QuernViewModel(
     private val _checkingHealthUrls = MutableStateFlow<Set<String>>(emptySet())
     val checkingHealthUrls: StateFlow<Set<String>> = _checkingHealthUrls.asStateFlow()
 
+    private val _isRefreshingAddons = MutableStateFlow(false)
+    val isRefreshingAddons: StateFlow<Boolean> = _isRefreshingAddons.asStateFlow()
+
     private var homeJob: Job? = null
     private var searchJob: Job? = null
     private var detailJob: Job? = null
@@ -350,6 +353,9 @@ class QuernViewModel(
         refreshHome()
         viewModelScope.launch {
             repository.debridManager.refreshAllStatuses()
+        }
+        viewModelScope.launch {
+            refreshInstalledAddonsInternal(manual = false, formatToast = null, emptyToast = null)
         }
     }
 
@@ -403,10 +409,24 @@ class QuernViewModel(
         homeJob?.cancel()
         homeJob = viewModelScope.launch {
             _isLoadingHome.value = true
-            _homeRows.value = runCatching {
-                repository.loadHomeCatalogs(appSettings.value.hiddenCatalogKeys)
-            }.getOrDefault(emptyList())
-            _isLoadingHome.value = false
+            try {
+                repository.loadHomeCatalogsProgressive(
+                    hiddenCatalogKeys = appSettings.value.hiddenCatalogKeys
+                ) { rows, isComplete ->
+                    _homeRows.value = rows
+                    if (rows.isNotEmpty() || isComplete) {
+                        _isLoadingHome.value = false
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                if (_homeRows.value.isEmpty()) {
+                    _homeRows.value = emptyList()
+                }
+            } finally {
+                _isLoadingHome.value = false
+            }
         }
     }
 
@@ -850,6 +870,67 @@ class QuernViewModel(
     fun checkAllAddonsHealth() {
         val current = addons.value
         current.forEach { checkAddonHealth(it.manifestUrl) }
+    }
+
+    fun refreshInstalledAddons(
+        formatToast: (succeeded: Int, total: Int) -> String,
+        emptyToast: String
+    ) {
+        if (_isRefreshingAddons.value) return
+        viewModelScope.launch {
+            refreshInstalledAddonsInternal(
+                manual = true,
+                formatToast = formatToast,
+                emptyToast = emptyToast
+            )
+        }
+    }
+
+    private suspend fun refreshInstalledAddonsInternal(
+        manual: Boolean,
+        formatToast: ((succeeded: Int, total: Int) -> String)?,
+        emptyToast: String?
+    ) {
+        if (manual) _isRefreshingAddons.value = true
+        try {
+            val res = runCatching {
+                repository.addonRepository.refreshInstalledManifests(force = manual)
+            }.getOrNull() ?: return
+
+            if (res.totalCount == 0) {
+                if (manual && !emptyToast.isNullOrBlank()) {
+                    _toastMessage.value = emptyToast
+                }
+                return
+            }
+
+            // Keep hiddenCatalogKeys valid for catalogs that still exist; prune only keys whose
+            // addon was refreshed and no longer defines that catalog.
+            var prunedHidden = false
+            if (res.refreshedAddonIds.isNotEmpty()) {
+                settingsStore.update { curr ->
+                    val filtered = curr.hiddenCatalogKeys.filterTo(LinkedHashSet()) { key ->
+                        key in res.allValidCatalogKeys ||
+                            res.refreshedAddonIds.none { id -> key.startsWith("${id}_") }
+                    }
+                    if (filtered.size != curr.hiddenCatalogKeys.size) {
+                        prunedHidden = true
+                        curr.copy(hiddenCatalogKeys = filtered)
+                    } else {
+                        curr
+                    }
+                }
+            }
+
+            if (manual || res.anyChanged || prunedHidden) {
+                refreshHome()
+            }
+            if (manual && formatToast != null) {
+                _toastMessage.value = formatToast(res.succeededCount, res.totalCount)
+            }
+        } finally {
+            if (manual) _isRefreshingAddons.value = false
+        }
     }
 
     fun toggleCatalogVisibility(catalogKey: String) {

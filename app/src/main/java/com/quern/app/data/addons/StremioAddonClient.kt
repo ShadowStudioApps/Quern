@@ -68,15 +68,24 @@ class StremioAddonClient(
         catalogId: String,
         search: String? = null,
         genre: String? = null,
-        skip: Int? = null
+        skip: Int? = null,
+        extraParams: Map<String, String> = emptyMap()
     ): List<MediaItem> = withContext(Dispatchers.IO) {
+        fun encodeSegmentPart(raw: String): String =
+            URLEncoder.encode(raw, "UTF-8").replace("+", "%20")
+
         val extras = buildList {
-            if (!search.isNullOrBlank()) add("search=${URLEncoder.encode(search, "UTF-8")}")
-            if (!genre.isNullOrBlank()) add("genre=${URLEncoder.encode(genre, "UTF-8")}")
+            if (!search.isNullOrBlank()) add("search=${encodeSegmentPart(search)}")
+            if (!genre.isNullOrBlank() && "genre" !in extraParams) add("genre=${encodeSegmentPart(genre)}")
+            extraParams.forEach { (k, v) ->
+                if (k.isNotBlank() && v.isNotBlank()) {
+                    add("${encodeSegmentPart(k)}=${encodeSegmentPart(v)}")
+                }
+            }
             if (skip != null && skip > 0) add("skip=$skip")
         }
         val extraSegment = if (extras.isEmpty()) "" else "/${extras.joinToString("&")}"
-        val encodedCatalog = URLEncoder.encode(catalogId, "UTF-8").replace("+", "%20")
+        val encodedCatalog = encodeSegmentPart(catalogId)
         val url = "${addon.baseUrl}/catalog/$type/$encodedCatalog$extraSegment.json"
 
         runCatching {

@@ -295,9 +295,11 @@ fun HomeScreen(
         }
     }
 
-    val featuredSlides = remember(filteredRows, rows) {
-        val primary = filteredRows.firstOrNull()?.items.orEmpty()
-        val fallback = rows.firstOrNull()?.items.orEmpty()
+    val firstFilteredRow = filteredRows.firstOrNull()
+    val firstRawRow = rows.firstOrNull()
+    val featuredSlides = remember(firstFilteredRow, firstRawRow) {
+        val primary = firstFilteredRow?.items.orEmpty()
+        val fallback = firstRawRow?.items.orEmpty()
         (if (primary.isNotEmpty()) primary else fallback).take(8)
     }
 
@@ -519,8 +521,10 @@ fun HomeScreen(
                 }
             }
         } else {
+            val phoneListState = rememberLazyListState()
             val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             LazyColumn(
+                state = phoneListState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = navBarBottom + 104.dp),
                 verticalArrangement = Arrangement.spacedBy(QuernHomeSpacing.rowVerticalGap(isTv))

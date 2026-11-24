@@ -59,6 +59,10 @@
     <string name="addons_dialog_tip">Paste a Stremio v3 manifest.json or stremio:// URL, or scan the QR code from your phone.</string>
     <string name="addons_check_all">Check All Health</string>
     <string name="addons_checking">Checking…</string>
+    <string name="addons_refresh_btn">Refresh Addons</string>
+    <string name="addons_refreshing">Refreshing…</string>
+    <string name="addons_refreshed_toast">Refreshed %1$d/%2$d addons</string>
+    <string name="addons_refresh_empty_toast">No addons installed to refresh</string>
     <string name="addons_installed_count">Installed Addons (%1$d)</string>
     <string name="addons_empty_state">No addons installed. Add a manifest.json URL or scan the QR code from your phone.</string>
     <string name="addons_health_ok">Reachable • Valid • %1$dms</string>

@@ -284,6 +284,7 @@ fun SettingsScreen(
     initialGroup: SettingsGroup = SettingsGroup.ADDONS,
     addonHealthMap: Map<String, AddonHealthResult> = emptyMap(),
     checkingHealthUrls: Set<String> = emptySet(),
+    isRefreshingAddons: Boolean = false,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onApplyAppIcon: (AppIconOption) -> Unit,
     onSyncStremio: (String, String) -> Unit = { _, _ -> },
@@ -295,6 +296,7 @@ fun SettingsScreen(
     onRemoveAddon: (String) -> Unit,
     onCheckAddonHealth: (String) -> Unit = {},
     onCheckAllAddonsHealth: () -> Unit = {},
+    onRefreshAddons: () -> Unit = {},
     onToggleCatalogVisibility: (String) -> Unit = {},
     onRefreshHome: () -> Unit = {},
     onShowToast: (String) -> Unit = {},
@@ -445,6 +447,7 @@ fun SettingsScreen(
                             hiddenCatalogKeys = settings.hiddenCatalogKeys,
                             healthMap = addonHealthMap,
                             checkingUrls = checkingHealthUrls,
+                            isRefreshingAddons = isRefreshingAddons,
                             onInstallAddon = onInstallAddon,
                             onToggleEnabled = onToggleAddon,
                             onMoveUp = onMoveAddonUp,
@@ -452,6 +455,7 @@ fun SettingsScreen(
                             onRemove = onRemoveAddon,
                             onCheckHealth = onCheckAddonHealth,
                             onCheckAllHealth = onCheckAllAddonsHealth,
+                            onRefreshAddons = onRefreshAddons,
                             onToggleCatalogVisibility = onToggleCatalogVisibility
                         )
                     }

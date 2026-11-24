@@ -165,16 +165,67 @@ class QuernRepository(
         favoriteDao.deleteAllForProfile(profileId)
     }
 
-    suspend fun loadHomeCatalogs(hiddenCatalogKeys: Set<String> = emptySet()): List<CatalogRow> = coroutineScope {
-        val tmdbDeferred = async { tmdbClient.getHomeCatalogRows() }
-        val serversDeferred = async { serverManager.getAllCatalogRows() }
-        val addonsDeferred = async { addonRepository.fetchHomeCatalogRows(hiddenCatalogKeys) }
+    suspend fun loadHomeCatalogs(hiddenCatalogKeys: Set<String> = emptySet()): List<CatalogRow> {
+        var latest = emptyList<CatalogRow>()
+        loadHomeCatalogsProgressive(hiddenCatalogKeys) { rows, _ -> latest = rows }
+        return latest
+    }
 
-        buildList {
-            addAll(serversDeferred.await())
-            addAll(tmdbDeferred.await())
-            addAll(addonsDeferred.await())
+    /**
+     * Fetches the first ~8 addon catalogs (plus servers and TMDB) first so Home appears quickly,
+     * then streams the remaining addon catalogs in background batches in exact user order
+     * (addon priority -> manifest catalog order) with no total cap.
+     */
+    suspend fun loadHomeCatalogsProgressive(
+        hiddenCatalogKeys: Set<String> = emptySet(),
+        onRowsUpdated: (rows: List<CatalogRow>, isComplete: Boolean) -> Unit
+    ) {
+        val specs = addonRepository.planHomeCatalogSpecs(hiddenCatalogKeys)
+        val initialSpecs = specs.take(AddonRepository.INITIAL_HOME_BATCH_SIZE)
+        val remainingChunks = specs
+            .drop(AddonRepository.INITIAL_HOME_BATCH_SIZE)
+            .chunked(AddonRepository.BACKGROUND_HOME_BATCH_SIZE)
+
+        val accumulated = ArrayList<CatalogRow>()
+
+        coroutineScope {
+            val tmdbDeferred = async { tmdbClient.getHomeCatalogRows() }
+            val serversDeferred = async { serverManager.getAllCatalogRows() }
+            val firstBatchDeferred = async { addonRepository.fetchCatalogBatch(initialSpecs) }
+
+            accumulated.addAll(serversDeferred.await())
+            accumulated.addAll(tmdbDeferred.await())
+            accumulated.addAll(firstBatchDeferred.await())
         }
+
+        val doneInitially = remainingChunks.isEmpty()
+        onRowsUpdated(accumulated.toList(), doneInitially)
+        if (doneInitially) {
+            logLoadedHomeSummary(accumulated)
+            return
+        }
+
+        remainingChunks.forEachIndexed { idx, chunk ->
+            val chunkRows = addonRepository.fetchCatalogBatch(chunk)
+            val isLast = idx == remainingChunks.lastIndex
+            if (chunkRows.isNotEmpty() || isLast) {
+                accumulated.addAll(chunkRows)
+                onRowsUpdated(accumulated.toList(), isLast)
+            }
+        }
+        logLoadedHomeSummary(accumulated)
+    }
+
+    private fun logLoadedHomeSummary(rows: List<CatalogRow>) {
+        val bySource = LinkedHashMap<String, Int>()
+        for (r in rows) {
+            val group = if ("•" in r.title) r.title.substringAfterLast("•").trim() else r.origin.displayName
+            bySource[group] = (bySource[group] ?: 0) + 1
+        }
+        android.util.Log.i(
+            "QuernCatalogs",
+            "Loaded ${rows.size} Home row(s): [${bySource.entries.joinToString(", ") { "${it.key}=${it.value}" }}] | titles=${rows.joinToString(" | ") { it.title }}"
+        )
     }
 
     suspend fun searchEverywhere(query: String): List<MediaItem> = coroutineScope {

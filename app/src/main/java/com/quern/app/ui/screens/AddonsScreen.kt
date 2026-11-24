@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import com.quern.app.ui.components.QuernAlertDialog as AlertDialog
@@ -96,6 +97,7 @@ fun AddonsScreen(
     hiddenCatalogKeys: Set<String> = emptySet(),
     healthMap: Map<String, AddonHealthResult> = emptyMap(),
     checkingUrls: Set<String> = emptySet(),
+    isRefreshingAddons: Boolean = false,
     onInstallAddon: (String, () -> Unit) -> Unit,
     onToggleEnabled: (String, Boolean) -> Unit,
     onMoveUp: (String) -> Unit,
@@ -103,6 +105,7 @@ fun AddonsScreen(
     onRemove: (String) -> Unit,
     onCheckHealth: (String) -> Unit = {},
     onCheckAllHealth: () -> Unit = {},
+    onRefreshAddons: () -> Unit = {},
     onToggleCatalogVisibility: (String) -> Unit = {}
 ) {
     val palette = LocalQuernPalette.current
@@ -124,6 +127,7 @@ fun AddonsScreen(
                 isTv = true,
                 hasAddons = addons.isNotEmpty(),
                 isCheckingAny = checkingUrls.isNotEmpty(),
+                isRefreshingAddons = isRefreshingAddons,
                 onUrlChange = { manifestUrlInput = it },
                 isInstalling = isInstalling,
                 onInstallUrl = { url ->
@@ -136,6 +140,7 @@ fun AddonsScreen(
                     }
                 },
                 onCheckAllHealth = onCheckAllHealth,
+                onRefreshAddons = onRefreshAddons,
                 onOpenQrSetup = if (isTvDevice) { { showQrDialog = true } } else null
             )
 
@@ -215,6 +220,7 @@ fun AddonsScreen(
                 isTv = false,
                 hasAddons = addons.isNotEmpty(),
                 isCheckingAny = checkingUrls.isNotEmpty(),
+                isRefreshingAddons = isRefreshingAddons,
                 onUrlChange = { manifestUrlInput = it },
                 isInstalling = isInstalling,
                 onInstallUrl = { url ->
@@ -226,7 +232,8 @@ fun AddonsScreen(
                         }
                     }
                 },
-                onCheckAllHealth = onCheckAllHealth
+                onCheckAllHealth = onCheckAllHealth,
+                onRefreshAddons = onRefreshAddons
             )
 
             LazyColumn(
@@ -315,10 +322,12 @@ private fun AddonUrlInstallerCard(
     isTv: Boolean,
     hasAddons: Boolean,
     isCheckingAny: Boolean,
+    isRefreshingAddons: Boolean = false,
     onUrlChange: (String) -> Unit,
     isInstalling: Boolean,
     onInstallUrl: (String) -> Unit,
     onCheckAllHealth: () -> Unit,
+    onRefreshAddons: () -> Unit = {},
     onOpenQrSetup: (() -> Unit)? = null
 ) {
     val palette = LocalQuernPalette.current
@@ -420,6 +429,15 @@ private fun AddonUrlInstallerCard(
                     )
                 }
                 if (hasAddons) {
+                    AddonActionPill(
+                        label = if (isRefreshingAddons) qString(R.string.addons_refreshing) else qString(R.string.addons_refresh_btn),
+                        icon = if (isRefreshingAddons) null else Icons.Default.Refresh,
+                        isPrimary = false,
+                        isLoading = isRefreshingAddons,
+                        accent = palette.focusRing,
+                        enabled = !isRefreshingAddons,
+                        onClick = onRefreshAddons
+                    )
                     AddonActionPill(
                         label = if (isCheckingAny) qString(R.string.addons_checking) else qString(R.string.addons_check_all),
                         icon = if (isCheckingAny) null else Icons.Default.MonitorHeart,
@@ -559,7 +577,7 @@ private fun InstalledAddonCard(
     var catalogsExpanded by remember { mutableStateOf(false) }
     var expandFocused by remember { mutableStateOf(false) }
 
-    val homeCatalogs = remember(addon) { addon.manifest.catalogs.filter { !it.requiresExtra } }
+    val homeCatalogs = remember(addon) { addon.manifest.catalogs.filter { it.isHomeEligible } }
 
     Surface(
         color = palette.glassSurface,
@@ -650,7 +668,7 @@ private fun InstalledAddonCard(
                     }
                     if (homeCatalogs.isNotEmpty()) {
                         val visibleCount = homeCatalogs.count { c ->
-                            "${addon.manifest.id}_${c.type}_${c.id}" !in hiddenCatalogKeys
+                            c.visibilityKey(addon.manifest.id) !in hiddenCatalogKeys
                         }
                         LumaBadgeChip("$visibleCount/${homeCatalogs.size} Catalogs", palette.focusRing)
                     }
@@ -733,10 +751,16 @@ private fun InstalledAddonCard(
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         homeCatalogs.forEach { cat ->
-                            val key = "${addon.manifest.id}_${cat.type}_${cat.id}"
+                            val key = cat.visibilityKey(addon.manifest.id)
                             val isVisible = key !in hiddenCatalogKeys
                             var catFocused by remember { mutableStateOf(false) }
-                            val label = (cat.name?.takeIf { it.isNotBlank() } ?: cat.id) + " (${cat.type})"
+                            val firstOpt = cat.defaultHomeExtraArgs()?.values?.firstOrNull { it.isNotBlank() }
+                            val baseName = cat.name?.takeIf { it.isNotBlank() } ?: cat.id
+                            val label = if (!firstOpt.isNullOrBlank()) {
+                                "$baseName · $firstOpt (${cat.type})"
+                            } else {
+                                "$baseName (${cat.type})"
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()

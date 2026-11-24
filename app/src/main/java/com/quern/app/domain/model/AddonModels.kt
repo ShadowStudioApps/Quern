@@ -51,13 +51,47 @@ data class CatalogDefinition(
     val type: String,
     val id: String,
     val name: String? = null,
-    val extra: List<CatalogExtra> = emptyList()
+    val extra: List<CatalogExtra> = emptyList(),
+    val extraRequired: List<String>? = null
 ) {
     val supportsSearch: Boolean
-        get() = extra.any { it.name == "search" }
+        get() = extra.any { it.name.equals("search", ignoreCase = true) }
+
+    val requiredExtras: List<CatalogExtra>
+        get() {
+            val requiredNames = extraRequired.orEmpty().toSet()
+            val explicit = extra.filter { it.isRequired == true || it.name in requiredNames }
+            val missingLegacy = requiredNames
+                .filter { reqName -> explicit.none { it.name == reqName } }
+                .map { CatalogExtra(name = it, isRequired = true, options = null) }
+            return explicit + missingLegacy
+        }
 
     val requiresExtra: Boolean
-        get() = extra.any { it.isRequired == true }
+        get() = requiredExtras.isNotEmpty()
+
+    /**
+     * Returns an empty map when no extra is required, a map of `extraName -> firstOption` when every
+     * required extra (excluding free-text `search`) declares non-empty `options`, or `null` when the
+     * catalog must stay off Home (e.g. search-only or required extra without options).
+     */
+    fun defaultHomeExtraArgs(): Map<String, String>? {
+        val req = requiredExtras
+        if (req.isEmpty()) return emptyMap()
+        if (req.any { it.name.equals("search", ignoreCase = true) }) return null
+        val resolved = LinkedHashMap<String, String>(req.size)
+        for (extraItem in req) {
+            val firstOpt = extraItem.options?.firstOrNull { it.isNotBlank() }?.trim()
+                ?: return null
+            resolved[extraItem.name] = firstOpt
+        }
+        return resolved
+    }
+
+    val isHomeEligible: Boolean
+        get() = defaultHomeExtraArgs() != null
+
+    fun visibilityKey(addonId: String): String = "${addonId}_${type}_${id}"
 }
 
 @Serializable

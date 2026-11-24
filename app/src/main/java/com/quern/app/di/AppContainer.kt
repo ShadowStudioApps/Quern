@@ -76,7 +76,8 @@ class AppContainer(context: Context) {
         dao = database.addonDao(),
         client = stremioAddonClient,
         debridManager = debridManager,
-        json = json
+        json = json,
+        context = context.applicationContext
     )
 
     val tmdbClient = TmdbClient(httpClient, json, vault)
