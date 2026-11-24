@@ -151,8 +151,18 @@ fun QuernApp(
         var railFocusSyncSignal by remember { mutableIntStateOf(0) }
         var settingsInitialGroup by remember { mutableStateOf(SettingsGroup.ADDONS) }
         var showingDetail by remember { mutableStateOf(false) }
-        // "Who's watching?" at launch when there is more than one profile; also opened from the rail.
+        // "Who's watching?" at launch when there is more than one profile; also opened from the rail
+        // or after the first account sync pulls multiple profiles onto a new device.
         var profilePickerOpen by rememberSaveable { mutableStateOf(settings.profiles.size > 1) }
+        var profilePickerShownThisLaunch by rememberSaveable { mutableStateOf(profilePickerOpen) }
+        val profilesAppliedCount by viewModel.profilesAppliedCount.collectAsState()
+
+        LaunchedEffect(profilesAppliedCount, settings.profiles.size, activePlayback) {
+            if (profilesAppliedCount > 0 && settings.profiles.size > 1 && !profilePickerShownThisLaunch && activePlayback == null) {
+                profilePickerOpen = true
+                profilePickerShownThisLaunch = true
+            }
+        }
 
         val snackbarHostState = remember { SnackbarHostState() }
 
@@ -550,7 +560,10 @@ fun QuernApp(
                                     currentTab = currentTab,
                                     autoHideCollapsed = autoHide,
                                     activeProfile = settings.activeProfile,
-                                    onOpenProfiles = { profilePickerOpen = true },
+                                    onOpenProfiles = {
+                                        profilePickerOpen = true
+                                        profilePickerShownThisLaunch = true
+                                    },
                                     focusSyncSignal = railFocusSyncSignal,
                                     onRailFocusChanged = { collapsedRailFocused = it },
                                     onSelectTab = { currentTab = it }

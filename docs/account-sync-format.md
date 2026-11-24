@@ -31,8 +31,10 @@ One row per `(user_id, section)`. `payload` is JSON (or an encrypted payload whe
 |---|---|---|
 | `addons` | yes | Installed addons, order, enabled flag, hidden catalogs. Manifest URLs often contain personal tokens. |
 | `secrets` | yes | Debrid API keys, media servers (with passwords and tokens), TMDB key, Trakt tokens, profile PIN hashes. |
-| `settings` | no | All entries of `AppSettings` except the per-device ones: `profiles`, `activeProfileId`, `appIcon`, `uiModeOverride`, `navigationStyle`, `cardSize`, `fontScale`, `bufferProfile`, `playerEngine`, `preferExternalPlayer`, `preferredExternalPlayerPackage`. `hiddenCatalogKeys` travels in `addons`. |
-| `profiles` | no | Profile ids, names, avatar colours (no PINs). |
+| `settings` | no | Shared entries of `AppSettings` across all devices (excludes `profiles`, `activeProfileId`, `hiddenCatalogKeys`, and the per-device-class keys in `settings_tv` / `settings_phone`). `hiddenCatalogKeys` travels in `addons`. |
+| `settings_tv` | no | Per-device-class settings shared across Android TV devices only (`navigationStyle`, `cardSize`, `fontScale`, `bufferProfile`, `playerEngine`, `preferExternalPlayer`, `preferredExternalPlayerPackage`, `appIcon`, `uiModeOverride`). Read and written only by TV hardware. |
+| `settings_phone` | no | Same keys and schema as `settings_tv`, shared across phones/tablets only. Read and written only by non-TV hardware so a phone never overwrites a TV's layout. |
+| `profiles` | no | Profile ids, names, avatar colours (no PINs). `activeProfileId` stays local per device. |
 | `favorites` | no | Library/favorites list, with deletions kept as tombstones. |
 | `progress` | yes | Watch progress / Continue Watching. Encrypted because it reveals viewing history; `lastStreamUrl` is never synced (it may contain tokens). |
 | `device_<id>` | no | One row per device: name, model, app version, last seen. `<id>` is 12 random lowercase letters, generated once per install. |
@@ -67,7 +69,29 @@ One row per `(user_id, section)`. `payload` is JSON (or an encrypted payload whe
 ```json
 { "formatVersion": 1, "values": { "theme": "GLOSSY_BLACK", "language": "ARABIC", "subtitleLanguage": "ARABIC", "...": "..." } }
 ```
-Enum values use their Kotlin `name`. Unknown keys are ignored and unknown enum values fall back to the default, so older apps survive newer websites.
+Enum values use their Kotlin `name`. Unknown keys are ignored and unknown enum values fall back to the current/default value, so older apps survive newer websites or newer app releases.
+
+### `settings_tv` and `settings_phone`
+```json
+{
+  "formatVersion": 1,
+  "values": {
+    "navigationStyle": "SIDEBAR_LEFT",
+    "cardSize": "STANDARD",
+    "fontScale": "STANDARD",
+    "bufferProfile": "BALANCED",
+    "playerEngine": "MEDIA3_EXOPLAYER",
+    "preferExternalPlayer": false,
+    "preferredExternalPlayerPackage": "",
+    "appIcon": "SLATE_BLUE",
+    "uiModeOverride": "AUTO"
+  }
+}
+```
+Device-class routing uses Android hardware TV detection (`UiModeManager.currentModeType == UI_MODE_TYPE_TELEVISION` or `Configuration.UI_MODE_TYPE_TELEVISION`, independent of `uiModeOverride`):
+- Android TV devices read and write only `settings_tv` and never read or write `settings_phone`.
+- Phones and tablets read and write only `settings_phone` and never read or write `settings_tv`.
+- Unknown keys in `values` (e.g. future UI scale keys) are ignored and unknown enum values keep the device's current value. `activeProfileId` is never synced so each device still asks "Who's watching?".
 
 ### `profiles`
 ```json
@@ -91,13 +115,14 @@ Items are per profile: `(profileId, contentId)` is the key. `favorites` items al
 - **Pull** on sign-in, on app start, when returning to the foreground, and every 10 minutes while open. Only sections whose server `revision` is newer than the last one this device saw get downloaded.
 - **Push** a section a few seconds after it changes locally (debounced; `progress` waits until it has been quiet for 30 s, since playback saves it every few seconds), using an optimistic check: `PATCH …?user_id=eq.<uid>&section=eq.<s>&revision=eq.<lastSeen>`. If no row was updated, someone else changed it first: pull, merge, push again. A section that doesn't exist yet is created with `POST` (a `409` means another device created it first: pull).
 - Each device remembers, per section, the last revision it saw and a hash of its local data right after the last pull or push. It uploads only when that hash changes, so data that came from the server is never echoed back.
-- **First link** (a device signs in to an account that already has data): `addons`, `profiles` and `secrets` are merged (server items first or winning, then items only this device had), `settings` takes the server copy. Afterwards it's last writer wins as below.
+- **First link** (a device signs in to an account that already has data): `addons`, `profiles` and `secrets` are merged (server items first or winning, then items only this device had), `settings` and the device's own `settings_tv` / `settings_phone` section take the server copy. Afterwards it's last writer wins as below.
+- **Profile picker after first sync**: if a freshly linked device starts with one local profile and the first sync pulls multiple profiles, the app opens "Who's watching?" once `profiles` (and any accompanying `secrets` PINs) have been applied, provided the picker has not already been shown during this launch.
 - `secrets` only accepts real PIN hashes (`PinHasher` format) in `profilePins`; anything else is ignored. A profile missing from `profilePins` has no PIN.
 - If an encrypted section can't be decrypted with this device's key:
   - the row was last written **before** this device signed in (server clock, `user.last_sign_in_at`): the password changed and this device has the newer key, so it re-uploads its own copy;
   - otherwise this device holds an old key: it stops uploading encrypted sections and asks the user to sign in again. It never overwrites data it couldn't read with an old key.
 - **Merging:**
   - `favorites` and `progress`: per item, the newest `updatedAt` wins (deletions included).
-  - `addons`, `settings`, `profiles` and `secrets`: the whole section, last writer wins. The website and the TV both edit these deliberately, so the newest edit is the intended one.
+  - `addons`, `settings`, `settings_tv`, `settings_phone`, `profiles` and `secrets`: the whole section, last writer wins. The website and the TV both edit these deliberately, so the newest edit is the intended one.
 - Each device keeps its own `device_<id>` row up to date and never writes another device's row.
 - **Sign-out** keeps local data and stops syncing. "Delete account" calls `rpc/quern_delete_my_account`, which removes the user and every row.

@@ -55,6 +55,8 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.filled.LockOpen
@@ -86,6 +88,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -93,10 +96,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -3598,6 +3608,8 @@ internal fun CreateProfileDialog(
     onCreate: (String, Long, String, String?) -> Unit
 ) {
     val palette = LocalQuernPalette.current
+    val focusManager = LocalFocusManager.current
+    val firstColorRequester = remember { FocusRequester() }
     var name by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
     var avatarKey by remember { mutableStateOf<String?>(null) }
@@ -3633,13 +3645,24 @@ internal fun CreateProfileDialog(
                     onValueChange = { name = it },
                     label = { Text(qString(R.string.profile_name_label)) },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { firstColorRequester.requestFocus() }),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = palette.focusRing,
                         unfocusedBorderColor = palette.border,
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+                                firstColorRequester.requestFocus()
+                                true
+                            } else {
+                                false
+                            }
+                        }
                 )
 
                 Text(
@@ -3649,12 +3672,13 @@ internal fun CreateProfileDialog(
                     fontWeight = FontWeight.SemiBold
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    avatarColors.forEach { hex ->
+                    avatarColors.forEachIndexed { idx, hex ->
                         val chosen = selectedColor == hex
                         var focused by remember { mutableStateOf(false) }
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
+                                .then(if (idx == 0) Modifier.focusRequester(firstColorRequester) else Modifier)
                                 .clip(CircleShape)
                                 .background(Color(hex))
                                 .border(
@@ -3700,13 +3724,33 @@ internal fun CreateProfileDialog(
                     label = { Text(qString(R.string.profile_pin_optional)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.moveFocus(FocusDirection.Down) }),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = palette.focusRing,
                         unfocusedBorderColor = palette.border,
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown) {
+                                when (event.key) {
+                                    Key.DirectionDown -> {
+                                        focusManager.moveFocus(FocusDirection.Down)
+                                        true
+                                    }
+                                    Key.DirectionUp -> {
+                                        focusManager.moveFocus(FocusDirection.Up)
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            } else {
+                                false
+                            }
+                        }
                 )
             }
         },

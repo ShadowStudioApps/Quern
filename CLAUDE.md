@@ -72,6 +72,7 @@ Latest baseline (after the glass theme + floating rail, Shadow profile, same pat
 - **Rejected:** `allowRgb565` for posters. It needs `allowHardware(false)`, which measured +24 MB PSS and no jank gain.
 - **Dolby Vision** (`player/DolbyVisionFallback.kt`, `QuernRenderersFactory`): when no DV decoder supports profile 7 (`dvhe.07`), the track is presented as HEVC and the base layer plays as HDR10. Verified on the TV with `c2.mtk.hevc.decoder`. The TV's DV decoders cover profiles 4, 5, 8, 9 and 10 only.
 - **Data safety:** Room no longer uses `fallbackToDestructiveMigration`, so any schema change needs a version bump plus a migration. `SecureVault` stores only AES-GCM (`ENC:`); legacy `RAW:` entries migrate on read.
+- **Account sync** (`data/sync/QuernSyncEngine.kt`, `docs/account-sync-format.md`): per-device-class settings live in `settings_tv` (TV hardware) and `settings_phone` (non-TV hardware), routed via `isTvHardware(context)` (`AdaptiveComponents.kt`) so phones never overwrite TVs. `activeProfileId` stays local per device. On a new device that starts with one profile, `QuernApp` watches `profilesAppliedCount` (incremented after `pullAll()` finishes `profiles` + `secrets`) and opens "Who's watching?" once if `profiles.size > 1` and it has not been shown this launch.
 - **Sync code** (`QUERN1:`): holds only enabled addon URLs and a few settings. It doesn't include Debrid keys, servers, profiles or watch history.
 
 ## Open items

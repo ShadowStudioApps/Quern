@@ -209,19 +209,20 @@ fun QuernCompanionSignInCard(
                 }
             }
         } else {
-            // Wide Horizontal Card (Settings -> Accounts & Sync / Phone)
+            // Wide Horizontal Card (Settings -> Accounts & Sync / Phone / Addons QR dialog)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -230,7 +231,9 @@ fun QuernCompanionSignInCard(
                             text = qString(R.string.companion_card_title),
                             color = LumaTextPrimary,
                             fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     CompanionStatusBadge(
@@ -242,18 +245,18 @@ fun QuernCompanionSignInCard(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Left: Large QR + Short Code
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             QrCodeCard(
                                 content = qrPayload,
-                                size = 164.dp,
+                                size = 152.dp,
                                 modifier = Modifier.alpha(if (isExpired) 0.28f else 1f)
                             )
                             if (isExpired) {
@@ -270,7 +273,7 @@ fun QuernCompanionSignInCard(
                             border = BorderStroke(1.dp, palette.focusRing.copy(alpha = 0.8f))
                         ) {
                             Column(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
@@ -295,13 +298,11 @@ fun QuernCompanionSignInCard(
                     // Right: Numbered Steps 1-2-3 + URL + Refresh
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         CompanionStepRow(1, qString(R.string.companion_step_1), compact = false)
                         CompanionStepRow(2, qString(R.string.companion_step_2), compact = false)
                         CompanionStepRow(3, qString(R.string.companion_step_3), compact = false)
-
-                        Spacer(Modifier.height(2.dp))
 
                         Surface(
                             color = palette.surfaceElevated,
@@ -309,7 +310,7 @@ fun QuernCompanionSignInCard(
                             border = BorderStroke(1.dp, palette.border),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) {
                                 Text(
                                     text = qString(R.string.companion_url_label).uppercase(),
                                     color = LumaTextSecondary,
@@ -320,7 +321,7 @@ fun QuernCompanionSignInCard(
                                 Text(
                                     text = url,
                                     color = palette.focusRing,
-                                    fontSize = 14.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontFamily = FontFamily.Monospace,
                                     maxLines = 1,
@@ -396,7 +397,9 @@ private fun CompanionStatusBadge(
                 text = label,
                 color = badgeColor,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }

@@ -1,8 +1,6 @@
 package com.quern.app.data.sync
 
-import android.app.UiModeManager
 import android.content.Context
-import android.content.res.Configuration
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
@@ -12,6 +10,7 @@ import com.quern.app.data.debrid.DebridManager
 import com.quern.app.data.KIND_FAVORITE
 import com.quern.app.data.KIND_PROGRESS
 import com.quern.app.data.local.AddonDao
+import com.quern.app.data.local.AppIconManager
 import com.quern.app.data.local.FavoriteDao
 import com.quern.app.data.local.FavoriteEntity
 import com.quern.app.data.local.TombstoneDao
@@ -30,6 +29,7 @@ import com.quern.app.domain.model.MediaServerType
 import com.quern.app.domain.model.TmdbConfig
 import com.quern.app.domain.model.TraktAuthState
 import com.quern.app.domain.model.UserProfile
+import com.quern.app.ui.components.isTvHardware
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -115,6 +115,8 @@ class QuernSyncEngine(
     private enum class Section(val key: String, val encrypted: Boolean) {
         ADDONS("addons", true),
         SETTINGS("settings", false),
+        SETTINGS_TV("settings_tv", false),
+        SETTINGS_PHONE("settings_phone", false),
         PROFILES("profiles", false),
         SECRETS("secrets", true),
         // Merged per item (newest updatedAt wins), not whole-section last writer wins.
@@ -122,6 +124,16 @@ class QuernSyncEngine(
         PROGRESS("progress", true);
 
         val perItem: Boolean get() = this == FAVORITES || this == PROGRESS
+        val isDeviceSettings: Boolean get() = this == SETTINGS_TV || this == SETTINGS_PHONE
+    }
+
+    /** Each device reads and writes only the per-device-class settings section for its own hardware. */
+    private val deviceSettingsSection: Section by lazy {
+        if (isTv()) Section.SETTINGS_TV else Section.SETTINGS_PHONE
+    }
+
+    private val activeSections: List<Section> by lazy {
+        Section.entries.filter { !it.isDeviceSettings || it == deviceSettingsSection }
     }
 
     private class RemoteRow(
@@ -144,6 +156,10 @@ class QuernSyncEngine(
     private val _addonsApplied = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     /** Emits after addons or hidden catalogs changed because of the server, so Home can reload. */
     val addonsApplied: SharedFlow<Unit> = _addonsApplied.asSharedFlow()
+
+    private val _profilesAppliedCount = MutableStateFlow(0)
+    /** Increments after a sync pull applies `profiles` (and any accompanying `secrets` PINs). */
+    val profilesAppliedCount: StateFlow<Int> = _profilesAppliedCount.asStateFlow()
 
     private var started = false
 
@@ -206,7 +222,7 @@ class QuernSyncEngine(
             _status.value = _status.value.copy(running = true)
             val error = runStep {
                 pullAll()
-                Section.entries.forEach { pushIfChanged(it) }
+                activeSections.forEach { pushIfChanged(it) }
                 writeDeviceRow()
             }
             finish(error)
@@ -216,7 +232,7 @@ class QuernSyncEngine(
     private suspend fun pushChangesNow() {
         if (!account.state.value.isSignedIn) return
         lock.withLock {
-            val error = runStep { Section.entries.forEach { pushIfChanged(it) } }
+            val error = runStep { activeSections.forEach { pushIfChanged(it) } }
             if (error != null) _status.value = _status.value.copy(lastError = error)
         }
     }
@@ -250,14 +266,22 @@ class QuernSyncEngine(
     private suspend fun pullAll() {
         val revisions = fetchRows(select = "section,revision,encrypted", sections = null)
             .associateBy { it.section }
-        val stale = Section.entries.filter { s ->
+        val stale = activeSections.filter { s ->
             val remote = revisions[s.key] ?: return@filter false
             remote.revision > lastRevision(s)
         }
         if (stale.isEmpty()) return
         val rows = fetchRows(select = "section,revision,encrypted,payload,updated_at", sections = stale.map { it.key })
             .associateBy { it.section }
-        stale.forEach { s -> rows[s.key]?.let { applyRow(s, it) } }
+        var profilesApplied = false
+        stale.forEach { s ->
+            rows[s.key]?.let {
+                applyRow(s, it)
+                if (s == Section.PROFILES) profilesApplied = true
+            }
+        }
+        // Notify after all stale sections (including `secrets` with profile PINs) have been applied.
+        if (profilesApplied) _profilesAppliedCount.value += 1
     }
 
     private suspend fun pullSection(s: Section) {
@@ -269,6 +293,7 @@ class QuernSyncEngine(
             return
         }
         applyRow(s, row)
+        if (s == Section.PROFILES) _profilesAppliedCount.value += 1
     }
 
     private suspend fun applyRow(s: Section, row: RemoteRow) {
@@ -289,7 +314,7 @@ class QuernSyncEngine(
         // First time this device meets the account: keep what it already has next to the server copy.
         val firstLink = lastRevision(s) == 0L && localHash(s).isBlank()
         // True when this device holds something newer than the server copy and must upload after applying.
-        var needsUpload = firstLink && s != Section.SETTINGS
+        var needsUpload = firstLink && s != Section.SETTINGS && !s.isDeviceSettings
         runCatching {
             when (s) {
                 Section.ADDONS -> {
@@ -297,6 +322,12 @@ class QuernSyncEngine(
                     _addonsApplied.tryEmit(Unit)
                 }
                 Section.SETTINGS -> obj["values"]?.jsonObject?.let(settingsStore::applySyncSettingsValues)
+                Section.SETTINGS_TV, Section.SETTINGS_PHONE -> obj["values"]?.jsonObject?.let { vals ->
+                    val prevIcon = settingsStore.settings.value.appIcon
+                    settingsStore.applySyncDeviceSettingsValues(vals)
+                    val nextIcon = settingsStore.settings.value.appIcon
+                    if (nextIcon != prevIcon) runCatching { AppIconManager.applyIcon(context, nextIcon) }
+                }
                 Section.PROFILES -> applyProfiles(obj, union = firstLink)
                 Section.SECRETS -> applySecrets(obj, union = firstLink)
                 Section.FAVORITES, Section.PROGRESS -> needsUpload = mergeItems(s, obj)
@@ -664,6 +695,10 @@ class QuernSyncEngine(
             put("formatVersion", 1)
             put("values", settingsStore.syncSettingsValues())
         }
+        Section.SETTINGS_TV, Section.SETTINGS_PHONE -> buildJsonObject {
+            put("formatVersion", 1)
+            put("values", settingsStore.syncDeviceSettingsValues())
+        }
         Section.PROFILES -> buildJsonObject {
             put("formatVersion", 1)
             put("profiles", buildJsonArray {
@@ -854,10 +889,7 @@ class QuernSyncEngine(
             ?.takeIf { it.isNotBlank() }
             ?: Build.MODEL.orEmpty()
 
-    private fun isTv(): Boolean {
-        val ui = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-        return ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
-    }
+    private fun isTv(): Boolean = isTvHardware(context)
 
     companion object {
         private const val TAG = "QuernSync"

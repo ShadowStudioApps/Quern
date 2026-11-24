@@ -220,6 +220,15 @@ internal class RememberLastFocusedNode :
     }
 }
 
+fun isTvHardware(
+    context: Context,
+    configuration: Configuration = context.resources.configuration
+): Boolean {
+    val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+    return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+        (configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+}
+
 @Composable
 fun rememberIsTvMode(override: UiModeOverride): Boolean {
     val context = LocalContext.current
@@ -228,11 +237,7 @@ fun rememberIsTvMode(override: UiModeOverride): Boolean {
         when (override) {
             UiModeOverride.TV -> true
             UiModeOverride.PHONE -> false
-            UiModeOverride.AUTO -> {
-                val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-                uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
-                    (configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
-            }
+            UiModeOverride.AUTO -> isTvHardware(context, configuration)
         }
     }
 }

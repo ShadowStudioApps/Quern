@@ -72,6 +72,7 @@ class QuernViewModel(
 
     // ---- Account sync ----
     val syncStatus: StateFlow<SyncStatus> = syncEngine.status
+    val profilesAppliedCount: StateFlow<Int> = syncEngine.profilesAppliedCount
 
     fun syncNow() {
         viewModelScope.launch { syncEngine.syncNow() }

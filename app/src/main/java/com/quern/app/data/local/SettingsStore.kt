@@ -38,9 +38,14 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Strictly non-secret settings snapshot for portable export/import.
@@ -243,6 +248,72 @@ class SettingsStore(context: Context) {
         val incoming = values.filterKeys { it in current && it !in SYNC_EXCLUDED_KEYS }
         val snap = syncJson.decodeFromJsonElement<NonSecretSettingsSnapshot>(JsonObject(current + incoming))
         applySnapshot(snap)
+    }
+
+    /**
+     * Values for the per-device-class account section (`settings_tv` or `settings_phone`,
+     * see docs/account-sync-format.md). Kept as a flat key/value object so future keys
+     * (such as UI scale) stay forward-compatible.
+     */
+    fun syncDeviceSettingsValues(): JsonObject {
+        val s = _settings.value
+        return buildJsonObject {
+            put("navigationStyle", s.navigationStyle.name)
+            put("cardSize", s.cardSize.name)
+            put("fontScale", s.fontScale.name)
+            put("bufferProfile", s.bufferProfile.name)
+            put("playerEngine", s.playerEngine.name)
+            put("preferExternalPlayer", s.preferExternalPlayer)
+            put("preferredExternalPlayerPackage", s.preferredExternalPlayerPackage)
+            put("appIcon", s.appIcon.name)
+            put("uiModeOverride", s.uiModeOverride.name)
+        }
+    }
+
+    /**
+     * Applies a remote `settings_tv` or `settings_phone` section. Unknown keys are ignored and
+     * unknown enum values keep the current value.
+     */
+    fun applySyncDeviceSettingsValues(values: JsonObject) {
+        fun str(key: String): String? = values[key]?.jsonPrimitive?.contentOrNull
+        val rawEngine = str("playerEngine")
+        update { curr ->
+            val nextEngine = when {
+                rawEngine == null -> curr.playerEngine
+                rawEngine == "MPV" -> PlayerEngine.EXTERNAL
+                else -> runCatching { PlayerEngine.valueOf(rawEngine) }.getOrDefault(curr.playerEngine)
+            }
+            val incomingPkg = str("preferredExternalPlayerPackage")
+            val nextPkg = when {
+                rawEngine == "MPV" && incomingPkg.isNullOrBlank() -> "is.xyz.mpv"
+                incomingPkg != null -> incomingPkg
+                else -> curr.preferredExternalPlayerPackage
+            }
+            curr.copy(
+                navigationStyle = str("navigationStyle")
+                    ?.let { runCatching { NavigationStyle.valueOf(it) }.getOrNull() }
+                    ?: curr.navigationStyle,
+                cardSize = str("cardSize")
+                    ?.let { runCatching { CardSizePreset.valueOf(it) }.getOrNull() }
+                    ?: curr.cardSize,
+                fontScale = str("fontScale")
+                    ?.let { runCatching { FontScalePreset.valueOf(it) }.getOrNull() }
+                    ?: curr.fontScale,
+                bufferProfile = str("bufferProfile")
+                    ?.let { runCatching { BufferProfile.valueOf(it) }.getOrNull() }
+                    ?: curr.bufferProfile,
+                playerEngine = nextEngine,
+                preferExternalPlayer = values["preferExternalPlayer"]?.jsonPrimitive?.booleanOrNull
+                    ?: curr.preferExternalPlayer,
+                preferredExternalPlayerPackage = nextPkg,
+                appIcon = str("appIcon")
+                    ?.let { runCatching { AppIconOption.valueOf(it) }.getOrNull() }
+                    ?: curr.appIcon,
+                uiModeOverride = str("uiModeOverride")
+                    ?.let { runCatching { UiModeOverride.valueOf(it) }.getOrNull() }
+                    ?: curr.uiModeOverride
+            )
+        }
     }
 
     fun exportNonSecretSettingsCode(): String {
@@ -519,7 +590,7 @@ class SettingsStore(context: Context) {
     }
 
     private companion object {
-        /** Per-device keys (screen, hardware, installed player apps) plus keys owned by other sections. */
+        /** Per-device keys (synced separately in `settings_tv` / `settings_phone`) plus keys owned by other sections. */
         val SYNC_EXCLUDED_KEYS = setOf(
             "version",
             "hiddenCatalogKeys",
@@ -529,7 +600,9 @@ class SettingsStore(context: Context) {
             "bufferProfile",
             "playerEngine",
             "preferExternalPlayer",
-            "preferredExternalPlayerPackage"
+            "preferredExternalPlayerPackage",
+            "appIcon",
+            "uiModeOverride"
         )
     }
 }

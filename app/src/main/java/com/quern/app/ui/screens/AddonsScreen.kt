@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -62,6 +63,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import com.quern.app.R
 import com.quern.app.data.addons.AddonHealthResult
 import com.quern.app.data.companion.CompanionSessionState
@@ -175,6 +177,10 @@ fun AddonsScreen(
         if (showQrDialog) {
             AlertDialog(
                 onDismissRequest = { showQrDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+                modifier = Modifier
+                    .fillMaxWidth(0.76f)
+                    .widthIn(max = 680.dp),
                 containerColor = palette.surfaceElevated,
                 text = {
                     QuernCompanionSignInCard(
