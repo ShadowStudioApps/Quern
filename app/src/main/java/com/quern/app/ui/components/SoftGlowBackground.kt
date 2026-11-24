@@ -56,7 +56,8 @@ fun SoftGlowBackground(
     glowColors: List<Color>,
     modifier: Modifier = Modifier,
     /** 1 = full strength (profile picker); lower behind busy pages so posters and text stay readable. */
-    intensity: Float = 1f
+    intensity: Float = 1f,
+    picker: Boolean = false
 ) {
     val clamped = intensity.coerceIn(0f, 1f)
     val primaryAlpha = 0.62f * clamped
@@ -82,7 +83,7 @@ fun SoftGlowBackground(
                         Triple(Offset(w * 0.28f, h * 0.86f), rMed, secondaryAlpha),
                         Triple(Offset(w * 0.78f, h * 0.82f), rLarge, primaryAlpha * 0.85f)
                     )
-                    orbs.forEachIndexed { i, (center, radius, alpha) ->
+                    (if (picker) orbs.take(2) else orbs).forEachIndexed { i, (center, radius, alpha) ->
                         drawCircle(
                             brush = Brush.radialGradient(
                                 colorStops = arrayOf(
@@ -101,7 +102,7 @@ fun SoftGlowBackground(
                     drawRect(Color.Black.copy(alpha = 0.14f))
                     drawRect(
                         Brush.radialGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.52f)),
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = if (picker) 0.82f else 0.52f)),
                             center = Offset(w * 0.5f, h * 0.48f),
                             radius = max(w, h) * 0.78f
                         )

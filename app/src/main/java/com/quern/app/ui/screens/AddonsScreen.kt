@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,6 +71,7 @@ import com.quern.app.data.companion.CompanionSessionState
 import com.quern.app.domain.model.InstalledAddon
 import com.quern.app.ui.components.LumaBadgeChip
 import com.quern.app.ui.components.QuernCompanionSignInCard
+import com.quern.app.ui.components.isTvHardware
 import com.quern.app.ui.components.quernSwitchColors
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
@@ -104,6 +106,7 @@ fun AddonsScreen(
     onToggleCatalogVisibility: (String) -> Unit = {}
 ) {
     val palette = LocalQuernPalette.current
+    val isTvDevice = isTvHardware(LocalContext.current)
     var manifestUrlInput by remember { mutableStateOf("") }
     var isInstalling by remember { mutableStateOf(false) }
     var showQrDialog by remember { mutableStateOf(false) }
@@ -133,7 +136,7 @@ fun AddonsScreen(
                     }
                 },
                 onCheckAllHealth = onCheckAllHealth,
-                onOpenQrSetup = { showQrDialog = true }
+                onOpenQrSetup = if (isTvDevice) { { showQrDialog = true } } else null
             )
 
             Text(
@@ -228,19 +231,21 @@ fun AddonsScreen(
 
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(bottom = 90.dp),
+                contentPadding = PaddingValues(bottom = 112.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                item(key = "qr_phone") {
-                    QuernCompanionSignInCard(
-                        url = addonsQrUrl,
-                        session = companionSession,
-                        onRefreshSession = onRefreshCompanionSession,
-                        onBindServer = onBindCompanionServer,
-                        onUnbindServer = onUnbindCompanionServer,
-                        compactVertical = false,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                if (isTvDevice) {
+                    item(key = "qr_phone") {
+                        QuernCompanionSignInCard(
+                            url = addonsQrUrl,
+                            session = companionSession,
+                            onRefreshSession = onRefreshCompanionSession,
+                            onBindServer = onBindCompanionServer,
+                            onUnbindServer = onUnbindCompanionServer,
+                            compactVertical = false,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
 
                 item(key = "installed_count") {

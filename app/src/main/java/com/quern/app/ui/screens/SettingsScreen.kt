@@ -24,14 +24,19 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -160,11 +165,14 @@ import com.quern.app.domain.model.UiModeOverride
 import com.quern.app.domain.model.UpdateChannel
 import com.quern.app.domain.model.UserProfile
 import com.quern.app.player.ExternalPlayerHelper
+import com.quern.app.ui.components.LocalQuernLayout
 import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.ProfileAvatarCircle
 import com.quern.app.ui.components.ProfileAvatarGrid
 import com.quern.app.ui.components.QrCodeCard
 import com.quern.app.ui.components.QuernCompanionSignInCard
+import com.quern.app.ui.components.QuernLayoutClass
+import com.quern.app.ui.components.isTvHardware
 import com.quern.app.ui.components.quernSwitchColors
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
@@ -712,23 +720,26 @@ fun SettingsScreen(
             }
         }
     } else {
+        val isCompact = LocalQuernLayout.current == QuernLayoutClass.COMPACT
+        val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 14.dp)
+                .padding(top = 14.dp, bottom = navBarBottom),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val wideMaxWidthMod = if (isCompact) Modifier.fillMaxWidth() else Modifier.widthIn(max = 840.dp).fillMaxWidth()
             if (activeSubPage == SettingsSubPage.NONE) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                    modifier = wideMaxWidthMod
+                        .padding(horizontal = if (isCompact) 14.dp else 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         text = qString(R.string.settings_title),
                         color = LumaTextPrimary,
-                        fontSize = 24.sp,
+                        fontSize = if (isCompact) 22.sp else 24.sp,
                         fontWeight = FontWeight.Black
                     )
                     Surface(
@@ -736,11 +747,12 @@ fun SettingsScreen(
                         shape = RoundedCornerShape(999.dp),
                         border = BorderStroke(1.dp, palette.border),
                         modifier = Modifier
+                            .then(if (isCompact) Modifier.heightIn(min = 48.dp) else Modifier)
                             .clip(RoundedCornerShape(999.dp))
                             .tvClickable(onClick = { showSearchDialog = true })
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = if (isCompact) 12.dp else 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
@@ -751,7 +763,8 @@ fun SettingsScreen(
                 }
                 Spacer(Modifier.height(10.dp))
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = wideMaxWidthMod,
+                    contentPadding = PaddingValues(horizontal = if (isCompact) 14.dp else 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(SettingsGroup.entries) { grp ->
@@ -761,11 +774,12 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(999.dp),
                             border = BorderStroke(1.dp, if (active) palette.focusRing else palette.border),
                             modifier = Modifier
+                                .then(if (isCompact) Modifier.heightIn(min = 48.dp) else Modifier)
                                 .clip(RoundedCornerShape(999.dp))
                                 .tvClickable(onClick = { selectedGroup = grp })
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = if (isCompact) 12.dp else 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
@@ -781,11 +795,11 @@ fun SettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                Box(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+                Box(modifier = wideMaxWidthMod.weight(1f).padding(horizontal = if (isCompact) 14.dp else 20.dp)) {
                     renderActiveGroup(selectedGroup, activeSubPage)
                 }
             } else {
-                Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                Box(modifier = wideMaxWidthMod.weight(1f).padding(horizontal = if (isCompact) 14.dp else 20.dp)) {
                     renderActiveGroup(selectedGroup, activeSubPage)
                 }
             }
@@ -945,6 +959,7 @@ private fun AppearanceSectionPane(
 ) {
     val palette = LocalQuernPalette.current
     val isAr = settings.effectiveLanguage == AppLanguage.ARABIC
+    val isTvLayout = LocalQuernLayout.current == QuernLayoutClass.TV
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1080,20 +1095,22 @@ private fun AppearanceSectionPane(
             }
         }
 
-        // 3. Navigation Style
-        item(key = "navigation_style") {
-            SettingSectionCard(title = qString(R.string.appearance_nav_title)) {
-                HelpTextLine(qString(R.string.appearance_nav_help))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    NavigationStyle.entries.forEach { style ->
-                        SelectablePillOption(
-                            label = if (isAr) style.labelAr else style.labelEn,
-                            selected = settings.navigationStyle == style,
-                            onClick = { onUpdateSettings { it.copy(navigationStyle = style) } }
-                        )
+        // 3. Navigation Style (TV rail / top bar only — non-TV uses the floating bottom dock)
+        if (isTvLayout) {
+            item(key = "navigation_style") {
+                SettingSectionCard(title = qString(R.string.appearance_nav_title)) {
+                    HelpTextLine(qString(R.string.appearance_nav_help))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        NavigationStyle.entries.forEach { style ->
+                            SelectablePillOption(
+                                label = if (isAr) style.labelAr else style.labelEn,
+                                selected = settings.navigationStyle == style,
+                                onClick = { onUpdateSettings { it.copy(navigationStyle = style) } }
+                            )
+                        }
                     }
                 }
             }
@@ -2659,6 +2676,7 @@ private fun SettingsCategoryOverviewPane(
 ) {
     val s = LocalQuernStrings.current
     val palette = LocalQuernPalette.current
+    val isTvDevice = isTvHardware(LocalContext.current)
     val isAr = settings.effectiveLanguage == AppLanguage.ARABIC
 
     val rows = when (group) {
@@ -2814,6 +2832,7 @@ private fun SettingsSubPageContent(
 ) {
     val s = LocalQuernStrings.current
     val palette = LocalQuernPalette.current
+    val isTvDevice = isTvHardware(LocalContext.current)
     val isAr = settings.effectiveLanguage == AppLanguage.ARABIC
     val backFocus = remember { FocusRequester() }
 
@@ -2852,7 +2871,10 @@ private fun SettingsSubPageContent(
 
                     SettingSectionCard(title = qString(R.string.settings_export_import_title)) {
                         HelpTextLine(qString(R.string.settings_export_import_help))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             SelectablePillOption(
                                 label = qString(R.string.settings_export_btn),
                                 selected = true,
@@ -2949,7 +2971,7 @@ private fun SettingsSubPageContent(
                     }
                 }
 
-                if (!isTv || account.state.isSignedIn) item(key = "qr_phone_setup") {
+                if (isTvDevice && account.state.isSignedIn) item(key = "qr_phone_setup") {
                     QuernCompanionSignInCard(
                         url = companionUrl,
                         session = companionSession,
@@ -2973,7 +2995,10 @@ private fun SettingsSubPageContent(
                             fontSize = 13.sp
                         )
                         Spacer(Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             SelectablePillOption(
                                 label = qString(R.string.account_sync_stremio_btn),
                                 selected = true,
@@ -3181,11 +3206,13 @@ internal fun SelectablePillOption(
     }
     val fg = if (focused || selected) palette.onAccent else LumaTextPrimary
 
+    val isCompact = LocalQuernLayout.current == QuernLayoutClass.COMPACT
     Surface(
         color = bg,
         shape = RoundedCornerShape(999.dp),
         border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
         modifier = modifier
+            .then(if (isCompact) Modifier.heightIn(min = 48.dp) else Modifier)
             .clip(RoundedCornerShape(999.dp))
             .tvClickable(
                 onFocusChangedState = { focused = it },
@@ -3193,13 +3220,20 @@ internal fun SelectablePillOption(
                 onClick = onClick
             )
     ) {
-        Text(
-            text = label,
-            color = fg,
-            fontSize = 13.sp,
-            fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-        )
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(
+                horizontal = 16.dp,
+                vertical = if (isCompact) 12.dp else 10.dp
+            )
+        ) {
+            Text(
+                text = label,
+                color = fg,
+                fontSize = 13.sp,
+                fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.Medium
+            )
+        }
     }
 }
 
@@ -3210,10 +3244,12 @@ private fun SettingToggleRow(
     onCheckedChange: (Boolean) -> Unit
 ) {
     val palette = LocalQuernPalette.current
+    val isCompact = LocalQuernLayout.current == QuernLayoutClass.COMPACT
     var focused by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (isCompact) Modifier.heightIn(min = 48.dp) else Modifier)
             .clip(RoundedCornerShape(12.dp))
             .background(if (focused) palette.accent else Color.Transparent)
             .border(

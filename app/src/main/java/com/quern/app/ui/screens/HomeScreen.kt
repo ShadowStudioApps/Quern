@@ -10,14 +10,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -76,6 +81,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -108,6 +114,8 @@ import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.LumaHeroBanner
 import com.quern.app.ui.components.LumaMediaCarouselRow
 import com.quern.app.ui.components.QuernCompanionSignInCard
+import com.quern.app.ui.components.LocalQuernLayout
+import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.ui.components.QuernHomeSpacing
 import com.quern.app.ui.components.buildAmbientBackdropRequest
 import com.quern.app.ui.components.buildHeroBackdropRequest
@@ -344,10 +352,10 @@ fun HomeScreen(
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize()
     ) {
-        val heroHeight = if (isTv) {
-            (maxHeight * 0.72f).coerceIn(340.dp, 540.dp)
-        } else {
-            (maxHeight * 0.46f).coerceIn(280.dp, 380.dp)
+        val heroHeight = when (LocalQuernLayout.current) {
+            QuernLayoutClass.TV -> (maxHeight * 0.72f).coerceIn(340.dp, 540.dp)
+            QuernLayoutClass.COMPACT -> (maxHeight * 0.57f).coerceIn(340.dp, 520.dp)
+            QuernLayoutClass.WIDE -> (maxHeight * 0.48f).coerceIn(300.dp, 440.dp)
         }
         val heroAspectRatio = (maxWidth.value / heroHeight.value.coerceAtLeast(1f)).coerceIn(1.2f, 6.0f)
 
@@ -511,9 +519,10 @@ fun HomeScreen(
                 }
             }
         } else {
+            val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 72.dp),
+                contentPadding = PaddingValues(bottom = navBarBottom + 104.dp),
                 verticalArrangement = Arrangement.spacedBy(QuernHomeSpacing.rowVerticalGap(isTv))
             ) {
                 if (updateBannerRelease != null) {
@@ -567,6 +576,7 @@ fun HomeScreen(
                         ContinueWatchingRow(
                             items = sortedContinueWatching,
                             isTv = isTv,
+                            cardSize = cardSize,
                             onClick = onContinueClick
                         )
                     }
@@ -769,6 +779,7 @@ private val ContinueOverlayScrim = Brush.verticalGradient(
 private fun ContinueWatchingRow(
     items: List<WatchProgress>,
     isTv: Boolean,
+    cardSize: CardSizePreset = CardSizePreset.STANDARD,
     onClick: (WatchProgress) -> Unit,
     onItemFocused: ((WatchProgress, Int) -> Unit)? = null,
     firstItemFocusRequester: FocusRequester? = null,
@@ -784,8 +795,8 @@ private fun ContinueWatchingRow(
     val startPad = QuernHomeSpacing.contentStartPadding(isTv, railInset)
     val endPad = QuernHomeSpacing.contentEndPadding(isTv)
     // True 16:9 landscape cards with title/episode/badge overlaid directly on the artwork (no text block below).
-    val cwWidth = if (isTv) 196.dp else 160.dp
-    val cwHeight = if (isTv) 110.dp else 90.dp
+    val cwWidth = continueCardWidth(cardSize)
+    val cwHeight = if (isTv) 110.dp else cwWidth * (9f / 16f)
     val cwDecodeW = remember(cwWidth, density.density) {
         with(density) { (cwWidth.toPx() * 1.1f).toInt().coerceIn(220, 480) }
     }
@@ -825,7 +836,7 @@ private fun ContinueWatchingRow(
                 top = QuernHomeSpacing.titleToCardsGap(isTv),
                 bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
             ),
-            horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(isTv))
+            horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(LocalQuernLayout.current))
         ) {
             itemsIndexed(items, key = { _, it -> it.contentId }, contentType = { _, _ -> "cw_card" }) { index, progress ->
                 val isFirst = index == 0
@@ -994,8 +1005,9 @@ private fun HomeSkeletonScreen(
     val railInset = if (isTv) LocalTvRailInset.current else 0.dp
     val startPad = QuernHomeSpacing.contentStartPadding(isTv, railInset)
     val endPad = QuernHomeSpacing.contentEndPadding(isTv)
-    val cardGap = QuernHomeSpacing.cardHorizontalGap(isTv)
-    val baseWidth = if (isTv) cardSize.tvWidthDp else cardSize.phoneWidthDp
+    val cardGap = QuernHomeSpacing.cardHorizontalGap(LocalQuernLayout.current)
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val baseWidth = QuernHomeSpacing.posterWidth(cardSize, LocalQuernLayout.current, screenWidthDp)
     val posterWidth = if (cardShape == CardShapePreset.LANDSCAPE) (baseWidth * 1.45f).toInt().dp else baseWidth.dp
     val posterCorner = remember(cardCorner) { RoundedCornerShape(cardCorner.radiusDp.dp) }
     val fill = palette.surfaceElevated.copy(alpha = 0.34f)
@@ -1030,7 +1042,7 @@ private fun HomeSkeletonScreen(
         }
         // Continue Watching 16:9 skeleton row
         item(key = "sk_cw") {
-            val cwWidth = if (isTv) 196.dp else 160.dp
+            val cwWidth = continueCardWidth(cardSize)
             Column(modifier = Modifier.fillMaxWidth()) {
                 Box(Modifier.padding(start = startPad).width(150.dp).height(16.dp).clip(RoundedCornerShape(6.dp)).background(fillStrong))
                 Spacer(Modifier.height(QuernHomeSpacing.titleToCardsGap(isTv)))
@@ -1066,6 +1078,22 @@ private fun HomeSkeletonScreen(
     }
 }
 
+@Composable
+private fun continueCardWidth(cardSize: CardSizePreset = CardSizePreset.STANDARD): Dp {
+    val layout = LocalQuernLayout.current
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val sizeDelta = cardSize.phoneWidthDp - CardSizePreset.STANDARD.phoneWidthDp
+    return when (layout) {
+        QuernLayoutClass.TV -> 196.dp
+        QuernLayoutClass.WIDE -> {
+            val base = if (screenWidthDp >= 800) 216 else 160
+            (base + sizeDelta * 1.4f).dp.coerceIn(144.dp, 280.dp)
+        }
+        QuernLayoutClass.COMPACT -> (screenWidthDp * 0.73f + sizeDelta).dp.coerceIn(210.dp, 340.dp)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EmptyHomeCard(
     isTv: Boolean,
@@ -1113,9 +1141,9 @@ private fun EmptyHomeCard(
                     lineHeight = 20.sp
                 )
                 Spacer(Modifier.height(4.dp))
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Surface(
                         color = if (addBtnFocused) Color.White else palette.accent,

@@ -15,6 +15,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -241,6 +244,21 @@ val LocalTvRailInset = staticCompositionLocalOf { 0.dp }
  * stay uniform across all rows at both 100% and smaller Interface Size scales.
  */
 object QuernHomeSpacing {
+    fun posterWidth(
+        size: CardSizePreset,
+        layout: QuernLayoutClass,
+        screenWidthDp: Int = 640
+    ): Int = when (layout) {
+        QuernLayoutClass.TV -> size.tvWidthDp
+        QuernLayoutClass.WIDE -> if (screenWidthDp >= 800) {
+            // 10-11" tablets (>= 800 dp) get fuller posters while unfolded foldables (600-799 dp) stay unchanged.
+            size.phoneWidthDp + 34
+        } else {
+            size.phoneWidthDp
+        }
+        QuernLayoutClass.COMPACT -> (110 + size.phoneWidthDp - CardSizePreset.STANDARD.phoneWidthDp).coerceIn(94, 152)
+    }
+
     fun contentStartPadding(isTv: Boolean, railInset: Dp): Dp =
         if (isTv) railInset + 18.dp else 14.dp
 
@@ -250,6 +268,12 @@ object QuernHomeSpacing {
     /** Uniform horizontal gap between sibling cards in Continue Watching and poster rows. */
     fun cardHorizontalGap(isTv: Boolean): Dp =
         if (isTv) 15.dp else 10.dp
+
+    fun cardHorizontalGap(layout: QuernLayoutClass): Dp = when (layout) {
+        QuernLayoutClass.TV -> 15.dp
+        QuernLayoutClass.WIDE -> 12.dp
+        QuernLayoutClass.COMPACT -> 10.dp
+    }
 
     /** Uniform vertical gap between a row header title and its cards (leaves room for 6% focus lift). */
     fun titleToCardsGap(isTv: Boolean): Dp =
@@ -273,15 +297,23 @@ fun isTvHardware(
         (configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
 }
 
+enum class QuernLayoutClass { TV, WIDE, COMPACT }
+
+val LocalQuernLayout = androidx.compose.runtime.staticCompositionLocalOf { QuernLayoutClass.WIDE }
+
 @Composable
-fun rememberIsTvMode(override: UiModeOverride): Boolean {
+fun currentQuernLayout(override: UiModeOverride = UiModeOverride.AUTO): QuernLayoutClass {
     val context = LocalContext.current
-    val configuration = LocalConfiguration.current
-    return remember(override, configuration.uiMode, configuration.screenWidthDp) {
+    val config = LocalConfiguration.current
+    return remember(context, override, config.uiMode, config.screenWidthDp) {
         when (override) {
-            UiModeOverride.TV -> true
-            UiModeOverride.PHONE -> false
-            UiModeOverride.AUTO -> isTvHardware(context, configuration)
+            UiModeOverride.TV -> QuernLayoutClass.TV
+            UiModeOverride.PHONE -> if (config.screenWidthDp >= 600) QuernLayoutClass.WIDE else QuernLayoutClass.COMPACT
+            UiModeOverride.AUTO -> when {
+                isTvHardware(context, config) -> QuernLayoutClass.TV
+                config.screenWidthDp >= 600 -> QuernLayoutClass.WIDE
+                else -> QuernLayoutClass.COMPACT
+            }
         }
     }
 }
@@ -310,7 +342,9 @@ fun QuernAlertDialog(
     ) {
         val effectiveDensity = scaledDensity ?: LocalDensity.current
         CompositionLocalProvider(LocalDensity provides effectiveDensity) {
-            val defaultWidthMod = if (properties.usePlatformDefaultWidth) {
+            val defaultWidthMod = if (LocalQuernLayout.current == QuernLayoutClass.COMPACT) {
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            } else if (properties.usePlatformDefaultWidth) {
                 Modifier.widthIn(min = 280.dp, max = 560.dp)
             } else {
                 Modifier
@@ -412,6 +446,7 @@ fun LumaBadgeChip(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LumaHeroBanner(
     item: MediaItem,
@@ -624,15 +659,20 @@ fun LumaHeroBanner(
         }
 
         // Bottom Spotlight Info: Meta Logo (fallback large text), single metadata line, 2-line synopsis, smart CTA
+        val isCompactLayout = LocalQuernLayout.current == QuernLayoutClass.COMPACT
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(
                     start = startPad,
                     end = endPad,
-                    bottom = if (isTv) 26.dp else 16.dp
+                    bottom = when {
+                        isTv -> 26.dp
+                        isCompactLayout -> 34.dp
+                        else -> 16.dp
+                    }
                 )
-                .fillMaxWidth(if (isTv) 0.54f else 0.92f)
+                .fillMaxWidth(if (isTv) 0.54f else if (isCompactLayout) 1f else 0.92f)
         ) {
             val logoUrl = item.logoUrl?.takeIf { it.isNotBlank() }
             var logoFailed by remember(logoUrl) { mutableStateOf(false) }
@@ -747,6 +787,7 @@ fun LumaHeroBanner(
                     FocusRequester.Default
                 }
             }
+            val ctaMinHeightMod = if (isCompactLayout) Modifier.heightIn(min = 48.dp) else Modifier
             if (activeProgress != null && onResumeDirect != null) {
                 val resumeLabel = remember(activeProgress, isAr) {
                     val minsLeft = ((activeProgress.durationMs - activeProgress.positionMs)
@@ -770,9 +811,9 @@ fun LumaHeroBanner(
                         else -> "Resume"
                     }
                 }
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     var resumeFocused by remember { mutableStateOf(false) }
                     Surface(
@@ -780,6 +821,7 @@ fun LumaHeroBanner(
                         shape = RoundedCornerShape(999.dp),
                         border = if (resumeFocused) BorderStroke(2.dp, palette.focusRing) else null,
                         modifier = Modifier
+                            .then(ctaMinHeightMod)
                             .focusRequester(primaryCtaFocus)
                             .onGloballyPositioned { coords -> primaryCtaAttached = coords.isAttached }
                             .then(downTargetMod)
@@ -791,7 +833,10 @@ fun LumaHeroBanner(
                             )
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(
+                                horizontal = if (isCompactLayout) 18.dp else 16.dp,
+                                vertical = if (isCompactLayout) 12.dp else 8.dp
+                            ),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -799,14 +844,15 @@ fun LumaHeroBanner(
                                 Icons.Default.PlayArrow,
                                 contentDescription = null,
                                 tint = if (resumeFocused) palette.onAccent else Color.Black,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(if (isCompactLayout) 18.dp else 16.dp)
                             )
                             Text(
                                 text = resumeLabel,
                                 color = if (resumeFocused) palette.onAccent else Color.Black,
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 11.5.sp,
-                                maxLines = 1
+                                fontSize = if (isCompactLayout) 13.sp else 11.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -820,6 +866,7 @@ fun LumaHeroBanner(
                             color = if (detailsFocused) palette.focusRing else Color.White.copy(alpha = 0.28f)
                         ),
                         modifier = Modifier
+                            .then(ctaMinHeightMod)
                             .then(downTargetMod)
                             .clip(RoundedCornerShape(999.dp))
                             .tvClickable(
@@ -828,13 +875,20 @@ fun LumaHeroBanner(
                                 onClick = { onSelect(item) }
                             )
                     ) {
-                        Text(
-                            text = viewDetailsLabel,
-                            color = if (detailsFocused) palette.onAccent else Color.White.copy(alpha = 0.92f),
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.5.dp)
-                        )
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(
+                                horizontal = if (isCompactLayout) 16.dp else 14.dp,
+                                vertical = if (isCompactLayout) 12.dp else 7.5.dp
+                            )
+                        ) {
+                            Text(
+                                text = viewDetailsLabel,
+                                color = if (detailsFocused) palette.onAccent else Color.White.copy(alpha = 0.92f),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = if (isCompactLayout) 13.sp else 11.sp
+                            )
+                        }
                     }
                 }
             } else {
@@ -844,6 +898,7 @@ fun LumaHeroBanner(
                     shape = RoundedCornerShape(999.dp),
                     border = if (detailsFocused) BorderStroke(2.dp, palette.focusRing) else null,
                     modifier = Modifier
+                        .then(ctaMinHeightMod)
                         .focusRequester(primaryCtaFocus)
                         .onGloballyPositioned { coords -> primaryCtaAttached = coords.isAttached }
                         .then(downTargetMod)
@@ -854,13 +909,20 @@ fun LumaHeroBanner(
                             onClick = { onSelect(item) }
                         )
                 ) {
-                    Text(
-                        text = viewDetailsLabel,
-                        color = if (detailsFocused) palette.onAccent else Color.Black,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 11.5.sp,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
-                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(
+                            horizontal = if (isCompactLayout) 22.dp else 18.dp,
+                            vertical = if (isCompactLayout) 12.dp else 8.dp
+                        )
+                    ) {
+                        Text(
+                            text = viewDetailsLabel,
+                            color = if (detailsFocused) palette.onAccent else Color.Black,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = if (isCompactLayout) 13.sp else 11.5.sp
+                        )
+                    }
                 }
             }
         }
@@ -872,7 +934,7 @@ fun LumaHeroBanner(
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(horizontal = endPad, vertical = if (isTv) 26.dp else 18.dp),
+                    .padding(horizontal = endPad, vertical = if (isTv) 26.dp else if (isCompactLayout) 12.dp else 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1029,7 +1091,7 @@ fun LumaMediaCarouselRow(
                 top = QuernHomeSpacing.titleToCardsGap(isTv),
                 bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
             ),
-            horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(isTv))
+            horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(LocalQuernLayout.current))
         ) {
             itemsIndexed(
                 items = uniqueItems,
@@ -1083,6 +1145,7 @@ fun LumaPosterCard(
     cardShape: CardShapePreset = CardShapePreset.PORTRAIT,
     cardCorner: CardCornerPreset = CardCornerPreset.ROUNDED,
     showPosterLabels: Boolean = true,
+    fillGridWidth: Boolean = false,
     onClick: () -> Unit,
     onFocused: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -1102,7 +1165,8 @@ fun LumaPosterCard(
     val focusGlowColor = palette.focusRing
     val isGlossy = palette.isGlossy
     val density = LocalDensity.current
-    val baseWidth = if (isTv) cardSize.tvWidthDp else cardSize.phoneWidthDp
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val baseWidth = QuernHomeSpacing.posterWidth(cardSize, LocalQuernLayout.current, screenWidthDp)
     val cardWidth = if (cardShape == CardShapePreset.LANDSCAPE) (baseWidth * 1.45f).toInt().dp else baseWidth.dp
     val cornerShape = remember(cardCorner) { RoundedCornerShape(cardCorner.radiusDp.dp) }
     val decodeWidthPx = remember(cardWidth, density.density) {
@@ -1132,7 +1196,7 @@ fun LumaPosterCard(
 
     Column(
         modifier = modifier
-            .width(cardWidth)
+            .then(if (fillGridWidth) Modifier.fillMaxWidth() else Modifier.width(cardWidth))
             .zIndex(if (isFocused) 10f else 0f)
             .graphicsLayer {
                 val s = 1f + 0.06f * focusProgress.value
@@ -1249,7 +1313,7 @@ fun LumaPosterCard(
             }
         }
 
-        if (showPosterLabels) {
+        if (showPosterLabels || LocalQuernLayout.current == QuernLayoutClass.COMPACT) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

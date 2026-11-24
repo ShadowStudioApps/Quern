@@ -7,6 +7,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -53,6 +55,7 @@ import com.quern.app.data.sync.QuernAccountState
 import com.quern.app.data.sync.SyncStatus
 import com.quern.app.ui.components.QrCodeCard
 import com.quern.app.ui.components.QuernAlertDialog as AlertDialog
+import com.quern.app.ui.components.isTvHardware
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaGreen
@@ -118,9 +121,11 @@ private fun accountMessageText(message: AccountUiMessage, state: QuernAccountSta
 }
 
 /** Quern account on Shadow Studio's server: QR sign-in on TV, sign up / sign in / sign out / delete. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
     val palette = LocalQuernPalette.current
+    val isTvDevice = isTvHardware(LocalContext.current)
     val state = account.state
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = palette.focusRing,
@@ -161,7 +166,10 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
                 }
             }
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 SelectablePillOption(label = qString(R.string.qa_sync_now), selected = true) {
                     if (!account.sync.running) account.onSyncNow()
                 }
@@ -177,7 +185,7 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
             Spacer(Modifier.height(4.dp))
             Text(qString(R.string.qa_privacy_note), color = LumaTextSecondary, fontSize = 12.sp)
 
-            if (isTv) {
+            if (isTvDevice) {
                 Spacer(Modifier.height(12.dp))
                 TvDeviceLinkQrPanel(account = account)
                 Spacer(Modifier.height(10.dp))
@@ -189,7 +197,7 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
                 }
             }
 
-            if (!isTv) {
+            if (!isTvDevice) {
                 state.awaitingEmailConfirmation?.let { pending ->
                     Spacer(Modifier.height(10.dp))
                     Text(
@@ -219,7 +227,10 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     SelectablePillOption(label = qString(R.string.qa_sign_in), selected = true) {
                         if (!account.busy) account.onSignIn(email, password)
                     }
@@ -231,10 +242,6 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
                             if (!account.busy) account.onResend(email)
                         }
                     }
-                }
-                if (!isTv) {
-                    Spacer(Modifier.height(10.dp))
-                    HelpTextLine(qString(R.string.qa_phone_hint))
                 }
             }
         }

@@ -7,9 +7,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -31,10 +34,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.quern.app.domain.model.CardSizePreset
+import com.quern.app.ui.components.LocalQuernLayout
+import com.quern.app.ui.components.QuernHomeSpacing
+import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.R
 import com.quern.app.domain.model.MediaItem
 import com.quern.app.ui.components.LocalTvRailInset
@@ -50,20 +58,25 @@ fun SearchScreen(
     results: List<MediaItem>,
     isSearching: Boolean,
     isTv: Boolean,
+    cardSize: CardSizePreset = CardSizePreset.STANDARD,
     onQueryChange: (String) -> Unit,
     onSearchSubmit: () -> Unit,
     onItemClick: (MediaItem) -> Unit
 ) {
     val palette = LocalQuernPalette.current
+    val layout = LocalQuernLayout.current
+    val isCompact = layout == QuernLayoutClass.COMPACT
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val railInset = if (isTv) LocalTvRailInset.current else 0.dp
+    val navBarBottom = if (isTv) 0.dp else WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(
-                start = if (isTv) railInset + 22.dp else 16.dp,
-                end = if (isTv) 28.dp else 16.dp,
-                top = 18.dp,
-                bottom = 18.dp
+                start = if (isTv) railInset + 22.dp else 14.dp,
+                end = if (isTv) 28.dp else 14.dp,
+                top = if (isCompact) 14.dp else 18.dp,
+                bottom = if (isTv) 18.dp else 0.dp
             )
     ) {
         Text(
@@ -139,16 +152,23 @@ fun SearchScreen(
                     )
                 }
                 else -> {
+                    val gridMinSize = if (isTv) {
+                        maxOf(150.dp, (cardSize.tvWidthDp + 24).dp)
+                    } else {
+                        (QuernHomeSpacing.posterWidth(cardSize, layout, screenWidthDp) - 6).coerceAtLeast(88).dp
+                    }
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = if (isTv) 150.dp else 118.dp),
-                        contentPadding = PaddingValues(bottom = 88.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                        columns = GridCells.Adaptive(minSize = gridMinSize),
+                        contentPadding = PaddingValues(bottom = if (isTv) 44.dp else navBarBottom + 104.dp),
+                        horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(layout)),
+                        verticalArrangement = Arrangement.spacedBy(if (isCompact) 14.dp else 18.dp)
                     ) {
                         items(results, key = { "${it.origin}_${it.type}_${it.id}" }) { item ->
                             LumaPosterCard(
                                 item = item,
                                 isTv = isTv,
+                                cardSize = cardSize,
+                                fillGridWidth = !isTv,
                                 onClick = { onItemClick(item) }
                             )
                         }

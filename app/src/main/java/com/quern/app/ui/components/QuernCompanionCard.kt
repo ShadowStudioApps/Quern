@@ -110,7 +110,7 @@ fun QuernCompanionSignInCard(
         border = BorderStroke(1.5.dp, palette.border),
         modifier = modifier
     ) {
-        if (compactVertical) {
+        if (compactVertical || LocalQuernLayout.current == QuernLayoutClass.COMPACT) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,

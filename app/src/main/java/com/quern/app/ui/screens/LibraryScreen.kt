@@ -6,11 +6,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,10 +47,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.quern.app.domain.model.CardSizePreset
+import com.quern.app.ui.components.LocalQuernLayout
+import com.quern.app.ui.components.QuernHomeSpacing
+import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.R
 import com.quern.app.data.servers.WebDavEntry
 import com.quern.app.domain.model.DebridCloudItem
@@ -69,6 +80,7 @@ fun LibraryScreen(
     servers: List<MediaServerConfig>,
     webDavEntries: List<WebDavEntry>,
     isTv: Boolean,
+    cardSize: CardSizePreset = CardSizePreset.STANDARD,
     onItemClick: (MediaItem) -> Unit,
     onRefreshCloud: () -> Unit,
     onPlayCloudItem: (DebridCloudItem) -> Unit,
@@ -76,7 +88,12 @@ fun LibraryScreen(
     onPlayWebDavEntry: (MediaServerConfig, WebDavEntry) -> Unit
 ) {
     val palette = LocalQuernPalette.current
+    val layout = LocalQuernLayout.current
+    val isCompact = layout == QuernLayoutClass.COMPACT
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val railInset = if (isTv) LocalTvRailInset.current else 0.dp
+    val navBarBottom = if (isTv) 0.dp else WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val listBottomPadding = if (isTv) 44.dp else navBarBottom + 104.dp
     var selectedTab by remember { mutableIntStateOf(0) }
     val webDavServers = remember(servers) { servers.filter { it.type == MediaServerType.WEBDAV } }
     var activeWebDavServer by remember(webDavServers) { mutableStateOf(webDavServers.firstOrNull()) }
@@ -93,10 +110,10 @@ fun LibraryScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(
-                start = if (isTv) railInset + 22.dp else 16.dp,
-                end = if (isTv) 28.dp else 16.dp,
-                top = 18.dp,
-                bottom = 18.dp
+                start = if (isTv) railInset + 22.dp else 14.dp,
+                end = if (isTv) 28.dp else 14.dp,
+                top = if (isCompact) 14.dp else 18.dp,
+                bottom = if (isTv) 18.dp else 0.dp
             )
     ) {
         Row(
@@ -119,7 +136,7 @@ fun LibraryScreen(
 
         Spacer(Modifier.height(10.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(modifier = if (LocalQuernLayout.current == QuernLayoutClass.COMPACT) Modifier.horizontalScroll(rememberScrollState()) else Modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             listOf(
                 qString(R.string.library_tab_favorites, favorites.size),
                 qString(R.string.library_tab_debrid),
@@ -139,19 +156,24 @@ fun LibraryScreen(
                         if (focused) palette.focusRing else if (selected) Color.White else palette.border
                     ),
                     modifier = Modifier
+                        .then(if (isCompact) Modifier.heightIn(min = 48.dp) else Modifier)
                         .clip(RoundedCornerShape(999.dp))
                         .tvClickable(
                             onFocusChangedState = { focused = it },
                             onClick = { selectedTab = idx }
                         )
                 ) {
-                    Text(
-                        text = label,
-                        color = if (focused) palette.onAccent else if (selected) Color.Black else LumaTextPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
-                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = if (isCompact) 12.dp else 9.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (focused) palette.onAccent else if (selected) Color.Black else LumaTextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -165,14 +187,25 @@ fun LibraryScreen(
                         Text(qString(R.string.library_empty_favorites), color = LumaTextSecondary)
                     }
                 } else {
+                    val gridMinSize = if (isTv) {
+                        maxOf(150.dp, (cardSize.tvWidthDp + 24).dp)
+                    } else {
+                        (QuernHomeSpacing.posterWidth(cardSize, layout, screenWidthDp) - 6).coerceAtLeast(88).dp
+                    }
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = if (isTv) 150.dp else 118.dp),
-                        contentPadding = PaddingValues(bottom = 88.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                        columns = GridCells.Adaptive(minSize = gridMinSize),
+                        contentPadding = PaddingValues(bottom = listBottomPadding),
+                        horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(layout)),
+                        verticalArrangement = Arrangement.spacedBy(if (isCompact) 14.dp else 18.dp)
                     ) {
                         items(favorites, key = { "${it.origin}_${it.type}_${it.id}" }) { item ->
-                            LumaPosterCard(item = item, isTv = isTv, onClick = { onItemClick(item) })
+                            LumaPosterCard(
+                                item = item,
+                                isTv = isTv,
+                                cardSize = cardSize,
+                                fillGridWidth = !isTv,
+                                onClick = { onItemClick(item) }
+                            )
                         }
                     }
                 }
@@ -192,7 +225,7 @@ fun LibraryScreen(
                     }
                 } else {
                     LazyColumn(
-                        contentPadding = PaddingValues(bottom = 88.dp),
+                        contentPadding = PaddingValues(bottom = listBottomPadding),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(cloudItems, key = { "${it.service}_${it.id}" }) { cloudItem ->

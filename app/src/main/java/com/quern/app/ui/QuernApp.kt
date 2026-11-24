@@ -30,7 +30,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -101,7 +104,9 @@ import com.quern.app.ui.components.DeviceLinkApproveDialog
 import com.quern.app.ui.components.LocalContentFocusMemory
 import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.QuernBrandMark
-import com.quern.app.ui.components.rememberIsTvMode
+import com.quern.app.ui.components.currentQuernLayout
+import com.quern.app.ui.components.LocalQuernLayout
+import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.screens.DetailScreen
 import com.quern.app.ui.screens.HomeScreen
@@ -159,7 +164,8 @@ fun QuernApp(
         else Density(density = rootDensity.density * screenScale, fontScale = rootDensity.fontScale)
     }
 
-    CompositionLocalProvider(LocalDensity provides scaledRootDensity) {
+    val layoutClass = currentQuernLayout(settings.uiModeOverride)
+    CompositionLocalProvider(LocalDensity provides scaledRootDensity, LocalQuernLayout provides layoutClass) {
         QuernTheme(
             themePreset = settings.theme,
             amoledPureBlack = settings.amoledPureBlack,
@@ -169,7 +175,7 @@ fun QuernApp(
             fontFamilyChoice = settings.fontChoice.fontFamily
         ) {
         val context = LocalContext.current
-        val isTv = rememberIsTvMode(settings.uiModeOverride)
+        val isTv = layoutClass == QuernLayoutClass.TV
         val palette = LocalQuernPalette.current
 
         val activePlayback by viewModel.activePlayback.collectAsState()
@@ -388,6 +394,7 @@ fun QuernApp(
                                 results = searchResults,
                                 isSearching = isSearching,
                                 isTv = isTv,
+                                cardSize = settings.cardSize,
                                 onQueryChange = { viewModel.updateSearchQuery(it) },
                                 onSearchSubmit = { viewModel.performSearch() },
                                 onItemClick = openItemDetail
@@ -407,6 +414,7 @@ fun QuernApp(
                                 servers = mediaServers,
                                 webDavEntries = webDavEntries,
                                 isTv = isTv,
+                                cardSize = settings.cardSize,
                                 onItemClick = openItemDetail,
                                 onRefreshCloud = { viewModel.refreshCloudLibrary() },
                                 onPlayCloudItem = { viewModel.playCloudItem(it) },
@@ -661,6 +669,7 @@ fun QuernApp(
         } else {
             Scaffold(
                 containerColor = Color.Transparent,
+                contentWindowInsets = WindowInsets.statusBars,
                 snackbarHost = { SnackbarHost(snackbarHostState) }
             ) { innerPadding ->
                 Box(
@@ -821,13 +830,14 @@ fun QuernFloatingPhoneDock(
         shape = RoundedCornerShape(999.dp),
         shadowElevation = 16.dp,
         modifier = modifier
+            .widthIn(max = 520.dp)
             .fillMaxWidth()
             .glossySheen(palette.isGlossy, cornerRadius = 999.dp, intensity = 0.85f)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -841,10 +851,11 @@ fun QuernFloatingPhoneDock(
                 )
                 Box(
                     modifier = Modifier
+                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                         .clip(RoundedCornerShape(999.dp))
                         .background(bg)
                         .clickable { onSelectTab(tab) }
-                        .padding(horizontal = if (selected) 16.dp else 12.dp, vertical = 9.dp),
+                        .padding(horizontal = if (selected) 16.dp else 12.dp, vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(

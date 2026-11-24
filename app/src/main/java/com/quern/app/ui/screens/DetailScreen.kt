@@ -19,10 +19,15 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -75,6 +80,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Precision
+import com.quern.app.ui.components.LocalQuernLayout
+import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.R
 import com.quern.app.domain.model.Episode
 import com.quern.app.domain.model.MediaItem
@@ -351,6 +358,7 @@ fun DetailScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(Color(0xEB080A0F))
+                                .navigationBarsPadding()
                                 .padding(horizontal = 14.dp, vertical = 14.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -401,15 +409,17 @@ fun DetailScreen(
                         )
                     }
 
+                    val isCompactDetail = LocalQuernLayout.current == QuernLayoutClass.COMPACT
+                    val navBarBottom = if (isTv) 0.dp else WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
-                            start = if (isTv) 36.dp else 18.dp,
-                            end = if (isTv) 36.dp else 18.dp,
-                            top = if (isTv) 22.dp else 18.dp,
-                            bottom = 72.dp
+                            start = if (isTv) 36.dp else if (isCompactDetail) 14.dp else 20.dp,
+                            end = if (isTv) 36.dp else if (isCompactDetail) 14.dp else 20.dp,
+                            top = if (isTv) 22.dp else 14.dp,
+                            bottom = if (isTv) 72.dp else navBarBottom + 36.dp
                         ),
-                        verticalArrangement = Arrangement.spacedBy(22.dp)
+                        verticalArrangement = Arrangement.spacedBy(if (isCompactDetail) 18.dp else 22.dp)
                     ) {
                         // Top Navigation Bar (Back + Favorite)
                         item(key = "top_nav") {
@@ -513,8 +523,8 @@ fun DetailScreen(
                                         shape = RoundedCornerShape(999.dp),
                                         border = if (playFocused) BorderStroke(2.5.dp, palette.focusRing) else null,
                                         modifier = Modifier
-                                            .width(if (isTv) 268.dp else 220.dp)
-                                            .height(46.dp)
+                                            .then(if (LocalQuernLayout.current == QuernLayoutClass.COMPACT) Modifier.weight(1f) else Modifier.width(if (isTv) 268.dp else 220.dp))
+                                            .height(if (LocalQuernLayout.current == QuernLayoutClass.COMPACT) 48.dp else 46.dp)
                                             .focusRequester(playCtaFocus)
                                             .clip(RoundedCornerShape(999.dp))
                                             .tvClickable(
@@ -1068,7 +1078,7 @@ private fun DetailCircleButton(
         shape = CircleShape,
         border = BorderStroke(if (focused) 2.5.dp else 1.dp, if (focused) palette.focusRing else LumaGlassBorder),
         modifier = Modifier
-            .size(42.dp)
+            .size(if (LocalQuernLayout.current == QuernLayoutClass.COMPACT) 48.dp else 42.dp)
             .clip(CircleShape)
             .tvClickable(
                 onFocusChangedState = { focused = it },
@@ -1102,24 +1112,33 @@ private fun DetailFilterPill(
     }
     val fg = if (focused || selected) palette.onAccent else Color.White
 
+    val isCompact = LocalQuernLayout.current == QuernLayoutClass.COMPACT
     Surface(
         color = bg,
         shape = RoundedCornerShape(999.dp),
         border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
         modifier = modifier
+            .then(if (isCompact) Modifier.heightIn(min = 48.dp) else Modifier)
             .clip(RoundedCornerShape(999.dp))
             .tvClickable(
                 onFocusChangedState = { focused = it },
                 onClick = onClick
             )
     ) {
-        Text(
-            text = label,
-            color = fg,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
-        )
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(
+                horizontal = if (isCompact) 16.dp else 14.dp,
+                vertical = if (isCompact) 12.dp else 7.dp
+            )
+        ) {
+            Text(
+                text = label,
+                color = fg,
+                fontSize = if (isCompact) 13.sp else 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
