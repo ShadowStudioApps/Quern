@@ -95,6 +95,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -386,6 +391,15 @@ fun QuernPlayerScreen(
     val playPauseFocusRequester = remember { FocusRequester() }
     val skipIntroFocusRequester = remember { FocusRequester() }
     val syncBarFocusRequester = remember { FocusRequester() }
+    val seekBarFocusRequester = remember { FocusRequester() }
+    val speedFocusRequester = remember { FocusRequester() }
+    val subtitlesFocusRequester = remember { FocusRequester() }
+    val audioFocusRequester = remember { FocusRequester() }
+    val engineFocusRequester = remember { FocusRequester() }
+    // HUD button that opened the current dialog; focus goes back to it when the dialog closes.
+    var dialogReturnFocus by remember { mutableStateOf<FocusRequester?>(null) }
+    // Bumped on every remote key press while the HUD is visible so auto-hide restarts.
+    var hudInteraction by remember { mutableIntStateOf(0) }
 
     val buildExoMediaItem = remember(request.stream.url, request.stream.subtitles, request.externalSubtitles) {
         {
@@ -522,6 +536,15 @@ fun QuernPlayerScreen(
         }
     }
 
+    // Keep the TV/phone screen awake while a video is playing or buffering, so the system
+    // screen saver never starts mid-playback. Paused playback lets the screen sleep normally.
+    val hostView = LocalView.current
+    val keepAwake = isPlaying || isBuffering
+    DisposableEffect(hostView, keepAwake) {
+        hostView.keepScreenOn = keepAwake
+        onDispose { hostView.keepScreenOn = false }
+    }
+
     // Pause playback cleanly when app moves to background (Home button on TV / app switch on phone)
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = LifecycleEventObserver { _, event ->
@@ -630,7 +653,7 @@ fun QuernPlayerScreen(
     }
 
     // Auto-hide controls after inactivity (pause timer while dialogs or subtitle sync bar are open)
-    LaunchedEffect(controlsVisible, isPlaying, anyModalOpen) {
+    LaunchedEffect(controlsVisible, isPlaying, anyModalOpen, hudInteraction) {
         if (controlsVisible && isPlaying && !anyModalOpen) {
             delay(6000L)
             controlsVisible = false
@@ -651,6 +674,20 @@ fun QuernPlayerScreen(
         }
     }
 
+    // A closed dialog leaves Compose with no focused node, so the remote would stop reaching
+    // the HUD. Put focus back on the button that opened the dialog (or Play/Pause).
+    LaunchedEffect(anyModalOpen) {
+        if (anyModalOpen) return@LaunchedEffect
+        delay(80L)
+        when {
+            controlsVisible -> runCatching {
+                (dialogReturnFocus ?: playPauseFocusRequester).requestFocus()
+            }.onFailure { runCatching { playPauseFocusRequester.requestFocus() } }
+            !showSkipIntro -> runCatching { rootFocusRequester.requestFocus() }
+        }
+        dialogReturnFocus = null
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -660,6 +697,7 @@ fun QuernPlayerScreen(
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val code = keyEvent.nativeKeyEvent.keyCode
+                if (controlsVisible) hudInteraction++
 
                 // Dedicated media keys ALWAYS work
                 when (code) {
@@ -1157,25 +1195,62 @@ fun QuernPlayerScreen(
                         )
                     }
 
-                    // Sleek Thin Rounded Progress Bar
+                    // Progress bar. Focusable on TV: UP from the buttons lands here, LEFT/RIGHT
+                    // seek 10 s (30 s while the key is held), OK toggles play/pause.
                     val safeDuration = durationMs.coerceAtLeast(1L)
-                    Slider(
-                        value = (currentPosMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f),
-                        onValueChange = { fraction ->
-                            val target = (fraction * safeDuration).toLong()
-                            currentPosMs = target
-                            exoPlayer.seekTo(target)
-                        },
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFF3B82F6),
-                            activeTrackColor = Color(0xFF3B82F6),
-                            inactiveTrackColor = Color.White.copy(alpha = 0.24f)
-                        ),
+                    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+                    var seekBarFocused by remember { mutableStateOf(false) }
+                    Box(
+                        contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(22.dp)
-                            .focusProperties { canFocus = false }
-                    )
+                            .focusRequester(seekBarFocusRequester)
+                            .onFocusChanged { seekBarFocused = it.isFocused }
+                            .onKeyEvent { ev ->
+                                if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                val native = ev.nativeKeyEvent
+                                val step = if (native.repeatCount >= 6) 30_000L else 10_000L
+                                // The slider is mirrored in RTL, so follow its visual direction.
+                                val forwardKey = if (isRtl) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
+                                val backwardKey = if (isRtl) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
+                                when (native.keyCode) {
+                                    forwardKey, backwardKey -> {
+                                        val delta = if (native.keyCode == forwardKey) step else -step
+                                        val maxPos = durationMs.takeIf { it > 0L } ?: Long.MAX_VALUE
+                                        val target = (exoPlayer.currentPosition + delta).coerceIn(0L, maxPos)
+                                        exoPlayer.seekTo(target)
+                                        currentPosMs = target
+                                        seekToast = if (delta > 0) "+${step / 1000}s" else "-${step / 1000}s"
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            }
+                            .focusable()
+                    ) {
+                        Slider(
+                            value = (currentPosMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f),
+                            onValueChange = { fraction ->
+                                val target = (fraction * safeDuration).toLong()
+                                currentPosMs = target
+                                exoPlayer.seekTo(target)
+                            },
+                            colors = SliderDefaults.colors(
+                                thumbColor = if (seekBarFocused) Color.White else Color(0xFF3B82F6),
+                                activeTrackColor = Color(0xFF3B82F6),
+                                inactiveTrackColor = Color.White.copy(alpha = if (seekBarFocused) 0.40f else 0.24f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(22.dp)
+                                .focusProperties { canFocus = false }
+                        )
+                    }
 
                     // Bottom-Left Row of 7 Clean Circular Icon Buttons (EXACT match to Screenshot #3!)
                     Row(
@@ -1217,28 +1292,44 @@ fun QuernPlayerScreen(
                         PlayerMinimalIconButton(
                             icon = Icons.Default.Speed,
                             contentDescription = "Playback Speed",
-                            onClick = { showSpeedDialog = true }
+                            modifier = Modifier.focusRequester(speedFocusRequester),
+                            onClick = {
+                                dialogReturnFocus = speedFocusRequester
+                                showSpeedDialog = true
+                            }
                         )
 
                         // 4. Subtitles (CC)
                         PlayerMinimalIconButton(
                             icon = Icons.Default.ClosedCaption,
                             contentDescription = "Subtitles",
-                            onClick = { showSubtitleDialog = true }
+                            modifier = Modifier.focusRequester(subtitlesFocusRequester),
+                            onClick = {
+                                dialogReturnFocus = subtitlesFocusRequester
+                                showSubtitleDialog = true
+                            }
                         )
 
                         // 5. Audio Tracks (Speaker)
                         PlayerMinimalIconButton(
                             icon = Icons.Default.Speaker,
                             contentDescription = "Audio Tracks",
-                            onClick = { showAudioDialog = true }
+                            modifier = Modifier.focusRequester(audioFocusRequester),
+                            onClick = {
+                                dialogReturnFocus = audioFocusRequester
+                                showAudioDialog = true
+                            }
                         )
 
                         // 6. Cloud / Sources / mpv Switch
                         PlayerMinimalIconButton(
                             icon = Icons.Default.CloudQueue,
                             contentDescription = "Switch Player / Sources",
-                            onClick = { showEngineDialog = true }
+                            modifier = Modifier.focusRequester(engineFocusRequester),
+                            onClick = {
+                                dialogReturnFocus = engineFocusRequester
+                                showEngineDialog = true
+                            }
                         )
 
                         // 7. Subtitle Sync & Info (i)
@@ -1473,6 +1564,7 @@ private fun PlayerMinimalIconButton(
     icon: ImageVector,
     contentDescription: String,
     highlighted: Boolean = false,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val palette = LocalQuernPalette.current
@@ -1487,7 +1579,7 @@ private fun PlayerMinimalIconButton(
         color = bg,
         shape = CircleShape,
         border = if (focused) BorderStroke(2.dp, Color.White) else null,
-        modifier = Modifier
+        modifier = modifier
             .size(40.dp)
             .clip(CircleShape)
             .tvClickable(
