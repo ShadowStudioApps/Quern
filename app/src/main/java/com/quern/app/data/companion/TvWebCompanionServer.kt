@@ -131,11 +131,9 @@ class TvWebCompanionServer(
     fun start(scope: CoroutineScope) {
         synchronized(authLock) {
             if (serverJob?.isActive == true) return
-            if (_sessionState.value.isExpired()) {
-                _sessionState.value = createFreshSession(isRunning = true)
-            } else {
-                _sessionState.value = _sessionState.value.copy(isServerRunning = true)
-            }
+            // Always start a fresh 10-minute session when the server transitions from stopped
+            // to running, so opening the QR card minutes after launch/close doesn't show a stale timer.
+            _sessionState.value = createFreshSession(isRunning = true)
         }
         serverJob = scope.launch(Dispatchers.IO) {
             runCatching {
