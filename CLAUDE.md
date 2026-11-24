@@ -63,7 +63,7 @@ Latest baseline (after the glass theme + floating rail, Shadow profile, same pat
 
 ## How key pieces work (don't regress)
 
-- **Rail focus** (`ui/QuernApp.kt`, `QuernTvNavigationRail`): one persistent `Row` per tab, never `if (expanded) Row else Box`. The `Column` uses `focusProperties { enter = selected tab's requester }` + `focusGroup()`.
+- **Rail focus** (`ui/QuernApp.kt`, `QuernTvNavigationRail`): one persistent `Row` per tab, never `if (expanded) Row else Box`. The outer rail `Box` wraps both the tab column and the bottom profile button in a single `focusGroup()` with `focusProperties { enter = selected tab's requester }`, so LEFT from any content row (including lower rows) always enters on the selected tab; the profile button is reached via DOWN from the last tab (and UP returns to it). Pressing BACK from another tab switches to Home and re-syncs rail focus to the Home tab (`focusSyncSignal`).
 - **Floating rail:** the rail is drawn over full-bleed content (no solid column). Screens pad their TV content by `LocalTvRailInset`. The content focus group itself starts at `railInset` (`padding(start = railInset)` before `restoreLastContentFocus`) and a `layout` shifts the content back to x=0. If the group starts at x=0, RIGHT from the rail never enters the content. Don't set the rail's `focusProperties { right = … }` to a content `FocusRequester`: it fails on a fresh launch.
 - **Backgrounds:** `SoftGlowBackground` (quarter/eighth-size bitmap, drawn once) sits behind every page; pages and the Scaffold are transparent. Never animate it or add `Modifier.blur` (measured 79–99% janky).
 - **RIGHT back to the same item:** `RememberLastFocusedNode` inside `tvClickable` (`ui/components/AdaptiveComponents.kt`) records the last focused item under `LocalContentFocusMemory`. The content area uses `restoreLastContentFocus`. Don't use `focusRestorer` here: in UI 1.7.6 it focuses the LazyColumn container itself, so focus becomes invisible.
@@ -78,11 +78,9 @@ Latest baseline (after the glass theme + floating rail, Shadow profile, same pat
 
 - Full JSON backup export (history, favorites, servers, profiles, optional keys) so users can move devices without losing data.
 - French, Spanish, German, Turkish, Russian and Portuguese lack the new settings strings (only `values` and `values-ar` exist).
-- Cosmetic: the "QUERN" logo wraps one letter per line while the rail animates open (use `maxLines = 1, softWrap = false`).
-- DOWN from "View Details" skips Continue Watching (the first-row requester is bound to the first catalog row).
-- After BACK from a tab, rail focus can stay on that tab while Home is shown.
 - All theme presets now have a transparent `borderTint` (design choice from the settings redesign).
 - v1.7.0 is the first public release. The next release needs a `versionCode` bump (currently 15).
+- Fixed in PART 1: "QUERN" logo wrap (`maxLines = 1, softWrap = false`), race-free `firstRowFocusRequester` targeting Continue Watching (or first catalog row) on DOWN from "View Details", rail focus syncing back to Home on BACK from another tab, LEFT from lower rows entering the rail on the selected tab instead of the profile button, and removal of the legacy BYO Supabase sign-in/push/pull path from `CloudSyncManager` (keeping Stremio import, JSON/backup import, and `QUERN1:` portable sync code).
 
 ## Step reports
 

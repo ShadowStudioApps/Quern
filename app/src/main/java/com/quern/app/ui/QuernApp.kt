@@ -50,9 +50,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -146,6 +148,7 @@ fun QuernApp(
         val toastMessage by viewModel.toastMessage.collectAsState()
 
         var currentTab by remember { mutableStateOf(QuernTab.HOME) }
+        var railFocusSyncSignal by remember { mutableIntStateOf(0) }
         var settingsInitialGroup by remember { mutableStateOf(SettingsGroup.ADDONS) }
         var showingDetail by remember { mutableStateOf(false) }
         // "Who's watching?" at launch when there is more than one profile; also opened from the rail.
@@ -158,6 +161,7 @@ fun QuernApp(
         }
         BackHandler(enabled = !showingDetail && currentTab != QuernTab.HOME) {
             currentTab = QuernTab.HOME
+            railFocusSyncSignal += 1
         }
 
         LaunchedEffect(toastMessage) {
@@ -547,6 +551,7 @@ fun QuernApp(
                                     autoHideCollapsed = autoHide,
                                     activeProfile = settings.activeProfile,
                                     onOpenProfiles = { profilePickerOpen = true },
+                                    focusSyncSignal = railFocusSyncSignal,
                                     onRailFocusChanged = { collapsedRailFocused = it },
                                     onSelectTab = { currentTab = it }
                                 )
@@ -772,12 +777,14 @@ fun QuernTvNavigationRail(
     autoHideCollapsed: Boolean = false,
     activeProfile: UserProfile? = null,
     onOpenProfiles: (() -> Unit)? = null,
+    focusSyncSignal: Int = 0,
     onRailFocusChanged: ((Boolean) -> Unit)? = null,
     onSelectTab: (QuernTab) -> Unit
 ) {
     val palette = LocalQuernPalette.current
     // One requester per tab so focus entering the rail lands on the selected tab, not the geometrically nearest one
     val tabFocusRequesters = remember { QuernTab.entries.associateWith { FocusRequester() } }
+    val profileFocusRequester = remember { FocusRequester() }
     val firstItemFocusRequester = tabFocusRequesters.getValue(QuernTab.HOME)
     val latestTab by rememberUpdatedState(currentTab)
     var railHasFocus by remember { mutableStateOf(false) }
@@ -799,6 +806,21 @@ fun QuernTvNavigationRail(
     LaunchedEffect(Unit) {
         runCatching { firstItemFocusRequester.requestFocus() }
     }
+
+    // Keep rail focus aligned with the active tab when switching tabs programmatically (e.g. BACK to Home).
+    LaunchedEffect(currentTab) {
+        if (railHasFocus) {
+            runCatching { tabFocusRequesters.getValue(currentTab).requestFocus() }
+        }
+    }
+    LaunchedEffect(focusSyncSignal) {
+        if (focusSyncSignal > 0) {
+            delay(50L)
+            runCatching { tabFocusRequesters.getValue(latestTab).requestFocus() }
+        }
+    }
+
+    val hasProfileButton = activeProfile != null && onOpenProfiles != null
 
     Box(
         modifier = Modifier
@@ -833,6 +855,10 @@ fun QuernTvNavigationRail(
                 )
                 onDrawBehind { drawRect(veil) }
             }
+            // Single focusGroup spanning both the tab column and the bottom profile button so LEFT
+            // from any content row (even lower rows) always enters on the selected tab, never the profile button.
+            .focusProperties { enter = { tabFocusRequesters.getValue(latestTab) } }
+            .focusGroup()
             .onFocusChanged {
                 railHasFocus = it.hasFocus
                 onRailFocusChanged?.invoke(it.hasFocus)
@@ -865,12 +891,11 @@ fun QuernTvNavigationRail(
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
-                .fillMaxWidth()
-                .focusProperties { enter = { tabFocusRequesters.getValue(latestTab) } }
-                .focusGroup(),
+                .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             horizontalAlignment = Alignment.Start
         ) {
+            val lastTab = QuernTab.entries.last()
             QuernTab.entries.forEach { tab ->
                 var focused by remember { mutableStateOf(false) }
                 val selected = currentTab == tab
@@ -909,6 +934,11 @@ fun QuernTvNavigationRail(
                             scaleY = s
                         }
                         .focusRequester(tabFocusRequesters.getValue(tab))
+                        .then(
+                            if (tab == lastTab && hasProfileButton) {
+                                Modifier.focusProperties { down = profileFocusRequester }
+                            } else Modifier
+                        )
                         .clip(RailItemShape)
                         .drawBehind { drawRect(itemBgState.value) }
                         .glossySheen(palette.isGlossy && (focused || selected), cornerRadius = 14.dp, intensity = if (focused) 1.15f else 0.7f)
@@ -945,7 +975,7 @@ fun QuernTvNavigationRail(
             }
         }
 
-        // Active profile, pinned bottom-left: one press opens "Who's watching?".
+        // Active profile, pinned bottom-left: reached with DOWN from the last tab; one press opens "Who's watching?".
         if (activeProfile != null && onOpenProfiles != null) {
             var profileFocused by remember { mutableStateOf(false) }
             Row(
@@ -953,6 +983,8 @@ fun QuernTvNavigationRail(
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
                     .height(48.dp)
+                    .focusRequester(profileFocusRequester)
+                    .focusProperties { up = tabFocusRequesters.getValue(QuernTab.entries.last()) }
                     .clip(RailItemShape)
                     .drawBehind { if (profileFocused) drawRect(palette.accent) }
                     .then(

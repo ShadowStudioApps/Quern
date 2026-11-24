@@ -131,8 +131,19 @@ fun HomeScreen(
         { item: MediaItem, idx: Int -> pendingHeroFocus.value = item to idx }
     }
     val firstRowFocusRequester = remember { FocusRequester() }
-    var isFirstRowItemAttached by remember { mutableStateOf(false) }
-    val onFirstRowAttachedChanged = remember { { attached: Boolean -> isFirstRowItemAttached = attached } }
+    // Track which row ("cw" vs "cat") currently owns firstRowFocusRequester so a disposing row
+    // can never clear the attached state of the row replacing it.
+    var attachedFirstRowTag by remember { mutableStateOf<String?>(null) }
+    val onCwFirstAttachedChanged = remember {
+        { attached: Boolean ->
+            attachedFirstRowTag = if (attached) "cw" else if (attachedFirstRowTag == "cw") null else attachedFirstRowTag
+        }
+    }
+    val onCatFirstAttachedChanged = remember {
+        { attached: Boolean ->
+            attachedFirstRowTag = if (attached) "cat" else if (attachedFirstRowTag == "cat") null else attachedFirstRowTag
+        }
+    }
     val todayYmd = remember {
         val cal = Calendar.getInstance()
         cal.get(Calendar.YEAR) * 10_000 + (cal.get(Calendar.MONTH) + 1) * 100 + cal.get(Calendar.DAY_OF_MONTH)
@@ -209,6 +220,7 @@ fun HomeScreen(
 
     val hasContinueWatching = sortedContinueWatching.isNotEmpty()
     val hasAnyContentRow = hasContinueWatching || filteredRows.isNotEmpty()
+    val expectedFirstRowTag = if (hasContinueWatching) "cw" else "cat"
     val firstRowAnchorKey = if (hasContinueWatching) {
         "cw_${sortedContinueWatching.firstOrNull()?.contentId}"
     } else {
@@ -216,7 +228,7 @@ fun HomeScreen(
     }
     LaunchedEffect(firstRowAnchorKey, hasAnyContentRow) {
         if (!hasAnyContentRow) {
-            isFirstRowItemAttached = false
+            attachedFirstRowTag = null
         }
     }
 
@@ -257,14 +269,13 @@ fun HomeScreen(
                     onCategorySelected = onSelectCategory,
                     activeServiceBadge = activeServiceBadge,
                     firstRowFocusRequester = if (hasAnyContentRow) firstRowFocusRequester else null,
-                    isFirstRowAttached = { isFirstRowItemAttached }
+                    isFirstRowAttached = { attachedFirstRowTag == expectedFirstRowTag }
                 )
 
                 // When Continue Watching appears (e.g. after switching to a profile that has history),
                 // LazyColumn keeps the current first row anchored and inserts the new row above the
                 // viewport. Scroll back up so it's actually visible when the user is at the top.
                 val tvListState = rememberLazyListState()
-                val hasContinueWatching = sortedContinueWatching.isNotEmpty()
                 LaunchedEffect(hasContinueWatching) {
                     if (hasContinueWatching && tvListState.firstVisibleItemIndex <= 1) {
                         tvListState.scrollToItem(0)
@@ -286,7 +297,7 @@ fun HomeScreen(
                                 isTv = true,
                                 onClick = onContinueClick,
                                 firstItemFocusRequester = firstRowFocusRequester,
-                                onFirstItemAttachedChanged = onFirstRowAttachedChanged
+                                onFirstItemAttachedChanged = onCwFirstAttachedChanged
                             )
                         }
                     }
@@ -303,7 +314,7 @@ fun HomeScreen(
                             onItemClick = onItemClick,
                             onItemFocused = onPosterFocused,
                             firstItemFocusRequester = if (attachFirstRow) firstRowFocusRequester else null,
-                            onFirstItemAttachedChanged = if (attachFirstRow) onFirstRowAttachedChanged else null
+                            onFirstItemAttachedChanged = if (attachFirstRow) onCatFirstAttachedChanged else null
                         )
                     }
                 }

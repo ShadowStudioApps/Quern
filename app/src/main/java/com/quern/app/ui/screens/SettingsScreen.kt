@@ -373,7 +373,7 @@ fun SettingsScreen(
         SettingsSearchEntry(qString(R.string.services_debrid_title), "debrid torbox real-debrid alldebrid premiumize ديبريد", SettingsGroup.SERVICES, SettingsSubPage.INTEGRATIONS),
         SettingsSearchEntry(qString(R.string.services_media_servers_title), "jellyfin emby plex webdav server خوادم", SettingsGroup.SERVICES, SettingsSubPage.MEDIA_SERVERS),
         SettingsSearchEntry(qString(R.string.accounts_tracking_title), "tmdb trakt metadata tracking تتبع", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.TRACKING),
-        SettingsSearchEntry(qString(R.string.accounts_cloud_title), "cloud sync supabase stremio nuvio backup مزامنة حساب", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT),
+        SettingsSearchEntry(qString(R.string.accounts_cloud_title), "cloud sync account stremio backup مزامنة حساب", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT),
         SettingsSearchEntry(qString(R.string.settings_export_import_title), "export import backup code json تصدير استيراد نسخ احتياطي", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT),
         SettingsSearchEntry(qString(R.string.accounts_profiles_title), "profile pin lock user بروفايل ملفات", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.PROFILES),
         SettingsSearchEntry(qString(R.string.settings_presets_title), "preset tv phone low end quick bundle إعدادات جاهزة", SettingsGroup.SYSTEM),

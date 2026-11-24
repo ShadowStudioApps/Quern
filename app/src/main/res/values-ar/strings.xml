@@ -232,13 +232,6 @@
     <string name="account_nuvio_dialog_desc">الصق نسخة JSON احتياطية أو رابط النسخة أو روابط الإضافات (أسهل عبر الحاسوب/الهاتف على %1$s/#import).</string>
     <string name="account_nuvio_field">بيانات JSON أو رابط النسخة أو روابط الإضافات</string>
     <string name="account_import_btn">استيراد</string>
-    <string name="account_sync_active">المزامنة متعددة الشاشات مفعّلة • %1$s</string>
-    <string name="account_ready">جاهز</string>
-    <string name="account_email_label">البريد الإلكتروني</string>
-    <string name="account_password_label">كلمة المرور (6 أحرف فأكثر)</string>
-    <string name="account_custom_server_label">سيرفر مزامنة خاص (Supabase URL &amp; Key)</string>
-    <string name="account_supabase_url">رابط سيرفر المزامنة / Supabase</string>
-    <string name="account_supabase_key">مفتاح المزامنة / Anon Key</string>
 
     <string name="profile_unlock_title">فتح قفل %1$s</string>
     <string name="profile_unlock_subtitle">أدخل الرمز السري المكون من 4 أرقام</string>

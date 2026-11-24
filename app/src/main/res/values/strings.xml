@@ -232,13 +232,6 @@
     <string name="account_nuvio_dialog_desc">Paste an exported JSON backup, backup URL, or addon manifest links (easier from PC/Phone at %1$s/#import).</string>
     <string name="account_nuvio_field">Backup JSON, URL, or Manifest Links</string>
     <string name="account_import_btn">Import</string>
-    <string name="account_sync_active">Multi-Screen Sync Active • %1$s</string>
-    <string name="account_ready">Ready</string>
-    <string name="account_email_label">Email Address</string>
-    <string name="account_password_label">Password (6+ chars)</string>
-    <string name="account_custom_server_label">Custom Sync Server (Supabase URL &amp; Key)</string>
-    <string name="account_supabase_url">Sync Server / Supabase URL</string>
-    <string name="account_supabase_key">Sync API / Anon Key</string>
 
     <string name="profile_unlock_title">Unlock %1$s</string>
     <string name="profile_unlock_subtitle">Enter 4-digit PIN code</string>

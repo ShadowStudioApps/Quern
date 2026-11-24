@@ -9,9 +9,6 @@ import com.quern.app.domain.model.MediaType
 import com.quern.app.domain.model.SourceOrigin
 import com.quern.app.domain.model.WatchProgress
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -44,22 +41,9 @@ data class QuernSyncBundle(
     val navigationStyle: String = "SIDEBAR_LEFT"
 )
 
-data class CloudAccountState(
-    val serverUrl: String = "",
-    val anonKey: String = "",
-    val email: String = "",
-    val userId: String = "",
-    val accessToken: String = "",
-    val lastSyncedAt: String? = null
-) {
-    val isSignedIn: Boolean get() = accessToken.isNotBlank() && email.isNotBlank()
-}
-
 /**
- * Open-source Multi-Screen Cloud Sync Account Engine.
- * - Supports any self-hosted / free Supabase backend (Email + Password Sign Up / Sign In + Cloud Sync)
- *   so GitHub users can sync Addons, Settings, and Watch Progress across multiple Android TVs & Phones.
- * - Also provides zero-server Portable Sync Code export/import (via Phone Web Companion or copy/paste).
+ * Portable Sync Code (`QUERN1:`), Stremio account importer, and JSON/backup importer.
+ * Multi-device account sync lives in [QuernAccount] / [QuernSyncEngine].
  */
 class CloudSyncManager(
     private val httpClient: OkHttpClient,
@@ -68,89 +52,9 @@ class CloudSyncManager(
     private val repository: QuernRepository,
     private val settingsStore: SettingsStore
 ) {
-    private val _accountState = MutableStateFlow(loadState())
-    val accountState: StateFlow<CloudAccountState> = _accountState.asStateFlow()
-
-    fun saveBackendConfig(serverUrl: String, anonKey: String) {
-        val cleanUrl = serverUrl.trim().trimEnd('/')
-        vault.putString(KEY_SERVER_URL, cleanUrl)
-        vault.putString(KEY_ANON_KEY, anonKey.trim())
-        _accountState.value = loadState()
-    }
-
-    suspend fun signUp(serverUrl: String, anonKey: String, email: String, password: String): Result<String> =
-        authenticate(serverUrl, anonKey, email, password, isSignUp = true)
-
-    suspend fun signIn(serverUrl: String, anonKey: String, email: String, password: String): Result<String> =
-        authenticate(serverUrl, anonKey, email, password, isSignUp = false)
-
-    fun signOut() {
-        vault.remove(KEY_TOKEN)
-        vault.remove(KEY_REFRESH_TOKEN)
-        vault.remove(KEY_USER_ID)
-        vault.remove(KEY_EMAIL)
-        _accountState.value = loadState()
-    }
-
-    private suspend fun authenticate(
-        serverUrl: String,
-        anonKey: String,
-        email: String,
-        password: String,
-        isSignUp: Boolean
-    ): Result<String> = withContext(Dispatchers.IO) {
-        val cleanUrl = serverUrl.trim().trimEnd('/')
-        val cleanKey = anonKey.trim()
-        if (cleanUrl.isBlank() || cleanKey.isBlank()) {
-            return@withContext Result.failure(IllegalArgumentException("Enter your Supabase / Sync Server URL and API Key first (see README.md)."))
-        }
-        if (email.isBlank() || password.length < 6) {
-            return@withContext Result.failure(IllegalArgumentException("Valid email & password (6+ chars) required."))
-        }
-        runCatching {
-            val endpoint = if (isSignUp) "$cleanUrl/auth/v1/signup" else "$cleanUrl/auth/v1/token?grant_type=password"
-            val payload = buildJsonObject {
-                put("email", email.trim())
-                put("password", password)
-            }.toString().toRequestBody(JSON_MEDIA)
-
-            val req = Request.Builder()
-                .url(endpoint)
-                .header("apikey", cleanKey)
-                .header("Content-Type", "application/json")
-                .post(payload)
-                .build()
-
-            httpClient.newCall(req).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    val errObj = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
-                    val msg = errObj?.get("error_description")?.jsonPrimitive?.contentOrNull
-                        ?: errObj?.get("msg")?.jsonPrimitive?.contentOrNull
-                        ?: "HTTP ${resp.code}: Authentication failed"
-                    error(msg)
-                }
-                val root = json.parseToJsonElement(body).jsonObject
-                val token = root["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                val refreshToken = root["refresh_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                val userId = root["user"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull.orEmpty()
-                vault.putString(KEY_SERVER_URL, cleanUrl)
-                vault.putString(KEY_ANON_KEY, cleanKey)
-                vault.putString(KEY_EMAIL, email.trim())
-                if (token.isNotBlank()) vault.putString(KEY_TOKEN, token)
-                if (refreshToken.isNotBlank()) vault.putString(KEY_REFRESH_TOKEN, refreshToken)
-                if (userId.isNotBlank()) vault.putString(KEY_USER_ID, userId)
-                _accountState.value = loadState()
-
-                if (token.isBlank() && isSignUp) {
-                    "Account created! Check your email to confirm, then Sign In."
-                } else {
-                    if (!isSignUp) pullFromCloud()
-                    "Signed in as ${email.trim()}"
-                }
-            }
-        }
-    }
+    @Volatile
+    var lastImportAt: String? = null
+        private set
 
     suspend fun exportSyncCode(): String {
         val addons = repository.addonRepository.getEnabledAddons().map { it.manifestUrl }
@@ -173,96 +77,8 @@ class CloudSyncManager(
         val decoded = String(Base64.decode(cleaned, Base64.URL_SAFE or Base64.NO_WRAP), Charsets.UTF_8)
         val bundle = json.decodeFromString<QuernSyncBundle>(decoded)
         applyBundle(bundle)
+        lastImportAt = "Sync code imported just now"
         "Synced ${bundle.addonUrls.size} addons & settings!"
-    }
-
-    private fun refreshAccessToken(): Boolean {
-        val st = _accountState.value
-        val refreshToken = vault.getString(KEY_REFRESH_TOKEN)
-        if (st.serverUrl.isBlank() || st.anonKey.isBlank() || refreshToken.isBlank()) return false
-        return runCatching {
-            val payload = buildJsonObject {
-                put("refresh_token", refreshToken)
-            }.toString().toRequestBody(JSON_MEDIA)
-            val req = Request.Builder()
-                .url("${st.serverUrl}/auth/v1/token?grant_type=refresh_token")
-                .header("apikey", st.anonKey)
-                .header("Content-Type", "application/json")
-                .post(payload)
-                .build()
-            httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@use false
-                val root = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
-                val newToken = root["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                val newRefresh = root["refresh_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                if (newToken.isBlank()) return@use false
-                vault.putString(KEY_TOKEN, newToken)
-                if (newRefresh.isNotBlank()) vault.putString(KEY_REFRESH_TOKEN, newRefresh)
-                _accountState.value = loadState()
-                true
-            }
-        }.getOrDefault(false)
-    }
-
-    suspend fun pushToCloud(): Result<String> = withContext(Dispatchers.IO) {
-        val initial = _accountState.value
-        if (!initial.isSignedIn) return@withContext Result.failure(IllegalStateException("Sign in first to sync."))
-        runCatching {
-            val syncCode = exportSyncCode()
-            fun executePush(st: CloudAccountState): Int {
-                val payload = buildJsonObject {
-                    put("user_id", st.userId)
-                    put("payload", syncCode)
-                }.toString().toRequestBody(JSON_MEDIA)
-                val req = Request.Builder()
-                    .url("${st.serverUrl}/rest/v1/quern_sync?on_conflict=user_id")
-                    .header("apikey", st.anonKey)
-                    .header("Authorization", "Bearer ${st.accessToken}")
-                    .header("Content-Type", "application/json")
-                    .header("Prefer", "resolution=merge-duplicates")
-                    .post(payload)
-                    .build()
-                return httpClient.newCall(req).execute().use { it.code }
-            }
-            var code = executePush(_accountState.value)
-            if (code == 401 && refreshAccessToken()) {
-                code = executePush(_accountState.value)
-            }
-            if (code !in 200..299) error("Cloud push failed (HTTP $code)")
-            _accountState.value = _accountState.value.copy(lastSyncedAt = "Just now")
-            "Synced to Cloud successfully!"
-        }
-    }
-
-    suspend fun pullFromCloud(): Result<String> = withContext(Dispatchers.IO) {
-        val initial = _accountState.value
-        if (!initial.isSignedIn) return@withContext Result.failure(IllegalStateException("Sign in first to sync."))
-        runCatching {
-            fun executePull(st: CloudAccountState): Pair<Int, String> {
-                val req = Request.Builder()
-                    .url("${st.serverUrl}/rest/v1/quern_sync?user_id=eq.${st.userId}&select=payload")
-                    .header("apikey", st.anonKey)
-                    .header("Authorization", "Bearer ${st.accessToken}")
-                    .build()
-                return httpClient.newCall(req).execute().use { resp ->
-                    resp.code to resp.body?.string().orEmpty()
-                }
-            }
-            var (code, body) = executePull(_accountState.value)
-            if (code == 401 && refreshAccessToken()) {
-                val retry = executePull(_accountState.value)
-                code = retry.first
-                body = retry.second
-            }
-            if (code !in 200..299) error("Cloud pull failed (HTTP $code)")
-            val arr = json.parseToJsonElement(body) as? JsonArray
-            val syncCode = arr?.firstOrNull()?.jsonObject?.get("payload")?.jsonPrimitive?.contentOrNull
-            if (!syncCode.isNullOrBlank()) {
-                importSyncCode(syncCode).getOrThrow()
-            }
-            _accountState.value = _accountState.value.copy(lastSyncedAt = "Just now")
-            "Synced from Cloud!"
-        }
     }
 
     private suspend fun applyBundle(bundle: QuernSyncBundle) {
@@ -434,7 +250,7 @@ class CloudSyncManager(
                 }
             }
 
-            _accountState.value = _accountState.value.copy(lastSyncedAt = "Stremio synced just now")
+            lastImportAt = "Stremio synced just now"
             "Stremio Synced! $addonsImported addons • $libraryImported library items • $progressImported progress items."
         }
     }
@@ -571,27 +387,13 @@ class CloudSyncManager(
                 error("No addons or library items found in the pasted backup data.")
             }
 
-            _accountState.value = _accountState.value.copy(lastSyncedAt = "Backup imported just now")
+            lastImportAt = "Backup imported just now"
             "Backup Imported! $addonsImported addons • $libraryImported library items • $progressImported progress items."
         }
     }
 
-    private fun loadState(): CloudAccountState = CloudAccountState(
-        serverUrl = vault.getString(KEY_SERVER_URL),
-        anonKey = vault.getString(KEY_ANON_KEY),
-        email = vault.getString(KEY_EMAIL),
-        userId = vault.getString(KEY_USER_ID),
-        accessToken = vault.getString(KEY_TOKEN)
-    )
-
     companion object {
         private val JSON_MEDIA = "application/json".toMediaType()
-        private const val KEY_SERVER_URL = "sync_server_url"
-        private const val KEY_ANON_KEY = "sync_anon_key"
-        private const val KEY_EMAIL = "sync_email"
-        private const val KEY_USER_ID = "sync_user_id"
-        private const val KEY_TOKEN = "sync_access_token"
-        private const val KEY_REFRESH_TOKEN = "sync_refresh_token"
         private const val KEY_STREMIO_AUTH = "stremio_auth_key"
         private const val KEY_STREMIO_EMAIL = "stremio_email"
     }

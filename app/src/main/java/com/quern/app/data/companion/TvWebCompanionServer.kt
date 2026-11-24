@@ -561,7 +561,6 @@ class TvWebCompanionServer(
         val tmdb = repository.tmdbClient.getConfig()
         val syncCode = runCatching { cloudSyncManager.exportSyncCode() }.getOrDefault("")
         val account = quernAccount.state.value
-        val legacySync = cloudSyncManager.accountState.value
         val nowFormatted = SimpleDateFormat("MM/dd/yyyy, h:mm:ss a", Locale.US).format(Date())
 
         val activeProfile = settings.activeProfile
@@ -974,7 +973,7 @@ class TvWebCompanionServer(
                 </div>
                 <div class="stat-card">
                   <div class="stat-label">Last Sync</div>
-                  <div class="stat-value">${escapeHtml(legacySync.lastSyncedAt ?: nowFormatted)}</div>
+                  <div class="stat-value">${escapeHtml(cloudSyncManager.lastImportAt ?: nowFormatted)}</div>
                 </div>
               </div>
 

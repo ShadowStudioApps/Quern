@@ -11,7 +11,6 @@ import com.quern.app.data.local.PinMigrationState
 import com.quern.app.data.local.SettingsStore
 import com.quern.app.data.servers.ServerTestResult
 import com.quern.app.data.servers.WebDavEntry
-import com.quern.app.data.sync.CloudAccountState
 import com.quern.app.data.sync.CloudSyncManager
 import com.quern.app.data.sync.AccountError
 import com.quern.app.data.sync.AccountException
@@ -85,7 +84,6 @@ class QuernViewModel(
 
     val appSettings: StateFlow<AppSettings> = settingsStore.settings
     val pinMigrationState: StateFlow<PinMigrationState> = settingsStore.pinMigrationState
-    val cloudAccountState: StateFlow<CloudAccountState> = cloudSyncManager.accountState
 
     // ---- Quern account (Shadow Studio server) ----
     val accountState: StateFlow<QuernAccountState> = quernAccount.state
