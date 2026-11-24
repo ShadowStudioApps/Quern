@@ -74,7 +74,8 @@ class QuernViewModel(
     val cloudSyncManager: CloudSyncManager,
     val quernAccount: QuernAccount,
     val syncEngine: QuernSyncEngine,
-    val updateManager: AppUpdateManager
+    val updateManager: AppUpdateManager,
+    appContext: android.content.Context? = null
 ) : ViewModel() {
 
     // ---- App updates (official GitHub Releases) ----
@@ -189,7 +190,13 @@ class QuernViewModel(
         settingsStore.retryPinMigrationIfNeeded()
     }
 
-    private val companionServer = TvWebCompanionServer(repository, settingsStore, cloudSyncManager, quernAccount) {
+    private val companionServer = TvWebCompanionServer(
+        repository = repository,
+        settingsStore = settingsStore,
+        cloudSyncManager = cloudSyncManager,
+        quernAccount = quernAccount,
+        appContext = appContext
+    ) {
         refreshHome()
         viewModelScope.launch {
             repository.debridManager.refreshAllStatuses()
@@ -1079,10 +1086,19 @@ class QuernViewModel(
         private val cloudSyncManager: CloudSyncManager,
         private val quernAccount: QuernAccount,
         private val syncEngine: QuernSyncEngine,
-        private val updateManager: AppUpdateManager
+        private val updateManager: AppUpdateManager,
+        private val appContext: android.content.Context? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            QuernViewModel(repository, settingsStore, cloudSyncManager, quernAccount, syncEngine, updateManager) as T
+            QuernViewModel(
+                repository,
+                settingsStore,
+                cloudSyncManager,
+                quernAccount,
+                syncEngine,
+                updateManager,
+                appContext
+            ) as T
     }
 }

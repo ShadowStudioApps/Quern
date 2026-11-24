@@ -11,6 +11,7 @@ import com.quern.app.data.sync.DeviceLinkClient
 import com.quern.app.data.sync.PendingDeviceLink
 import com.quern.app.ui.QuernApp
 import com.quern.app.ui.QuernViewModel
+import com.quern.app.ui.components.isTvHardware
 
 class MainActivity : ComponentActivity() {
 
@@ -31,7 +32,8 @@ class MainActivity : ComponentActivity() {
                 container.cloudSyncManager,
                 container.quernAccount,
                 container.syncEngine,
-                container.updateManager
+                container.updateManager,
+                applicationContext
             )
         )[QuernViewModel::class.java]
 
@@ -68,7 +70,9 @@ class MainActivity : ComponentActivity() {
                 pendingAddonUrl.value = data
             }
             data.startsWith("quern://", ignoreCase = true) -> {
-                DeviceLinkClient.parseDeepLink(data)?.let { pendingDeviceLink.value = it }
+                if (!isTvHardware(this)) {
+                    DeviceLinkClient.parseDeepLink(data)?.let { pendingDeviceLink.value = it }
+                }
             }
         }
     }

@@ -105,6 +105,7 @@ import com.quern.app.ui.components.LocalContentFocusMemory
 import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.QuernBrandMark
 import com.quern.app.ui.components.currentQuernLayout
+import com.quern.app.ui.components.isTvHardware
 import com.quern.app.ui.components.LocalQuernLayout
 import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.ui.components.tvClickable
@@ -225,7 +226,7 @@ fun QuernApp(
             }
         }
 
-        if (pendingDeviceLink != null) {
+        if (pendingDeviceLink != null && !isTvHardware(context)) {
             val linkAccountState by viewModel.accountState.collectAsState()
             DeviceLinkApproveDialog(
                 request = pendingDeviceLink,
@@ -467,7 +468,12 @@ fun QuernApp(
                                     deviceLinkUrl = { viewModel.deviceLinkUrl },
                                     onStartDeviceLink = { name -> viewModel.startDeviceLink(name) },
                                     onStopDeviceLink = { viewModel.stopDeviceLink() },
-                                    onRefreshDeviceLink = { name -> viewModel.refreshDeviceLink(name) }
+                                    onRefreshDeviceLink = { name -> viewModel.refreshDeviceLink(name) },
+                                    canApproveLink = viewModel.canApproveDeviceLink(),
+                                    httpClient = okHttpClient,
+                                    onApproveDeviceLink = { req, code6 ->
+                                        viewModel.approveDeviceLink(req, code6, okHttpClient)
+                                    }
                                 ),
                                 addons = addons,
                                 debridStatuses = debridStatuses,

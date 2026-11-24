@@ -393,30 +393,48 @@ fun SettingsScreen(
         }
     }
 
-    val searchIndex = listOf(
-        SettingsSearchEntry(qString(R.string.group_addons), "addon url qr health catalog manifest stremio اضافات", SettingsGroup.ADDONS),
-        SettingsSearchEntry(qString(R.string.appearance_theme_title), "theme amoled black accent color المظهر سمة لون", SettingsGroup.APPEARANCE),
-        SettingsSearchEntry(qString(R.string.appearance_accent_title), "accent color swatch highlight لون التمييز", SettingsGroup.APPEARANCE),
-        SettingsSearchEntry(qString(R.string.appearance_nav_title), "navigation sidebar top bar التنقل الشريط الجانبي", SettingsGroup.APPEARANCE),
-        SettingsSearchEntry(qString(R.string.appearance_font_title), "font text scale size خط حجم النص", SettingsGroup.APPEARANCE),
-        SettingsSearchEntry(qString(R.string.appearance_screen_size_title), "interface screen size scale 75 80 85 90 95 100 حجم الواجهة", SettingsGroup.APPEARANCE),
-        SettingsSearchEntry(qString(R.string.appearance_lang_title), "language arabic english rtl اللغة عربي", SettingsGroup.APPEARANCE),
-        SettingsSearchEntry(qString(R.string.appearance_icon_title), "icon banner launcher ايقونة", SettingsGroup.APPEARANCE),
-        SettingsSearchEntry(qString(R.string.group_home), "hero poster card size labels unreleased row order continue watching الرئيسية بطاقات", SettingsGroup.HOME_LAYOUT),
-        SettingsSearchEntry(qString(R.string.home_cw_title), "continue watching sort resume history متابعة المشاهدة", SettingsGroup.HOME_LAYOUT),
-        SettingsSearchEntry(qString(R.string.group_playback), "player exoplayer mpv external subtitle audio speed aspect buffer skip intro التشغيل ترجمة صوت", SettingsGroup.PLAYBACK),
-        SettingsSearchEntry(qString(R.string.playback_buffer_title), "buffer network ram cache 4k remux تخزين مؤقت", SettingsGroup.PLAYBACK),
-        SettingsSearchEntry(qString(R.string.services_debrid_title), "debrid torbox real-debrid alldebrid premiumize ديبريد", SettingsGroup.SERVICES, SettingsSubPage.INTEGRATIONS),
-        SettingsSearchEntry(qString(R.string.services_media_servers_title), "jellyfin emby plex webdav server خوادم", SettingsGroup.SERVICES, SettingsSubPage.MEDIA_SERVERS),
-        SettingsSearchEntry(qString(R.string.accounts_tracking_title), "tmdb trakt metadata tracking تتبع", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.TRACKING),
-        SettingsSearchEntry(qString(R.string.accounts_cloud_title), "cloud sync account stremio backup مزامنة حساب", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT),
-        SettingsSearchEntry(qString(R.string.settings_export_import_title), "export import backup code json تصدير استيراد نسخ احتياطي", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT),
-        SettingsSearchEntry(qString(R.string.accounts_profiles_title), "profile pin lock user بروفايل ملفات", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.PROFILES),
-        SettingsSearchEntry(qString(R.string.settings_presets_title), "preset tv phone low end quick bundle إعدادات جاهزة", SettingsGroup.SYSTEM),
-        SettingsSearchEntry(qString(R.string.system_storage_title), "cache storage clear تخزين كاش", SettingsGroup.SYSTEM),
-        SettingsSearchEntry(qString(R.string.system_diagnostics_title), "diagnostics device ffmpeg media3 companion تشخيص", SettingsGroup.SYSTEM),
-        SettingsSearchEntry(qString(R.string.system_about_title), "about version licenses shadow studio حول التراخيص", SettingsGroup.SYSTEM)
-    )
+    val isTvDevice = isTvHardware(LocalContext.current)
+    val searchIndex = buildList {
+        add(
+            SettingsSearchEntry(
+                qString(R.string.group_addons),
+                if (isTvDevice) "addon url qr health catalog manifest stremio اضافات" else "addon url health catalog manifest stremio اضافات",
+                SettingsGroup.ADDONS
+            )
+        )
+        add(SettingsSearchEntry(qString(R.string.appearance_theme_title), "theme amoled black accent color المظهر سمة لون", SettingsGroup.APPEARANCE))
+        add(SettingsSearchEntry(qString(R.string.appearance_accent_title), "accent color swatch highlight لون التمييز", SettingsGroup.APPEARANCE))
+        if (isTv) {
+            add(SettingsSearchEntry(qString(R.string.appearance_nav_title), "navigation sidebar top bar التنقل الشريط الجانبي", SettingsGroup.APPEARANCE))
+        }
+        add(SettingsSearchEntry(qString(R.string.appearance_font_title), "font text scale size خط حجم النص", SettingsGroup.APPEARANCE))
+        add(SettingsSearchEntry(qString(R.string.appearance_screen_size_title), "interface screen size scale 75 80 85 90 95 100 حجم الواجهة", SettingsGroup.APPEARANCE))
+        add(SettingsSearchEntry(qString(R.string.appearance_lang_title), "language arabic english rtl اللغة عربي", SettingsGroup.APPEARANCE))
+        add(SettingsSearchEntry(qString(R.string.appearance_icon_title), "icon banner launcher ايقونة", SettingsGroup.APPEARANCE))
+        add(SettingsSearchEntry(qString(R.string.group_home), "hero poster card size labels unreleased row order continue watching الرئيسية بطاقات", SettingsGroup.HOME_LAYOUT))
+        add(SettingsSearchEntry(qString(R.string.home_cw_title), "continue watching sort resume history متابعة المشاهدة", SettingsGroup.HOME_LAYOUT))
+        add(SettingsSearchEntry(qString(R.string.group_playback), "player exoplayer mpv external subtitle audio speed aspect buffer skip intro التشغيل ترجمة صوت", SettingsGroup.PLAYBACK))
+        add(SettingsSearchEntry(qString(R.string.playback_buffer_title), "buffer network ram cache 4k remux تخزين مؤقت", SettingsGroup.PLAYBACK))
+        add(SettingsSearchEntry(qString(R.string.services_debrid_title), "debrid torbox real-debrid alldebrid premiumize ديبريد", SettingsGroup.SERVICES, SettingsSubPage.INTEGRATIONS))
+        add(SettingsSearchEntry(qString(R.string.services_media_servers_title), "jellyfin emby plex webdav server خوادم", SettingsGroup.SERVICES, SettingsSubPage.MEDIA_SERVERS))
+        add(SettingsSearchEntry(qString(R.string.accounts_tracking_title), "tmdb trakt metadata tracking تتبع", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.TRACKING))
+        add(SettingsSearchEntry(qString(R.string.accounts_cloud_title), "cloud sync account stremio backup مزامنة حساب", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT))
+        if (!isTvDevice) {
+            add(SettingsSearchEntry(qString(R.string.qa_link_tv_btn), "link tv qr scan nsd ربط تلفاز شاشة", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT))
+        }
+        add(SettingsSearchEntry(qString(R.string.settings_export_import_title), "export import backup code json تصدير استيراد نسخ احتياطي", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT))
+        add(SettingsSearchEntry(qString(R.string.accounts_profiles_title), "profile pin lock user بروفايل ملفات", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.PROFILES))
+        add(SettingsSearchEntry(qString(R.string.settings_presets_title), "preset tv phone low end quick bundle إعدادات جاهزة", SettingsGroup.SYSTEM))
+        add(SettingsSearchEntry(qString(R.string.system_storage_title), "cache storage clear تخزين كاش", SettingsGroup.SYSTEM))
+        add(
+            SettingsSearchEntry(
+                qString(R.string.system_diagnostics_title),
+                if (isTvDevice) "diagnostics device ffmpeg media3 companion تشخيص" else "diagnostics device ffmpeg media3 تشخيص",
+                SettingsGroup.SYSTEM
+            )
+        )
+        add(SettingsSearchEntry(qString(R.string.system_about_title), "about version licenses shadow studio حول التراخيص", SettingsGroup.SYSTEM))
+    }
 
     val resetToast = qString(R.string.settings_reset_done)
 
@@ -2303,16 +2321,19 @@ private fun SystemSectionPane(
         // 3. Diagnostics (Read-Only, Zero Secrets)
         item(key = "diagnostics") {
             SettingSectionCard(title = qString(R.string.system_diagnostics_title)) {
+                val diagIsTvDevice = isTvHardware(LocalContext.current)
                 HelpTextLine(qString(R.string.system_diagnostics_help))
-                val diagLines = listOf(
-                    "App Version" to "v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE}, ${BuildConfig.BUILD_TYPE})",
-                    "Device" to "${Build.MANUFACTURER} ${Build.MODEL}",
-                    "Android OS" to "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
-                    "CPU ABI" to (Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"),
-                    "Media Engine" to "Media3 ExoPlayer 1.5.1 + FFmpeg Audio Extension",
-                    "Local Companion" to companionUrl,
-                    "Installed Addons" to "${addons.count { it.enabled }} enabled / ${addons.size} total"
-                )
+                val diagLines = buildList {
+                    add("App Version" to "v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE}, ${BuildConfig.BUILD_TYPE})")
+                    add("Device" to "${Build.MANUFACTURER} ${Build.MODEL}")
+                    add("Android OS" to "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                    add("CPU ABI" to (Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"))
+                    add("Media Engine" to "Media3 ExoPlayer 1.5.1 + FFmpeg Audio Extension")
+                    if (diagIsTvDevice) {
+                        add("Local Companion" to companionUrl)
+                    }
+                    add("Installed Addons" to "${addons.count { it.enabled }} enabled / ${addons.size} total")
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     diagLines.forEach { (k, v) ->
                         Row(
@@ -2994,7 +3015,11 @@ private fun SettingsSubPageContent(
 
                     SettingSectionCard(title = qString(R.string.account_stremio_nuvio_title)) {
                         Text(
-                            text = qString(R.string.account_stremio_nuvio_desc, companionUrl),
+                            text = if (isTvDevice) {
+                                qString(R.string.account_stremio_nuvio_desc, companionUrl)
+                            } else {
+                                qString(R.string.account_stremio_nuvio_desc_phone)
+                            },
                             color = LumaTextSecondary,
                             fontSize = 13.sp
                         )
@@ -3079,7 +3104,15 @@ private fun SettingsSubPageContent(
                             title = { Text(qString(R.string.account_import_nuvio_btn), color = Color.White, fontWeight = FontWeight.Bold) },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(qString(R.string.account_nuvio_dialog_desc, companionUrl), color = LumaTextSecondary, fontSize = 12.sp)
+                                    Text(
+                                        text = if (isTvDevice) {
+                                            qString(R.string.account_nuvio_dialog_desc, companionUrl)
+                                        } else {
+                                            qString(R.string.account_nuvio_dialog_desc_phone)
+                                        },
+                                        color = LumaTextSecondary,
+                                        fontSize = 12.sp
+                                    )
                                     OutlinedTextField(
                                         value = nuvioInput,
                                         onValueChange = { nuvioInput = it },

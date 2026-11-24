@@ -114,8 +114,10 @@ class TvWebCompanionServer(
     private val settingsStore: SettingsStore,
     private val cloudSyncManager: CloudSyncManager,
     private val quernAccount: QuernAccount,
+    appContext: android.content.Context? = null,
     private val onDataChanged: () -> Unit
 ) {
+    private val nsdAdvertiser: TvLinkNsdAdvertiser? = appContext?.let { TvLinkNsdAdvertiser(it) }
     private var serverSocket: ServerSocket? = null
     private val clientSockets = mutableSetOf<Socket>()
     private var serverJob: Job? = null
@@ -208,6 +210,7 @@ class TvWebCompanionServer(
                 lastError = null
             )
         }
+        syncNsdAdvertisement()
         Log.i(TAG, "Device link session refreshed (5m TTL)")
     }
 
@@ -216,6 +219,27 @@ class TvWebCompanionServer(
         synchronized(linkLock) {
             linkKeyPair = null
             _deviceLinkState.value = DeviceLinkSessionState(isActive = false)
+        }
+        nsdAdvertiser?.stop()
+    }
+
+    private fun syncNsdAdvertisement() {
+        val adv = nsdAdvertiser ?: return
+        val boundPort = synchronized(this) { serverSocket?.localPort?.takeIf { it > 0 } ?: port }
+        val isServerUp = synchronized(this) { serverSocket?.isClosed == false }
+        val snap = synchronized(linkLock) {
+            val s = _deviceLinkState.value
+            if (s.isActive && !s.isExpired() && !s.isLocked && !s.isCompleted && linkKeyPair != null) s else null
+        }
+        if (isServerUp && snap != null) {
+            adv.advertise(
+                port = boundPort,
+                deviceName = snap.deviceName,
+                sessionId = snap.sessionId,
+                publicKeyB64 = snap.publicKeyB64
+            )
+        } else {
+            adv.stop()
         }
     }
 
@@ -251,6 +275,7 @@ class TvWebCompanionServer(
                         socket.bind(InetSocketAddress(port))
                         serverSocket = socket
                     }
+                    syncNsdAdvertisement()
                     supervisorScope {
                         while (isActive && !socket.isClosed) {
                             val client = socket.accept()
@@ -442,6 +467,10 @@ class TvWebCompanionServer(
                     writeHttpResponse(s, "200 OK", html)
                     return
                 }
+                path == "/api/link/discover" && method.equals("GET", ignoreCase = true) -> {
+                    handleDeviceLinkDiscover(s)
+                    return
+                }
                 path == "/api/link/info" && method.equals("GET", ignoreCase = true) -> {
                     handleDeviceLinkInfo(s, parseForm(queryString)["s"].orEmpty())
                     return
@@ -545,6 +574,31 @@ class TvWebCompanionServer(
         }
     }
 
+    private fun handleDeviceLinkDiscover(socket: Socket) {
+        val now = System.currentTimeMillis()
+        val st = synchronized(linkLock) {
+            val curr = _deviceLinkState.value
+            if (curr.isActive && !curr.isExpired(now) && !curr.isLocked && !curr.isCompleted && linkKeyPair != null) {
+                curr
+            } else {
+                null
+            }
+        }
+        if (st == null) {
+            writeJsonResponse(socket, "404 Not Found", """{"active":false}""")
+            return
+        }
+        val body = buildJsonObject {
+            put("active", true)
+            put("v", 1)
+            put("deviceName", st.deviceName)
+            put("s", st.sessionId)
+            put("pk", st.publicKeyB64)
+            put("expiresInSec", st.remainingSeconds(now))
+        }.toString()
+        writeJsonResponse(socket, "200 OK", body)
+    }
+
     private fun handleDeviceLinkInfo(socket: Socket, submittedSession: String) {
         val (st, matches) = synchronized(linkLock) {
             val curr = _deviceLinkState.value
@@ -616,6 +670,7 @@ class TvWebCompanionServer(
                 curr.isExpired(now) -> {
                     linkKeyPair = null
                     _deviceLinkState.value = curr.copy(isActive = false)
+                    nsdAdvertiser?.stop()
                     errorStatus = "410 Gone"
                     errorJson = """{"ok":false,"error":"expired"}"""
                 }
@@ -645,6 +700,7 @@ class TvWebCompanionServer(
                             isLocked = locked,
                             isActive = !locked
                         )
+                        if (locked) nsdAdvertiser?.stop()
                         Log.w(TAG, "Device link rejected: wrong code ($nextFails/${curr.maxFailedAttempts})")
                         errorStatus = if (locked) "423 Locked" else "403 Forbidden"
                         errorJson = buildJsonObject {
@@ -662,6 +718,7 @@ class TvWebCompanionServer(
                             isSigningIn = true,
                             lastError = null
                         )
+                        nsdAdvertiser?.stop()
                         decrypted = bundle
                     }
                 }
@@ -744,6 +801,7 @@ class TvWebCompanionServer(
                         isLocked = locked,
                         isActive = !locked
                     )
+                    if (locked) nsdAdvertiser?.stop()
                     errMsg = if (locked) {
                         "Too many wrong codes. Refresh the QR code on your TV."
                     } else {
@@ -758,6 +816,7 @@ class TvWebCompanionServer(
                         isSigningIn = true,
                         lastError = null
                     )
+                    nsdAdvertiser?.stop()
                     allowed = true
                 }
             }

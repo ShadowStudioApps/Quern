@@ -51,8 +51,11 @@ import com.quern.app.data.sync.AccountCrypto
 import com.quern.app.data.sync.AccountError
 import com.quern.app.data.sync.AccountUiMessage
 import com.quern.app.data.sync.DeviceLinkCrypto
+import com.quern.app.data.sync.DeviceLinkSubmitResult
+import com.quern.app.data.sync.PendingDeviceLink
 import com.quern.app.data.sync.QuernAccountState
 import com.quern.app.data.sync.SyncStatus
+import com.quern.app.ui.components.PhoneLinkTvDialog
 import com.quern.app.ui.components.QrCodeCard
 import com.quern.app.ui.components.QuernAlertDialog as AlertDialog
 import com.quern.app.ui.components.isTvHardware
@@ -64,6 +67,7 @@ import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
 import com.quern.app.ui.theme.qString
 import kotlinx.coroutines.delay
+import okhttp3.OkHttpClient
 import java.util.Locale
 
 /** Everything the account card needs, bundled so it can pass through the settings layers. */
@@ -82,7 +86,12 @@ class AccountUi(
     val deviceLinkUrl: () -> String = { "" },
     val onStartDeviceLink: (deviceName: String) -> Unit = {},
     val onStopDeviceLink: () -> Unit = {},
-    val onRefreshDeviceLink: (deviceName: String) -> Unit = {}
+    val onRefreshDeviceLink: (deviceName: String) -> Unit = {},
+    val canApproveLink: Boolean = false,
+    val httpClient: OkHttpClient? = null,
+    val onApproveDeviceLink: suspend (PendingDeviceLink, String) -> DeviceLinkSubmitResult = { _, _ ->
+        DeviceLinkSubmitResult.Failed("Unavailable")
+    }
 )
 
 @Composable
@@ -143,6 +152,7 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmSignOut by remember { mutableStateOf(false) }
     var showPhoneEmailHelp by remember { mutableStateOf(false) }
+    var showLinkTvDialog by remember { mutableStateOf(false) }
     var dismissedSaveWarning by remember(account.message) { mutableStateOf(false) }
 
     SettingSectionCard(title = qString(R.string.qa_title)) {
@@ -172,6 +182,11 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
             ) {
                 SelectablePillOption(label = qString(R.string.qa_sync_now), selected = true) {
                     if (!account.sync.running) account.onSyncNow()
+                }
+                if (!isTvDevice && account.httpClient != null) {
+                    SelectablePillOption(label = qString(R.string.qa_link_tv_btn), selected = false) {
+                        if (!account.busy) showLinkTvDialog = true
+                    }
                 }
                 SelectablePillOption(label = qString(R.string.qa_sign_out), selected = false) {
                     if (!account.busy) confirmSignOut = true
@@ -267,6 +282,16 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
                 )
             }
         }
+    }
+
+    if (showLinkTvDialog && !isTvDevice && account.httpClient != null) {
+        PhoneLinkTvDialog(
+            accountState = state,
+            canApprove = account.canApproveLink,
+            httpClient = account.httpClient,
+            onApprove = account.onApproveDeviceLink,
+            onDismiss = { showLinkTvDialog = false }
+        )
     }
 
     val saveFailed = account.message == AccountUiMessage.SignOutSaveFailed && !dismissedSaveWarning
@@ -476,6 +501,17 @@ private fun TvDeviceLinkQrPanel(account: AccountUi) {
                     fontSize = 12.5.sp,
                     lineHeight = 17.sp
                 )
+                val baseAddress = remember(qrUrl) {
+                    qrUrl.substringBefore("/link").takeIf { it.startsWith("http") }.orEmpty()
+                }
+                if (baseAddress.isNotBlank()) {
+                    Text(
+                        text = qString(R.string.qr_link_tv_address_hint, baseAddress),
+                        color = LumaTextSecondary.copy(alpha = 0.85f),
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
 
                 link.lastError?.let { err ->
                     Text(

@@ -147,11 +147,17 @@ Signing in on an Android TV without typing an email or password uses an ephemera
      ```text
      http://<tv-ip>:8787/link#pk=<tvPublicKeySpkiB64Url>&s=<sessionId>&n=<urlEncodedDeviceName>
      ```
-     and shows `code6` next to the QR (`XXX XXX`).
-   - Session TTL is **5 minutes** and auto-refreshes when expired. The `/api/link/*` endpoints only accept requests while the QR is actually on screen; closing the card wipes the ephemeral private key immediately.
-2. **Phone scans the QR**:
-   - The TV's `GET /link` page reads the URL fragment in JS and offers **"Open in Quern"** via an Android `intent://link?host=...&pk=...&s=...&n=...#Intent;scheme=quern;package=com.quern.app;S.browser_fallback_url=...;end` link (handled by `MainActivity`'s `quern://link` intent filter).
-   - If the app does not open, the page suggests opening it in Chrome and offers a browser email + password + 6-digit code form. The form sends those fields to the TV over local HTTP without transport encryption (`POST /link-fallback`, enforcing the same 5-minute TTL, active-QR gate, single-use rule, and 5-attempt lockout).
+     and shows `code6` (`XXX XXX`) and the base LAN URL (`http://<tv-ip>:8787`) next to the QR.
+   - Advertises the active link session on the local Wi-Fi via Android NSD (`android.net.nsd`, service type `_quern-link._tcp`, port `8787`, TXT attributes `v=1`, `n=<deviceName>`, `s=<sessionId>`, `pk=<tvPublicKeySpkiB64Url>` — nothing secret) and exposes `GET /api/link/discover` returning the same public `{ active, v, deviceName, s, pk, expiresInSec }` fields for manual address entry when mDNS is blocked.
+   - Session TTL is **5 minutes** and auto-refreshes when expired. Both NSD advertising and the `/api/link/*` endpoints are active **only** while the QR is actually on screen; closing, locking, or completing the session immediately unregisters NSD and wipes the ephemeral private key.
+2. **Phone discovers or scans the TV**:
+   - **From inside the signed-in phone app ("Link a TV" in Settings → Accounts & Sync)**:
+     - Discovers TVs on the LAN via NSD (`_quern-link._tcp`) and lists them by name.
+     - Offers **"Scan QR"** (CameraX + ZXing in-memory Y-plane decoder, shown only on non-TV hardware with `FEATURE_CAMERA_ANY`, requesting `CAMERA` permission on tap and releasing the camera immediately on close) which parses `http://<tv-ip>:8787/link#pk=...&s=...&n=...` directly without opening a browser.
+     - After ~8 seconds with no TV found (or on demand), shows a manual **"TV address"** field (`http://<tv-ip>:8787`) that queries `GET /api/link/discover`.
+   - **From the system camera app**:
+     - The TV's `GET /link` page reads the URL fragment in JS and offers **"Open in Quern"** via an Android `intent://link?host=...&pk=...&s=...&n=...#Intent;scheme=quern;package=com.quern.app;S.browser_fallback_url=...;end` link (handled by `MainActivity`'s `quern://link` intent filter on non-TV hardware).
+     - If the app does not open, the page suggests opening it in Chrome and offers a browser email + password + 6-digit code form. The form sends those fields to the TV over local HTTP without transport encryption (`POST /link-fallback`, enforcing the same 5-minute TTL, active-QR gate, single-use rule, and 5-attempt lockout).
 3. **Phone confirms and encrypts**:
    - The app validates that `host` is a private LAN origin (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`, `localhost`, or `*.local`), queries `GET /api/link/info?s=<sessionId>`, and shows `"Sign in TV '<device name>'?"` asking for the 6-digit code shown on the TV.
    - On **Allow**, the phone generates its own ephemeral EC P-256 key pair, computes `sharedSecret = ECDH(phonePriv, tvPub)`, and derives a 32-byte AES-256-GCM key with HKDF-SHA256 (RFC 5869):

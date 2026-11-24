@@ -407,4 +407,27 @@
     <string name="qa_phone_email_link">سجّل الدخول بالإيميل من هاتفك</string>
     <string name="qa_phone_email_help">امسح نفس رمز QR واختر تسجيل الدخول بالإيميل بصفحة الهاتف.</string>
     <string name="qa_sign_out_tv_confirm_body">راح ينسى هذا التلفزيون إضافاتك وبروفايلاتك وسجل المشاهدة. ترجع من تسجّل دخول مرة ثانية.</string>
+    <string name="qa_link_tv_btn">ربط تلفاز</string>
+    <string name="link_tv_title">ربط تلفاز</string>
+    <string name="link_tv_subtitle">على التلفاز، افتح الإعدادات ← الحسابات والمزامنة بحيث يظهر رمز QR لتسجيل الدخول.</string>
+    <string name="link_tv_searching">جاري البحث عن أجهزة التلفاز على نفس الواي فاي…</string>
+    <string name="link_tv_found_header">أجهزة التلفاز المتاحة على الشبكة</string>
+    <string name="link_tv_scan_qr_btn">مسح رمز QR</string>
+    <string name="link_tv_camera_denied">تم رفض صلاحية الكاميرا. ما زال بإمكانك اختيار التلفاز من القائمة أو إدخال عنوانه ورمز الـ 6 أرقام يدوياً.</string>
+    <string name="link_tv_not_found_help">لم يُعثر على تلفاز تلقائياً. تأكد من فتح رمز QR لتسجيل الدخول على التلفاز واتصال الجهازين بنفس الواي فاي، أو أدخل عنوان التلفاز الظاهر أسفل الرمز:</string>
+    <string name="link_tv_manual_toggle">إدخال عنوان التلفاز يدوياً</string>
+    <string name="link_tv_address_label">عنوان التلفاز</string>
+    <string name="link_tv_address_placeholder">http://192.168.1.10:8787</string>
+    <string name="link_tv_connect_btn">اتصال</string>
+    <string name="link_tv_connecting">جاري الاتصال…</string>
+    <string name="link_tv_err_invalid_addr">أدخل عنوان شبكة محلية صالحاً (مثل http://192.168.1.10:8787).</string>
+    <string name="link_tv_scan_title">مسح رمز QR للتلفاز</string>
+    <string name="link_tv_scan_hint">وجّه الكاميرا نحو رمز QR الظاهر على التلفاز. لا يتم حفظ أو إرسال أي صور نهائياً.</string>
+    <string name="link_tv_scan_invalid_qr">رمز QR هذا ليس رابط تسجيل دخول لتلفاز Quern على الشبكة المحلية.</string>
+    <string name="link_tv_scan_camera_error">تعذّر تشغيل الكاميرا. أغلق الماسح لاستخدام الاكتشاف التلقائي أو العنوان اليدوي.</string>
+    <string name="qr_link_tv_address_hint">عنوان التلفاز: %1$s</string>
+    <string name="addons_empty_state_phone">لا توجد إضافات مثبتة. الصق رابط manifest.json أو stremio:// أعلاه للبدء.</string>
+    <string name="addons_dialog_tip_phone">الصق رابط Stremio v3 manifest.json أو stremio://.</string>
+    <string name="account_stremio_nuvio_desc_phone">استورد إضافاتك المثبتة مباشرة من حساب Stremio أو من نسخة JSON احتياطية.</string>
+    <string name="account_nuvio_dialog_desc_phone">الصق النسخة الاحتياطية بصيغة JSON أدناه لاستيراد الإضافات والإعدادات.</string>
 </resources>

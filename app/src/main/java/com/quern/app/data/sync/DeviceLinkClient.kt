@@ -54,21 +54,48 @@ object DeviceLinkClient {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
-     * Parses a `quern://link?host=...&pk=...&s=...&n=...` deep link launched by the TV's
-     * companion `/link` page via Android `intent://`. Returns null if invalid or non-LAN.
+     * Parses either:
+     * - a `quern://link?host=...&pk=...&s=...&n=...` native deep link, OR
+     * - a `http://<lan-ip>:<port>/link#pk=...&s=...&n=...` URL encoded directly in the TV's QR.
+     * Returns null if invalid or non-LAN.
      */
-    fun parseDeepLink(uriString: String?): PendingDeviceLink? {
-        if (uriString.isNullOrBlank()) return null
-        val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return null
-        if (!uri.scheme.equals("quern", ignoreCase = true)) return null
-        if (!uri.host.equals("link", ignoreCase = true)) return null
+    fun parseDeepLink(uriString: String?): PendingDeviceLink? = parseQrOrLink(uriString)
 
-        val host = uri.getQueryParameter("host")?.trim().orEmpty().trimEnd('/')
-        val pk = uri.getQueryParameter("pk")?.trim().orEmpty()
-        val sessionId = uri.getQueryParameter("s")?.trim().orEmpty()
-        val deviceName = uri.getQueryParameter("n")?.trim().orEmpty()
-            .take(60)
-            .ifBlank { "Quern TV" }
+    fun parseQrOrLink(rawString: String?): PendingDeviceLink? {
+        if (rawString.isNullOrBlank()) return null
+        val trimmed = rawString.trim()
+        val uri = runCatching { Uri.parse(trimmed) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase().orEmpty()
+
+        val host: String
+        val pk: String
+        val sessionId: String
+        val deviceName: String
+
+        when {
+            scheme == "quern" && uri.host.equals("link", ignoreCase = true) -> {
+                host = uri.getQueryParameter("host")?.trim().orEmpty().trimEnd('/')
+                pk = uri.getQueryParameter("pk")?.trim().orEmpty()
+                sessionId = uri.getQueryParameter("s")?.trim().orEmpty()
+                deviceName = uri.getQueryParameter("n")?.trim().orEmpty()
+                    .take(60)
+                    .ifBlank { "Quern TV" }
+            }
+            (scheme == "http" || scheme == "https") &&
+                uri.path.orEmpty().trimEnd('/').equals("/link", ignoreCase = true) &&
+                !uri.fragment.isNullOrBlank() -> {
+                val authority = uri.encodedAuthority?.takeIf { it.isNotBlank() } ?: return null
+                host = "$scheme://$authority"
+                val fragUri = runCatching { Uri.parse("quern://frag?${uri.encodedFragment}") }.getOrNull()
+                    ?: return null
+                pk = fragUri.getQueryParameter("pk")?.trim().orEmpty()
+                sessionId = fragUri.getQueryParameter("s")?.trim().orEmpty()
+                deviceName = fragUri.getQueryParameter("n")?.trim().orEmpty()
+                    .take(60)
+                    .ifBlank { "Quern TV" }
+            }
+            else -> return null
+        }
 
         if (!DeviceLinkCrypto.isAllowedLanOrigin(host)) return null
         if (sessionId.length !in 12..64) return null
@@ -80,6 +107,80 @@ object DeviceLinkClient {
             sessionId = sessionId,
             deviceName = deviceName
         )
+    }
+
+    /**
+     * Normalizes a user-entered TV address (`192.168.1.10`, `192.168.1.10:8787`, or
+     * `http://192.168.1.10:8787`) to `http://<host>:<port>` and enforces [DeviceLinkCrypto.isAllowedLanOrigin].
+     */
+    fun normalizeManualTvOrigin(rawInput: String?): String? {
+        val cleaned = rawInput?.trim().orEmpty()
+        if (cleaned.isBlank()) return null
+        val withScheme = if (cleaned.startsWith("http://", ignoreCase = true) ||
+            cleaned.startsWith("https://", ignoreCase = true)
+        ) {
+            cleaned
+        } else {
+            "http://$cleaned"
+        }
+        val parsed = runCatching { java.net.URI(withScheme) }.getOrNull() ?: return null
+        val scheme = parsed.scheme?.lowercase() ?: return null
+        if (scheme != "http" && scheme != "https") return null
+        val rawHost = parsed.host?.takeIf { it.isNotBlank() } ?: return null
+        val port = if (parsed.port == -1) 8787 else parsed.port
+        if (port !in 1..65535) return null
+        val formattedHost = if (':' in rawHost && !rawHost.startsWith("[")) "[$rawHost]" else rawHost
+        val origin = "$scheme://$formattedHost:$port"
+        return origin.takeIf { DeviceLinkCrypto.isAllowedLanOrigin(it) }
+    }
+
+    /**
+     * Resolves a manual TV address (or pasted QR URL) into a [PendingDeviceLink] by querying
+     * `GET <origin>/api/link/discover` on the LAN. Fails if non-LAN, unreachable, or QR inactive.
+     */
+    suspend fun resolveTvAddress(
+        httpClient: OkHttpClient,
+        rawInput: String
+    ): Result<PendingDeviceLink> = withContext(Dispatchers.IO) {
+        parseQrOrLink(rawInput)?.let { return@withContext Result.success(it) }
+
+        val origin = normalizeManualTvOrigin(rawInput)
+            ?: return@withContext Result.failure(IllegalArgumentException("invalid_address"))
+
+        val req = Request.Builder()
+            .url("$origin/api/link/discover")
+            .get()
+            .build()
+        try {
+            httpClient.newCall(req).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                val obj = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+                val active = resp.isSuccessful && obj?.get("active")?.jsonPrimitive?.booleanOrNull == true
+                if (!active || obj == null) {
+                    return@use Result.failure(IllegalStateException("inactive"))
+                }
+                val pk = obj["pk"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                val sessionId = obj["s"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                val deviceName = obj["deviceName"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    .take(60)
+                    .ifBlank { "Quern TV" }
+                if (sessionId.length !in 12..64 ||
+                    runCatching { DeviceLinkCrypto.decodePublicKey(pk) }.isFailure
+                ) {
+                    return@use Result.failure(IllegalStateException("invalid_manifest"))
+                }
+                Result.success(
+                    PendingDeviceLink(
+                        tvOrigin = origin,
+                        tvPublicKeyB64 = pk,
+                        sessionId = sessionId,
+                        deviceName = deviceName
+                    )
+                )
+            }
+        } catch (e: IOException) {
+            Result.failure(IOException("network", e))
+        }
     }
 
     suspend fun fetchTvInfo(

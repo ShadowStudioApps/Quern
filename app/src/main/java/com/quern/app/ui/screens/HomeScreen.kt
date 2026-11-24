@@ -119,6 +119,7 @@ import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.ui.components.QuernHomeSpacing
 import com.quern.app.ui.components.buildAmbientBackdropRequest
 import com.quern.app.ui.components.buildHeroBackdropRequest
+import com.quern.app.ui.components.isTvHardware
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LocalQuernStrings
@@ -1243,7 +1244,7 @@ private fun EmptyHomeCard(
                 }
             }
 
-            if (addonsQrUrl.isNotBlank() && isTv) {
+            if (addonsQrUrl.isNotBlank() && isTvHardware(LocalContext.current)) {
                 QuernCompanionSignInCard(
                     url = addonsQrUrl,
                     session = companionSession,

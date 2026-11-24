@@ -407,4 +407,27 @@
     <string name="qa_phone_email_link">Sign in with email on your phone</string>
     <string name="qa_phone_email_help">Scan this same QR code and choose the email sign-in option on your phone.</string>
     <string name="qa_sign_out_tv_confirm_body">This TV will forget your addons, profiles and history. They come back when you sign in again.</string>
+    <string name="qa_link_tv_btn">Link a TV</string>
+    <string name="link_tv_title">Link a TV</string>
+    <string name="link_tv_subtitle">On your TV, open Settings → Accounts &amp; Sync so the sign-in QR code is visible.</string>
+    <string name="link_tv_searching">Looking for TVs on your Wi-Fi…</string>
+    <string name="link_tv_found_header">Available TVs on Wi-Fi</string>
+    <string name="link_tv_scan_qr_btn">Scan QR</string>
+    <string name="link_tv_camera_denied">Camera access was denied. You can still pick a discovered TV below or enter its address and 6-digit code manually.</string>
+    <string name="link_tv_not_found_help">No TV found automatically. Make sure the sign-in QR is open on your TV and both devices are on the same Wi-Fi, or enter the TV address shown under the QR:</string>
+    <string name="link_tv_manual_toggle">Enter TV address manually</string>
+    <string name="link_tv_address_label">TV address</string>
+    <string name="link_tv_address_placeholder">http://192.168.1.10:8787</string>
+    <string name="link_tv_connect_btn">Connect</string>
+    <string name="link_tv_connecting">Connecting…</string>
+    <string name="link_tv_err_invalid_addr">Enter a valid local Wi-Fi address (for example http://192.168.1.10:8787).</string>
+    <string name="link_tv_scan_title">Scan TV QR Code</string>
+    <string name="link_tv_scan_hint">Point your camera at the sign-in QR code on your TV. Frames never leave this device.</string>
+    <string name="link_tv_scan_invalid_qr">That QR code isn\'t a Quern TV sign-in link on your local Wi-Fi.</string>
+    <string name="link_tv_scan_camera_error">Could not start the camera. Close this scanner to use Wi-Fi discovery or manual TV address.</string>
+    <string name="qr_link_tv_address_hint">TV address: %1$s</string>
+    <string name="addons_empty_state_phone">No addons installed. Paste a manifest.json or stremio:// URL above to get started.</string>
+    <string name="addons_dialog_tip_phone">Paste a Stremio v3 manifest.json or stremio:// URL.</string>
+    <string name="account_stremio_nuvio_desc_phone">Import your installed addons directly from your Stremio account or a JSON backup.</string>
+    <string name="account_nuvio_dialog_desc_phone">Paste your JSON backup below to import your addons and settings.</string>
 </resources>

@@ -292,6 +292,7 @@ fun AddonsScreen(
 @Composable
 private fun EmptyAddonsBanner() {
     val palette = LocalQuernPalette.current
+    val isTvDevice = isTvHardware(LocalContext.current)
     Surface(
         color = palette.glassSurface,
         shape = RoundedCornerShape(18.dp),
@@ -306,7 +307,7 @@ private fun EmptyAddonsBanner() {
         ) {
             Icon(Icons.Default.Extension, contentDescription = null, tint = palette.focusRing, modifier = Modifier.size(28.dp))
             Text(
-                text = qString(R.string.addons_empty_state),
+                text = qString(if (isTvDevice) R.string.addons_empty_state else R.string.addons_empty_state_phone),
                 color = LumaTextSecondary,
                 fontSize = 13.5.sp,
                 lineHeight = 20.sp
@@ -453,6 +454,7 @@ private fun AddonUrlInstallerCard(
     }
 
     if (showUrlDialog) {
+        val isTvDevice = isTvHardware(LocalContext.current)
         var draftUrl by remember(manifestUrlInput) { mutableStateOf(manifestUrlInput) }
         AlertDialog(
             onDismissRequest = { showUrlDialog = false },
@@ -461,7 +463,7 @@ private fun AddonUrlInstallerCard(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = qString(R.string.addons_dialog_tip),
+                        text = qString(if (isTvDevice) R.string.addons_dialog_tip else R.string.addons_dialog_tip_phone),
                         color = LumaTextSecondary,
                         fontSize = 12.sp
                     )
