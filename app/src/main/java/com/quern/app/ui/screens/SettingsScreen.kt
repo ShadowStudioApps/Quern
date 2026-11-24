@@ -70,6 +70,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -118,6 +119,10 @@ import com.quern.app.data.companion.CompanionSessionState
 import com.quern.app.data.local.PinHasher
 import com.quern.app.data.local.PinMigrationState
 import com.quern.app.data.servers.ServerTestResult
+import com.quern.app.data.update.ManualCheckResult
+import com.quern.app.data.update.UpdateDownloadState
+import com.quern.app.data.update.UpdateErrorKind
+import com.quern.app.data.update.UpdateUiState
 
 import com.quern.app.domain.model.AccentColorChoice
 import com.quern.app.domain.model.AppFontChoice
@@ -291,7 +296,12 @@ fun SettingsScreen(
     onStartTraktAuth: (String, String) -> Unit,
     onConfirmTraktAuth: (String, String) -> Unit,
     onDisconnectTrakt: () -> Unit,
-    onClearCache: () -> Unit
+    onClearCache: () -> Unit,
+    updateState: UpdateUiState = UpdateUiState(),
+    onCheckForUpdates: () -> Unit = {},
+    onDownloadAndInstallUpdate: () -> Unit = {},
+    onDismissUpdate: () -> Unit = {},
+    onOpenUnknownSourcesSettings: () -> Boolean = { false }
 ) {
     val strings = LocalQuernStrings.current
     val palette = LocalQuernPalette.current
@@ -528,6 +538,11 @@ fun SettingsScreen(
                     addons = addons,
                     isTv = isTv,
                     isModified = isGroupModified(SettingsGroup.SYSTEM, settings),
+                    updateState = updateState,
+                    onCheckForUpdates = onCheckForUpdates,
+                    onDownloadAndInstallUpdate = onDownloadAndInstallUpdate,
+                    onDismissUpdate = onDismissUpdate,
+                    onOpenUnknownSourcesSettings = onOpenUnknownSourcesSettings,
                     onUpdateSettings = onUpdateSettings,
                     onApplyPreset = onApplyPreset,
                     onExportSettingsJson = onExportSettingsJson,
@@ -1886,6 +1901,11 @@ private fun SystemSectionPane(
     addons: List<InstalledAddon>,
     isTv: Boolean,
     isModified: Boolean,
+    updateState: UpdateUiState,
+    onCheckForUpdates: () -> Unit,
+    onDownloadAndInstallUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit,
+    onOpenUnknownSourcesSettings: () -> Boolean,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onApplyPreset: (QuernDevicePreset, String) -> Unit,
     onExportSettingsJson: () -> String,
@@ -1922,6 +1942,240 @@ private fun SystemSectionPane(
                 isModified = isModified,
                 onResetSection = onResetSection
             )
+        }
+
+        // 0. App Updates (official GitHub Releases)
+        item(key = "app_updates") {
+            val avail = updateState.available
+            val dl = updateState.downloadState
+            val isDownloading = dl is UpdateDownloadState.Downloading
+            val isReady = dl is UpdateDownloadState.ReadyToInstall
+            val isBlocked = dl is UpdateDownloadState.UnknownSourcesBlocked
+            SettingSectionCard(
+                title = if (avail != null) qString(R.string.update_available_title) else qString(R.string.update_section_title)
+            ) {
+                if (avail != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            color = palette.accent.copy(alpha = 0.25f),
+                            shape = RoundedCornerShape(999.dp),
+                            border = BorderStroke(1.dp, palette.focusRing.copy(alpha = 0.7f))
+                        ) {
+                            Text(
+                                text = "v${avail.version}",
+                                color = palette.focusRing,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                            )
+                        }
+                        if (avail.isPrerelease) {
+                            Surface(
+                                color = Color(0xFFF59E0B).copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(999.dp),
+                                border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.6f))
+                            ) {
+                                Text(
+                                    text = qString(R.string.update_prerelease_badge),
+                                    color = Color(0xFFFDE68A),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        if (avail.publishedDateText.isNotBlank()) {
+                            Text(
+                                text = qString(R.string.update_released_on, avail.publishedDateText),
+                                color = LumaTextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Surface(
+                        color = palette.surfaceElevated,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, palette.border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = avail.releaseNotes.ifBlank { qString(R.string.update_no_notes) },
+                            color = LumaTextPrimary.copy(alpha = 0.9f),
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            modifier = Modifier
+                                .heightIn(max = 120.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(10.dp)
+                        )
+                    }
+
+                    if (dl is UpdateDownloadState.Downloading) {
+                        Spacer(Modifier.height(10.dp))
+                        val pct = (dl.progress * 100f).toInt().coerceIn(0, 100)
+                        val sizeText = if (dl.totalBytes > 0L) {
+                            "${formatBytesReadable(dl.downloadedBytes)} / ${formatBytesReadable(dl.totalBytes)}"
+                        } else {
+                            formatBytesReadable(dl.downloadedBytes)
+                        }
+                        Text(
+                            text = qString(R.string.update_downloading, pct, sizeText),
+                            color = palette.focusRing,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { dl.progress },
+                            color = palette.focusRing,
+                            trackColor = palette.surfaceElevated,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                        )
+                    } else if (isBlocked) {
+                        Spacer(Modifier.height(10.dp))
+                        Surface(
+                            color = Color(0xFFF59E0B).copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.55f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = qString(R.string.update_unknown_sources_blocked),
+                                color = Color(0xFFFDE68A),
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    } else if (dl is UpdateDownloadState.Error) {
+                        Spacer(Modifier.height(8.dp))
+                        val errRes = when (dl.kind) {
+                            UpdateErrorKind.DOWNLOAD_FAILED -> R.string.update_download_failed
+                            UpdateErrorKind.INSTALLER_UNAVAILABLE -> R.string.update_installer_unavailable
+                        }
+                        Text(
+                            text = qString(errRes),
+                            color = LumaRed,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SelectablePillOption(
+                            label = when {
+                                isDownloading -> qString(R.string.update_action_downloading)
+                                isReady || isBlocked -> qString(R.string.update_action_install_now)
+                                else -> qString(R.string.update_action_download_install)
+                            },
+                            selected = true,
+                            onClick = { if (!isDownloading) onDownloadAndInstallUpdate() }
+                        )
+                        if (isBlocked) {
+                            SelectablePillOption(
+                                label = qString(R.string.update_action_open_permission),
+                                selected = false,
+                                onClick = { onOpenUnknownSourcesSettings() }
+                            )
+                        }
+                        if (updateState.showHomeBanner) {
+                            SelectablePillOption(
+                                label = qString(R.string.update_action_later),
+                                selected = false,
+                                onClick = onDismissUpdate
+                            )
+                        }
+                        SelectablePillOption(
+                            label = if (updateState.checking) qString(R.string.update_action_checking)
+                                else qString(R.string.update_action_check),
+                            selected = false,
+                            onClick = { if (!updateState.checking) onCheckForUpdates() }
+                        )
+                    }
+                } else {
+                    Text(
+                        text = qString(R.string.update_current_version, BuildConfig.VERSION_NAME),
+                        color = LumaTextPrimary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    when (updateState.manualCheckResult) {
+                        ManualCheckResult.UP_TO_DATE -> {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = qString(R.string.update_up_to_date),
+                                color = LumaGreen,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        ManualCheckResult.FAILED_RATE_LIMIT -> {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = qString(R.string.update_check_rate_limited),
+                                color = LumaRed,
+                                fontSize = 12.sp
+                            )
+                        }
+                        ManualCheckResult.FAILED_NETWORK -> {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = qString(R.string.update_check_failed),
+                                color = LumaRed,
+                                fontSize = 12.sp
+                            )
+                        }
+                        else -> Unit
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    SelectablePillOption(
+                        label = if (updateState.checking) qString(R.string.update_action_checking)
+                            else qString(R.string.update_action_check),
+                        selected = true,
+                        onClick = { if (!updateState.checking) onCheckForUpdates() }
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = qString(R.string.update_channel_label),
+                        color = LumaTextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    UpdateChannel.entries.forEach { ch ->
+                        SelectablePillOption(
+                            label = if (isAr) ch.labelAr else ch.labelEn,
+                            selected = settings.updateChannel == ch,
+                            onClick = {
+                                if (settings.updateChannel != ch) {
+                                    onUpdateSettings { it.copy(updateChannel = ch) }
+                                    onCheckForUpdates()
+                                }
+                            }
+                        )
+                    }
+                }
+            }
         }
 
         // 1. One-Tap Quern Device Presets (TV / Phone / Low-end Device)

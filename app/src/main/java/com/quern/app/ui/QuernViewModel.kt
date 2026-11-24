@@ -19,6 +19,8 @@ import com.quern.app.data.sync.QuernAccount
 import com.quern.app.data.sync.QuernAccountState
 import com.quern.app.data.sync.QuernSyncEngine
 import com.quern.app.data.sync.SyncStatus
+import com.quern.app.data.update.AppUpdateManager
+import com.quern.app.data.update.UpdateUiState
 import com.quern.app.domain.model.AppSettings
 import com.quern.app.domain.model.CatalogRow
 import com.quern.app.domain.model.DebridAccountStatus
@@ -67,8 +69,27 @@ class QuernViewModel(
     val settingsStore: SettingsStore,
     val cloudSyncManager: CloudSyncManager,
     val quernAccount: QuernAccount,
-    val syncEngine: QuernSyncEngine
+    val syncEngine: QuernSyncEngine,
+    val updateManager: AppUpdateManager
 ) : ViewModel() {
+
+    // ---- App updates (official GitHub Releases) ----
+    val updateState: StateFlow<UpdateUiState> = updateManager.state
+
+    fun checkForUpdatesManual() {
+        updateManager.checkNow(settingsStore.settings.value.updateChannel)
+    }
+
+    fun dismissUpdateBanner() {
+        updateManager.dismissCurrentUpdate()
+    }
+
+    fun downloadAndInstallUpdate(activityContext: android.content.Context) {
+        updateManager.downloadAndInstall(activityContext)
+    }
+
+    fun openUnknownSourcesSettings(activityContext: android.content.Context): Boolean =
+        updateManager.openUnknownSourcesSettings(activityContext)
 
     // ---- Account sync ----
     val syncStatus: StateFlow<SyncStatus> = syncEngine.status
@@ -900,10 +921,11 @@ class QuernViewModel(
         private val settingsStore: SettingsStore,
         private val cloudSyncManager: CloudSyncManager,
         private val quernAccount: QuernAccount,
-        private val syncEngine: QuernSyncEngine
+        private val syncEngine: QuernSyncEngine,
+        private val updateManager: AppUpdateManager
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            QuernViewModel(repository, settingsStore, cloudSyncManager, quernAccount, syncEngine) as T
+            QuernViewModel(repository, settingsStore, cloudSyncManager, quernAccount, syncEngine, updateManager) as T
     }
 }

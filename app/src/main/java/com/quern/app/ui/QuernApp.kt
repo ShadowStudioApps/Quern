@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -104,6 +105,7 @@ import com.quern.app.domain.model.UserProfile
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LocalQuernStrings
+import com.quern.app.ui.theme.LumaGreen
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
 import com.quern.app.ui.theme.QuernGlassBorderBrush
@@ -131,6 +133,7 @@ fun QuernApp(
 ) {
     val settings by viewModel.appSettings.collectAsState()
     val pinMigrationState by viewModel.pinMigrationState.collectAsState()
+    val updateState by viewModel.updateState.collectAsState()
 
     QuernTheme(
         themePreset = settings.theme,
@@ -307,7 +310,13 @@ fun QuernApp(
                                 continueWatchingSort = settings.continueWatchingSort,
                                 cardSize = settings.cardSize,
                                 cardShape = settings.cardShape,
-                                cardCorner = settings.cardCorner
+                                cardCorner = settings.cardCorner,
+                                updateBannerRelease = if (updateState.showHomeBanner) updateState.available else null,
+                                onOpenUpdate = {
+                                    settingsInitialGroup = SettingsGroup.SYSTEM
+                                    currentTab = QuernTab.SETTINGS
+                                },
+                                onDismissUpdate = { viewModel.dismissUpdateBanner() }
                             )
                         }
 
@@ -429,7 +438,12 @@ fun QuernApp(
                                     context.imageLoader.memoryCache?.clear()
                                     context.imageLoader.diskCache?.clear()
                                     viewModel.showToast("Cache cleared!")
-                                }
+                                },
+                                updateState = updateState,
+                                onCheckForUpdates = { viewModel.checkForUpdatesManual() },
+                                onDownloadAndInstallUpdate = { viewModel.downloadAndInstallUpdate(context) },
+                                onDismissUpdate = { viewModel.dismissUpdateBanner() },
+                                onOpenUnknownSourcesSettings = { viewModel.openUnknownSourcesSettings(context) }
                             )
                         }
                     }
@@ -468,6 +482,7 @@ fun QuernApp(
                             if (!showingDetail) {
                                 QuernTvTopNavBar(
                                     currentTab = currentTab,
+                                    hasSettingsUpdateDot = updateState.showSettingsDot,
                                     onSelectTab = { currentTab = it }
                                 )
                             }
@@ -564,6 +579,7 @@ fun QuernApp(
                                         profilePickerOpen = true
                                         profilePickerShownThisLaunch = true
                                     },
+                                    hasSettingsUpdateDot = updateState.showSettingsDot,
                                     focusSyncSignal = railFocusSyncSignal,
                                     onRailFocusChanged = { collapsedRailFocused = it },
                                     onSelectTab = { currentTab = it }
@@ -587,6 +603,7 @@ fun QuernApp(
                     if (!showingDetail) {
                         QuernFloatingPhoneDock(
                             currentTab = currentTab,
+                            hasSettingsUpdateDot = updateState.showSettingsDot,
                             onSelectTab = { currentTab = it },
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -614,6 +631,7 @@ private fun tabLabel(tab: QuernTab): String {
 @Composable
 fun QuernTvTopNavBar(
     currentTab: QuernTab,
+    hasSettingsUpdateDot: Boolean = false,
     onSelectTab: (QuernTab) -> Unit
 ) {
     val palette = LocalQuernPalette.current
@@ -694,7 +712,18 @@ fun QuernTvTopNavBar(
                             .padding(horizontal = 18.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(tab.icon, contentDescription = label, tint = fg, modifier = Modifier.size(18.dp))
+                        Box {
+                            Icon(tab.icon, contentDescription = label, tint = fg, modifier = Modifier.size(18.dp))
+                            if (tab == QuernTab.SETTINGS && hasSettingsUpdateDot) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(LumaGreen)
+                                )
+                            }
+                        }
                         Spacer(Modifier.width(7.dp))
                         Text(
                             text = label,
@@ -712,6 +741,7 @@ fun QuernTvTopNavBar(
 @Composable
 fun QuernFloatingPhoneDock(
     currentTab: QuernTab,
+    hasSettingsUpdateDot: Boolean = false,
     onSelectTab: (QuernTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -751,12 +781,23 @@ fun QuernFloatingPhoneDock(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = label,
-                            tint = if (selected) palette.onAccent else LumaTextSecondary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Box {
+                            Icon(
+                                imageVector = tab.icon,
+                                contentDescription = label,
+                                tint = if (selected) palette.onAccent else LumaTextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            if (tab == QuernTab.SETTINGS && hasSettingsUpdateDot) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(LumaGreen)
+                                )
+                            }
+                        }
                         if (selected) {
                             Text(
                                 text = label,
@@ -790,6 +831,7 @@ fun QuernTvNavigationRail(
     autoHideCollapsed: Boolean = false,
     activeProfile: UserProfile? = null,
     onOpenProfiles: (() -> Unit)? = null,
+    hasSettingsUpdateDot: Boolean = false,
     focusSyncSignal: Int = 0,
     onRailFocusChanged: ((Boolean) -> Unit)? = null,
     onSelectTab: (QuernTab) -> Unit
@@ -967,12 +1009,23 @@ fun QuernTvNavigationRail(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Start
                 ) {
-                    Icon(
-                        imageVector = tab.icon,
-                        contentDescription = label,
-                        tint = itemTint,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Box {
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = label,
+                            tint = itemTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        if (tab == QuernTab.SETTINGS && hasSettingsUpdateDot) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(LumaGreen)
+                            )
+                        }
+                    }
                     Spacer(Modifier.width(10.dp))
                     Text(
                         text = label,

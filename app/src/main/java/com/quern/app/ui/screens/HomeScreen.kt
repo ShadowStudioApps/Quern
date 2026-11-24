@@ -69,6 +69,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.quern.app.R
 import com.quern.app.data.companion.CompanionSessionState
+import com.quern.app.data.update.AvailableUpdate
 import com.quern.app.domain.model.CardCornerPreset
 import com.quern.app.domain.model.CardShapePreset
 import com.quern.app.domain.model.CardSizePreset
@@ -119,7 +120,10 @@ fun HomeScreen(
     continueWatchingSort: ContinueWatchingSort = ContinueWatchingSort.RECENT,
     cardSize: CardSizePreset = CardSizePreset.STANDARD,
     cardShape: CardShapePreset = CardShapePreset.PORTRAIT,
-    cardCorner: CardCornerPreset = CardCornerPreset.ROUNDED
+    cardCorner: CardCornerPreset = CardCornerPreset.ROUNDED,
+    updateBannerRelease: AvailableUpdate? = null,
+    onOpenUpdate: () -> Unit = {},
+    onDismissUpdate: () -> Unit = {}
 ) {
     val palette = LocalQuernPalette.current
     var selectedCategory by remember { mutableStateOf("All") }
@@ -258,6 +262,14 @@ fun HomeScreen(
             // HomeHeroSection dissolves cleanly into palette.background at its bottom edge so
             // LazyColumn sits directly underneath with ZERO GPU overdraw and ZERO sliced rows.
             Column(modifier = Modifier.fillMaxSize()) {
+                if (updateBannerRelease != null) {
+                    HomeUpdateBanner(
+                        release = updateBannerRelease,
+                        isTv = true,
+                        onOpenUpdate = onOpenUpdate,
+                        onDismiss = onDismissUpdate
+                    )
+                }
                 HomeHeroSection(
                     featuredSlides = featuredSlides,
                     pendingHeroFocus = pendingHeroFocus,
@@ -325,6 +337,16 @@ fun HomeScreen(
                 contentPadding = PaddingValues(bottom = 72.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (updateBannerRelease != null) {
+                    item(key = "update_banner") {
+                        HomeUpdateBanner(
+                            release = updateBannerRelease,
+                            isTv = isTv,
+                            onOpenUpdate = onOpenUpdate,
+                            onDismiss = onDismissUpdate
+                        )
+                    }
+                }
                 if (featuredSlides.isNotEmpty() && showHeroBanner) {
                     item(key = "hero") {
                         HomeHeroSection(
@@ -379,6 +401,98 @@ fun HomeScreen(
                         onItemFocused = if (isTv) onPosterFocused else null
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeUpdateBanner(
+    release: AvailableUpdate,
+    isTv: Boolean,
+    onOpenUpdate: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val palette = LocalQuernPalette.current
+    val railInset = if (isTv) LocalTvRailInset.current else 0.dp
+    var updateFocused by remember { mutableStateOf(false) }
+    var laterFocused by remember { mutableStateOf(false) }
+
+    Surface(
+        color = palette.surfaceElevated.copy(alpha = 0.94f),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, palette.focusRing.copy(alpha = 0.45f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = if (isTv) railInset + 16.dp else 12.dp,
+                end = if (isTv) 20.dp else 12.dp,
+                top = if (isTv) 8.dp else 10.dp,
+                bottom = 2.dp
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(palette.focusRing)
+            )
+            Text(
+                text = qString(R.string.update_banner_text, release.version),
+                color = LumaTextPrimary,
+                fontSize = if (isTv) 12.5.sp else 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Surface(
+                color = if (updateFocused) palette.focusRing else palette.accent,
+                shape = RoundedCornerShape(999.dp),
+                border = if (updateFocused) BorderStroke(1.5.dp, Color.White) else null,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .tvClickable(
+                        onFocusChangedState = { updateFocused = it },
+                        onClick = onOpenUpdate
+                    )
+            ) {
+                Text(
+                    text = qString(R.string.update_action_view),
+                    color = if (updateFocused) Color.Black else palette.onAccent,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                )
+            }
+            Surface(
+                color = if (laterFocused) palette.accent else palette.surface,
+                shape = RoundedCornerShape(999.dp),
+                border = BorderStroke(
+                    width = if (laterFocused) 1.5.dp else 1.dp,
+                    color = if (laterFocused) palette.focusRing else palette.border
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .tvClickable(
+                        onFocusChangedState = { laterFocused = it },
+                        onClick = onDismiss
+                    )
+            ) {
+                Text(
+                    text = qString(R.string.update_action_later),
+                    color = if (laterFocused) palette.onAccent else LumaTextSecondary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                )
             }
         }
     }

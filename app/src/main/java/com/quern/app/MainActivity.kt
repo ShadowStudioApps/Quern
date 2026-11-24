@@ -27,7 +27,8 @@ class MainActivity : ComponentActivity() {
                 container.settingsStore,
                 container.cloudSyncManager,
                 container.quernAccount,
-                container.syncEngine
+                container.syncEngine,
+                container.updateManager
             )
         )[QuernViewModel::class.java]
 
@@ -43,8 +44,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        val container = (application as QuernApplication).container
         // Pull account changes made on other devices or the website while the app was in the background.
-        (application as QuernApplication).container.syncEngine.onForeground()
+        container.syncEngine.onForeground()
+        // Check GitHub Releases at most once every 12 hours (silent on rate limits / offline).
+        container.updateManager.checkIfDue(container.settingsStore.settings.value.updateChannel)
     }
 
     override fun onNewIntent(intent: Intent) {

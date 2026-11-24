@@ -345,4 +345,27 @@
     <string name="qa_err_server">صار خطأ بالسيرفر. جرّب بعدين.</string>
     <string name="profile_picker_title">مين يشاهد؟</string>
     <string name="profile_picker_pin_subtitle">اكتب الرمز السري المكوّن من 4 أرقام لهذا البروفايل</string>
+    <string name="update_section_title">تحديثات التطبيق</string>
+    <string name="update_available_title">يتوفر تحديث جديد</string>
+    <string name="update_banner_text">يتوفر إصدار Quern v%1$s</string>
+    <string name="update_action_view">تحديث</string>
+    <string name="update_action_later">لاحقاً</string>
+    <string name="update_action_download_install">تنزيل وتثبيت</string>
+    <string name="update_action_install_now">تثبيت التحديث</string>
+    <string name="update_action_check">التحقق من التحديثات</string>
+    <string name="update_action_checking">جاري التحقق…</string>
+    <string name="update_action_downloading">جاري التنزيل…</string>
+    <string name="update_action_open_permission">فتح إذن التثبيت</string>
+    <string name="update_channel_label">قناة التحديث</string>
+    <string name="update_current_version">الإصدار الحالي: v%1$s</string>
+    <string name="update_released_on">تاريخ الإصدار %1$s</string>
+    <string name="update_prerelease_badge">تجريبي</string>
+    <string name="update_up_to_date">تستخدم أحدث إصدار بالفعل.</string>
+    <string name="update_check_rate_limited">تم بلوغ حد طلبات GitHub. جرّب مرة ثانية لاحقاً.</string>
+    <string name="update_check_failed">تعذّر التحقق من التحديثات. تأكد من اتصال الإنترنت.</string>
+    <string name="update_downloading">جاري تنزيل التحديث… %1$d%% (%2$s)</string>
+    <string name="update_download_failed">فشل التنزيل. تأكد من الاتصال وجرّب مرة ثانية.</string>
+    <string name="update_installer_unavailable">لم يفتح مثبّت الحزم على هذا الجهاز. اسمح بتثبيت التطبيقات من إعدادات النظام أو ثبّت الملف يدوياً.</string>
+    <string name="update_unknown_sources_blocked">التلفزيون يمنع التثبيت من مصادر غير معروفة. اسمح لـ Quern من الإعدادات ← التطبيقات ← الوصول الخاص ← تثبيت التطبيقات المجهولة، ثم اضغط تنزيل وتثبيت مرة أخرى.</string>
+    <string name="update_no_notes">لا توجد ملاحظات لهذا الإصدار.</string>
 </resources>

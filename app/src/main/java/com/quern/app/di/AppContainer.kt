@@ -21,6 +21,7 @@ import com.quern.app.data.servers.WebDavClient
 import com.quern.app.data.sync.CloudSyncManager
 import com.quern.app.data.sync.QuernAccount
 import com.quern.app.data.sync.QuernSyncEngine
+import com.quern.app.data.update.AppUpdateManager
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -125,5 +126,11 @@ class AppContainer(context: Context) {
         vault = vault,
         repository = repository,
         settingsStore = settingsStore
+    )
+
+    val updateManager = AppUpdateManager(
+        context = context.applicationContext,
+        httpClient = httpClient,
+        json = json
     )
 }
