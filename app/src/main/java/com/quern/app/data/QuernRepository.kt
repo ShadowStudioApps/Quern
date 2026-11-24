@@ -32,6 +32,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import android.os.SystemClock
+import android.util.Log
 
 /** Tombstone kinds shared with the sync engine. */
 const val KIND_FAVORITE = "favorite"
@@ -180,52 +182,33 @@ class QuernRepository(
         hiddenCatalogKeys: Set<String> = emptySet(),
         onRowsUpdated: (rows: List<CatalogRow>, isComplete: Boolean) -> Unit
     ) {
+        val started = SystemClock.elapsedRealtime()
         val specs = addonRepository.planHomeCatalogSpecs(hiddenCatalogKeys)
-        val initialSpecs = specs.take(AddonRepository.INITIAL_HOME_BATCH_SIZE)
-        val remainingChunks = specs
-            .drop(AddonRepository.INITIAL_HOME_BATCH_SIZE)
+        val firstSpecs = specs.take(AddonRepository.INITIAL_HOME_BATCH_SIZE)
+        val remainingChunks = specs.drop(AddonRepository.INITIAL_HOME_BATCH_SIZE)
             .chunked(AddonRepository.BACKGROUND_HOME_BATCH_SIZE)
-
-        val accumulated = ArrayList<CatalogRow>()
 
         coroutineScope {
             val tmdbDeferred = async { tmdbClient.getHomeCatalogRows() }
             val serversDeferred = async { serverManager.getAllCatalogRows() }
-            val firstBatchDeferred = async { addonRepository.fetchCatalogBatch(initialSpecs) }
+            val firstAddonsDeferred = async { addonRepository.fetchCatalogBatch(firstSpecs) }
+            val allRows = (serversDeferred.await() + tmdbDeferred.await() + firstAddonsDeferred.await())
+                .toMutableList()
 
-            accumulated.addAll(serversDeferred.await())
-            accumulated.addAll(tmdbDeferred.await())
-            accumulated.addAll(firstBatchDeferred.await())
-        }
+            Log.i("QuernCatalogs", "First Home batch in ${SystemClock.elapsedRealtime() - started} ms (n=${allRows.size})")
+            onRowsUpdated(allRows.toList(), remainingChunks.isEmpty())
 
-        val doneInitially = remainingChunks.isEmpty()
-        onRowsUpdated(accumulated.toList(), doneInitially)
-        if (doneInitially) {
-            logLoadedHomeSummary(accumulated)
-            return
-        }
-
-        remainingChunks.forEachIndexed { idx, chunk ->
-            val chunkRows = addonRepository.fetchCatalogBatch(chunk)
-            val isLast = idx == remainingChunks.lastIndex
-            if (chunkRows.isNotEmpty() || isLast) {
-                accumulated.addAll(chunkRows)
-                onRowsUpdated(accumulated.toList(), isLast)
+            remainingChunks.forEachIndexed { index, chunk ->
+                val batch = addonRepository.fetchCatalogBatch(chunk)
+                val isComplete = index == remainingChunks.lastIndex
+                if (batch.isNotEmpty() || isComplete) {
+                    allRows.addAll(batch)
+                    onRowsUpdated(allRows.toList(), isComplete)
+                }
             }
-        }
-        logLoadedHomeSummary(accumulated)
-    }
 
-    private fun logLoadedHomeSummary(rows: List<CatalogRow>) {
-        val bySource = LinkedHashMap<String, Int>()
-        for (r in rows) {
-            val group = if ("•" in r.title) r.title.substringAfterLast("•").trim() else r.origin.displayName
-            bySource[group] = (bySource[group] ?: 0) + 1
+            Log.i("QuernCatalogs", "All Home rows in ${SystemClock.elapsedRealtime() - started} ms (n=${allRows.size})")
         }
-        android.util.Log.i(
-            "QuernCatalogs",
-            "Loaded ${rows.size} Home row(s): [${bySource.entries.joinToString(", ") { "${it.key}=${it.value}" }}] | titles=${rows.joinToString(" | ") { it.title }}"
-        )
     }
 
     suspend fun searchEverywhere(query: String): List<MediaItem> = coroutineScope {

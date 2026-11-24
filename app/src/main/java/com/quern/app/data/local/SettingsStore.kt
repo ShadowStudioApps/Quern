@@ -56,7 +56,7 @@ import kotlinx.serialization.json.put
 private data class NonSecretSettingsSnapshot(
     val version: Int = 1,
     val language: String = AppLanguage.SYSTEM.name,
-    val theme: String = AppThemePreset.LIGHT_DARK_BLUE.name,
+    val theme: String = AppThemePreset.GLOSSY_BLACK.name,
     val amoledPureBlack: Boolean = true,
     val accentColor: String = AccentColorChoice.THEME_DEFAULT.name,
     val fontChoice: String = AppFontChoice.DEFAULT.name,

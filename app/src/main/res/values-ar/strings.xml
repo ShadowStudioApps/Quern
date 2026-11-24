@@ -430,4 +430,8 @@
     <string name="addons_dialog_tip_phone">الصق رابط Stremio v3 manifest.json أو stremio://.</string>
     <string name="account_stremio_nuvio_desc_phone">استورد إضافاتك المثبتة مباشرة من حساب Stremio أو من نسخة JSON احتياطية.</string>
     <string name="account_nuvio_dialog_desc_phone">الصق النسخة الاحتياطية بصيغة JSON أدناه لاستيراد الإضافات والإعدادات.</string>
+    <string name="home_qr_sign_in">سجّل الدخول أو أنشئ حساباً</string>
+    <string name="home_qr_sign_in_steps">امسح الرمز بكاميرا موبايلك لتسجيل الدخول أو إنشاء حساب Quern مجاني. ترجع إضافاتك وإعداداتك تلقائياً.</string>
+    <string name="home_qr_after_sign_in">حساب جديد؟ بعد تسجيل الدخول فعّل خدماتك وإضافاتك من الإعدادات.</string>
+    <string name="home_qr_add_addons">أضف الإضافات من موبايلك</string>
 </resources>

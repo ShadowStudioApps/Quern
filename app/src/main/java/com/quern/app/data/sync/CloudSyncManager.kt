@@ -34,7 +34,7 @@ data class QuernSyncBundle(
     val version: Int = 1,
     val addonUrls: List<String> = emptyList(),
     val language: String = "SYSTEM",
-    val theme: String = "LIGHT_DARK_BLUE",
+    val theme: String = "GLOSSY_BLACK",
     val amoledPureBlack: Boolean = true,
     val subtitleLanguage: String = "ARABIC",
     val audioLanguage: String = "ORIGINAL",

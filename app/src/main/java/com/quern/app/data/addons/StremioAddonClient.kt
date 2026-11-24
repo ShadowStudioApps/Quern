@@ -19,6 +19,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 
 /**
  * Implements the open Stremio Addon Protocol v3 (manifest, catalog, meta, stream, subtitles).
@@ -45,10 +46,12 @@ class StremioAddonClient(
         return manifestUrl to baseUrl
     }
 
-    suspend fun fetchManifest(rawUrl: String): Pair<InstalledAddon, String> = withContext(Dispatchers.IO) {
+    suspend fun fetchManifest(rawUrl: String, timeoutMs: Long? = null): Pair<InstalledAddon, String> = withContext(Dispatchers.IO) {
         val (manifestUrl, baseUrl) = normalizeManifestUrl(rawUrl)
         val req = Request.Builder().url(manifestUrl).build()
-        httpClient.newCall(req).execute().use { resp ->
+        val call = httpClient.newCall(req)
+        if (timeoutMs != null) call.timeout().timeout(timeoutMs, TimeUnit.MILLISECONDS)
+        call.execute().use { resp ->
             if (!resp.isSuccessful) error("Failed to fetch addon manifest (HTTP ${resp.code})")
             val body = resp.body?.string().orEmpty()
             val manifest = json.decodeFromString<AddonManifest>(body)

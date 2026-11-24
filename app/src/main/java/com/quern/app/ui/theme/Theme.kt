@@ -164,7 +164,7 @@ val LocalQuernPalette = staticCompositionLocalOf {
 }
 
 val LocalQuernAccent = staticCompositionLocalOf { Color(0xFF345372) }
-val LocalQuernThemePreset = staticCompositionLocalOf { AppThemePreset.LIGHT_DARK_BLUE }
+val LocalQuernThemePreset = staticCompositionLocalOf { AppThemePreset.GLOSSY_BLACK }
 /** Effective root-scaled + font-scaled Density so Dialog windows can re-apply it. */
 val LocalQuernScaledDensity = staticCompositionLocalOf<Density?> { null }
 val LocalQuernResources = staticCompositionLocalOf<Resources?> { null }
@@ -220,7 +220,7 @@ private val QuernTypography = Typography(
 
 @Composable
 fun QuernTheme(
-    themePreset: AppThemePreset = AppThemePreset.LIGHT_DARK_BLUE,
+    themePreset: AppThemePreset = AppThemePreset.GLOSSY_BLACK,
     amoledPureBlack: Boolean = true,
     language: AppLanguage = AppLanguage.SYSTEM,
     accentOverrideHex: Long? = null,

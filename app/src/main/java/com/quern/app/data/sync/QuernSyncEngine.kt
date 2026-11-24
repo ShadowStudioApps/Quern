@@ -2,6 +2,7 @@ package com.quern.app.data.sync
 
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import com.quern.app.BuildConfig
@@ -40,6 +41,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -56,6 +58,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -88,7 +92,8 @@ data class SyncStatus(
      * An encrypted section on the server can't be decrypted with this device's key (the password
      * was reset elsewhere). Encrypted sections stop uploading until the user signs in again.
      */
-    val keyMismatch: Boolean = false
+    val keyMismatch: Boolean = false,
+    val firstPullAttemptedFor: String? = null
 )
 
 /**
@@ -283,7 +288,9 @@ class QuernSyncEngine(
     suspend fun syncNow() {
         if (!account.state.value.isSignedIn) return
         lock.withLock {
-            if (!account.state.value.isSignedIn || hasPendingAccountReset()) return
+            val session = account.state.value
+            if (!session.isSignedIn || hasPendingAccountReset()) return
+            val userId = session.userId
             _status.value = _status.value.copy(running = true)
             val error = runStep {
                 pullAll()
@@ -293,7 +300,10 @@ class QuernSyncEngine(
                     vault.commitStrings(mapOf(KEY_RESTORE_PENDING to ""))
                 }
             }
-            finish(error)
+            val currentSession = account.state.value
+            if (currentSession.isSignedIn && currentSession.userId == userId) {
+                finish(error, userId)
+            }
         }
     }
 
@@ -322,11 +332,12 @@ class QuernSyncEngine(
         AccountError.SERVER
     }
 
-    private fun finish(error: AccountError?) {
+    private fun finish(error: AccountError?, userId: String) {
         val now = System.currentTimeMillis()
         if (error == null) vault.putString(KEY_LAST_SYNC, now.toString())
         _status.value = _status.value.copy(
             running = false,
+            firstPullAttemptedFor = userId,
             lastError = error,
             lastSyncAt = if (error == null) now else _status.value.lastSyncAt
         )
@@ -335,24 +346,45 @@ class QuernSyncEngine(
     // ---------------------------------------------------------------- pull
 
     private suspend fun pullAll() {
-        val revisions = fetchRows(select = "section,revision,encrypted", sections = null)
-            .associateBy { it.section }
-        val stale = activeSections.filter { s ->
-            val remote = revisions[s.key] ?: return@filter false
-            remote.revision > lastRevision(s)
-        }
-        if (stale.isEmpty()) return
-        val rows = fetchRows(select = "section,revision,encrypted,payload,updated_at", sections = stale.map { it.key })
-            .associateBy { it.section }
-        var profilesApplied = false
-        stale.forEach { s ->
-            rows[s.key]?.let {
-                applyRow(s, it)
-                if (s == Section.PROFILES) profilesApplied = true
+        val started = SystemClock.elapsedRealtime()
+        var revisionsMs = 0L
+        var rowsMs = 0L
+        var addonsMs = 0L
+        var addonCount = 0
+        try {
+            val revisions = fetchRows(select = "section,revision,encrypted", sections = null)
+                .associateBy { it.section }
+            revisionsMs = SystemClock.elapsedRealtime() - started
+            val stale = activeSections.filter { section ->
+                val remote = revisions[section.key] ?: return@filter false
+                remote.revision > lastRevision(section)
             }
+            if (stale.isEmpty()) return
+
+            val rowsStarted = SystemClock.elapsedRealtime()
+            val rows = fetchRows(select = "section,revision,encrypted,payload,updated_at", sections = stale.map { it.key })
+                .associateBy { it.section }
+            rowsMs = SystemClock.elapsedRealtime() - rowsStarted
+            rows[Section.ADDONS.key]?.let { row ->
+                val addonsStarted = SystemClock.elapsedRealtime()
+                applyRow(Section.ADDONS, row)
+                addonsMs = SystemClock.elapsedRealtime() - addonsStarted
+                addonCount = addonDao.getAll().size
+            }
+
+            var profilesApplied = false
+            stale.forEach { section ->
+                if (section != Section.ADDONS) rows[section.key]?.let { row ->
+                    applyRow(section, row)
+                    if (section == Section.PROFILES) profilesApplied = true
+                }
+            }
+            // Notify after all stale sections (including secrets with profile PINs) have been applied.
+            if (profilesApplied) _profilesAppliedCount.value += 1
+        } finally {
+            val totalMs = SystemClock.elapsedRealtime() - started
+            Log.i(TAG, "pullAll took $totalMs ms (revisions $revisionsMs ms, rows $rowsMs ms, addons $addonsMs ms, n=$addonCount)")
         }
-        // Notify after all stale sections (including `secrets` with profile PINs) have been applied.
-        if (profilesApplied) _profilesAppliedCount.value += 1
     }
 
     private suspend fun pullSection(s: Section) {
@@ -600,13 +632,39 @@ class QuernSyncEngine(
             .toSet()
 
         val installed = addonDao.getAll().map { it.manifestUrl }.toMutableSet()
-        // installAddon may normalize the URL (stremio:// -> https://), so remember what it stored.
+        val missingUrls = remote.map { it.first }.distinct().filterNot { it in installed }
+        val fetched = coroutineScope {
+            val limiter = Semaphore(6)
+            missingUrls.associateWith { url ->
+                async {
+                    limiter.withPermit {
+                        try {
+                            addonRepository.fetchAddonManifest(url, timeoutMs = 8_000L)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                }
+            }.mapValues { (_, task) -> task.await() }
+        }
+
+        // Persist in remote order and keep the normalized URL used by Room.
         val resolved = LinkedHashMap<String, Boolean>()
         for ((url, enabled, _) in remote) {
             val stored = if (url in installed) {
                 url
             } else {
-                addonRepository.installAddon(url).getOrNull()?.manifestUrl?.also { installed += it }
+                fetched[url]?.let { manifest ->
+                    try {
+                        addonRepository.storeFetchedAddon(manifest).manifestUrl.also { installed += it }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
             }
             if (stored != null) resolved[stored] = enabled
         }

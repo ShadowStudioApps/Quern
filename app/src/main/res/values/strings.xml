@@ -430,4 +430,8 @@
     <string name="addons_dialog_tip_phone">Paste a Stremio v3 manifest.json or stremio:// URL.</string>
     <string name="account_stremio_nuvio_desc_phone">Import your installed addons directly from your Stremio account or a JSON backup.</string>
     <string name="account_nuvio_dialog_desc_phone">Paste your JSON backup below to import your addons and settings.</string>
+    <string name="home_qr_sign_in">Sign in or create an account</string>
+    <string name="home_qr_sign_in_steps">Scan with your phone camera to sign in or create a free Quern account. Your addons and settings come back automatically.</string>
+    <string name="home_qr_after_sign_in">New account? After signing in, turn on your services and addons from Settings.</string>
+    <string name="home_qr_add_addons">Add addons from your phone</string>
 </resources>

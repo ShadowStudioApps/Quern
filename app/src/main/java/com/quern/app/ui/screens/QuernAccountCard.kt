@@ -359,7 +359,12 @@ internal fun QuernAccountCard(account: AccountUi, isTv: Boolean = false) {
  * - Auto-refreshes after 5 minutes; locks after 5 wrong 6-digit codes until manually refreshed.
  */
 @Composable
-private fun TvDeviceLinkQrPanel(account: AccountUi) {
+internal fun TvDeviceLinkQrPanel(
+    account: AccountUi,
+    titleRes: Int = R.string.qr_link_title,
+    stepsRes: Int = R.string.qr_link_steps,
+    refreshModifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val palette = LocalQuernPalette.current
     val link = account.deviceLink
@@ -445,7 +450,7 @@ private fun TvDeviceLinkQrPanel(account: AccountUi) {
                     ) {
                         Icon(Icons.Default.QrCode2, null, tint = palette.focusRing, modifier = Modifier.size(20.dp))
                         Text(
-                            text = qString(R.string.qr_link_title),
+                            text = qString(titleRes),
                             color = LumaTextPrimary,
                             fontSize = 15.5.sp,
                             fontWeight = FontWeight.Bold
@@ -496,7 +501,7 @@ private fun TvDeviceLinkQrPanel(account: AccountUi) {
                 }
 
                 Text(
-                    text = qString(R.string.qr_link_steps),
+                    text = qString(stepsRes),
                     color = LumaTextSecondary,
                     fontSize = 12.5.sp,
                     lineHeight = 17.sp
@@ -530,7 +535,7 @@ private fun TvDeviceLinkQrPanel(account: AccountUi) {
                         width = if (refreshFocused) 2.5.dp else 1.dp,
                         color = if (refreshFocused) palette.focusRing else palette.border
                     ),
-                    modifier = Modifier
+                    modifier = refreshModifier
                         .clip(RoundedCornerShape(999.dp))
                         .tvClickable(
                             onFocusChangedState = { refreshFocused = it },

@@ -73,7 +73,14 @@ class AddonRepository(
         dao.getAll().filter { it.enabled }.mapNotNull { it.toInstalledAddon() }
 
     suspend fun installAddon(rawManifestUrl: String): Result<InstalledAddon> = runCatching {
-        val (installed, rawJson) = client.fetchManifest(rawManifestUrl)
+        storeFetchedAddon(fetchAddonManifest(rawManifestUrl))
+    }
+
+    internal suspend fun fetchAddonManifest(rawUrl: String, timeoutMs: Long? = null) =
+        client.fetchManifest(rawUrl, timeoutMs)
+
+    internal suspend fun storeFetchedAddon(manifest: Pair<InstalledAddon, String>): InstalledAddon {
+        val (installed, rawJson) = manifest
         val nextPriority = dao.getAll().size
         dao.upsert(
             AddonEntity(
@@ -86,7 +93,7 @@ class AddonRepository(
                 priority = nextPriority
             )
         )
-        installed.copy(priority = nextPriority)
+        return installed.copy(priority = nextPriority)
     }
 
     suspend fun checkAddonHealth(manifestUrl: String): AddonHealthResult {
@@ -245,11 +252,9 @@ class AddonRepository(
     suspend fun planHomeCatalogSpecs(hiddenCatalogKeys: Set<String> = emptySet()): List<HomeCatalogSpec> {
         val enabled = getEnabledAddons()
         val usedRowIds = HashSet<String>()
-        val perAddonLog = ArrayList<String>(enabled.size)
         val specs = ArrayList<HomeCatalogSpec>()
 
         for (addon in enabled) {
-            var addonSpecCount = 0
             for (catalog in addon.manifest.catalogs) {
                 val extraArgs = catalog.defaultHomeExtraArgs() ?: continue
                 val visKey = catalog.visibilityKey(addon.manifest.id)
@@ -268,12 +273,10 @@ class AddonRepository(
                     catalog = catalog,
                     extraArgs = extraArgs
                 )
-                addonSpecCount++
             }
-            perAddonLog += "${addon.manifest.name}:$addonSpecCount/${addon.manifest.catalogs.size}"
         }
 
-        Log.i(TAG, "Planned ${specs.size} Home catalog(s) [${perAddonLog.joinToString(", ")}]")
+        Log.i(TAG, "Planned ${specs.size} Home catalog(s)")
         return specs
     }
 

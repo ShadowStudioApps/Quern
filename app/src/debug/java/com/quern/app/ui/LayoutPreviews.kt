@@ -138,8 +138,7 @@ fun Compact360HomePreview() {
             onContinueClick = {},
             onOpenAddons = {},
             onOpenServers = {},
-            onRefresh = {},
-            addonsQrUrl = ""
+            onRefresh = {}
         )
     }
 }
@@ -157,8 +156,7 @@ fun Compact412HomePreview() {
             onContinueClick = {},
             onOpenAddons = {},
             onOpenServers = {},
-            onRefresh = {},
-            addonsQrUrl = ""
+            onRefresh = {}
         )
     }
 }
@@ -177,8 +175,7 @@ fun Compact412ScaledHomePreview() {
             onContinueClick = {},
             onOpenAddons = {},
             onOpenServers = {},
-            onRefresh = {},
-            addonsQrUrl = ""
+            onRefresh = {}
         )
     }
 }
@@ -196,8 +193,7 @@ fun WideFoldableHomePreview() {
             onContinueClick = {},
             onOpenAddons = {},
             onOpenServers = {},
-            onRefresh = {},
-            addonsQrUrl = ""
+            onRefresh = {}
         )
     }
 }
@@ -215,8 +211,7 @@ fun WideTabletPortraitHomePreview() {
             onContinueClick = {},
             onOpenAddons = {},
             onOpenServers = {},
-            onRefresh = {},
-            addonsQrUrl = ""
+            onRefresh = {}
         )
     }
 }
@@ -234,8 +229,7 @@ fun WideTabletLandscapeHomePreview() {
             onContinueClick = {},
             onOpenAddons = {},
             onOpenServers = {},
-            onRefresh = {},
-            addonsQrUrl = ""
+            onRefresh = {}
         )
     }
 }

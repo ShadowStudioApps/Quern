@@ -393,7 +393,7 @@ data class UserProfile(
 
 data class AppSettings(
     val language: AppLanguage = AppLanguage.SYSTEM,
-    val theme: AppThemePreset = AppThemePreset.LIGHT_DARK_BLUE,
+    val theme: AppThemePreset = AppThemePreset.GLOSSY_BLACK,
     val amoledPureBlack: Boolean = true,
     val accentColor: AccentColorChoice = AccentColorChoice.THEME_DEFAULT,
     val fontChoice: AppFontChoice = AppFontChoice.DEFAULT,

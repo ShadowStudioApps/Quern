@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -47,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -87,6 +89,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
@@ -96,7 +99,6 @@ import coil.compose.AsyncImage
 import coil.imageLoader
 import coil.request.ImageRequest
 import com.quern.app.R
-import com.quern.app.data.companion.CompanionSessionState
 import com.quern.app.data.update.AvailableUpdate
 import com.quern.app.domain.model.CardCornerPreset
 import com.quern.app.domain.model.CardShapePreset
@@ -110,16 +112,15 @@ import com.quern.app.domain.model.SourceOrigin
 import com.quern.app.domain.model.WatchProgress
 import java.util.Calendar
 import com.quern.app.ui.components.AmbientBlurredBackdrop
+import com.quern.app.ui.components.LocalContentFocusMemory
 import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.LumaHeroBanner
 import com.quern.app.ui.components.LumaMediaCarouselRow
-import com.quern.app.ui.components.QuernCompanionSignInCard
 import com.quern.app.ui.components.LocalQuernLayout
 import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.ui.components.QuernHomeSpacing
 import com.quern.app.ui.components.buildAmbientBackdropRequest
 import com.quern.app.ui.components.buildHeroBackdropRequest
-import com.quern.app.ui.components.isTvHardware
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LocalQuernStrings
@@ -143,11 +144,7 @@ fun HomeScreen(
     onOpenAddons: () -> Unit,
     onOpenServers: () -> Unit,
     onRefresh: () -> Unit,
-    addonsQrUrl: String = "",
-    companionSession: CompanionSessionState = CompanionSessionState("QRN-000", System.currentTimeMillis() + 600_000L),
-    onRefreshCompanionSession: () -> Unit = {},
-    onBindCompanionServer: () -> Unit = {},
-    onUnbindCompanionServer: () -> Unit = {},
+    emptyTvQr: (@Composable () -> Unit)? = null,
     activeServiceBadge: String? = null,
     showHeroBanner: Boolean = true,
     showPosterLabels: Boolean = true,
@@ -424,6 +421,8 @@ fun HomeScreen(
                 cardShape = cardShape,
                 cardCorner = cardCorner
             )
+        } else if (rows.isEmpty() && emptyTvQr != null) {
+            emptyTvQr()
         } else if (isTv && featuredSlides.isNotEmpty() && showHeroBanner) {
             // Borderless full-bleed TV layout:
             // 75% Hero scrolls naturally as the first item of the LazyColumn — Continue Watching peeks
@@ -562,13 +561,8 @@ fun HomeScreen(
                     }
                 } else if (rows.isEmpty()) {
                     item(key = "welcome_empty") {
-                        EmptyHomeCard(
+                        EmptyHomeActions(
                             isTv = isTv,
-                            addonsQrUrl = addonsQrUrl,
-                            companionSession = companionSession,
-                            onRefreshCompanionSession = onRefreshCompanionSession,
-                            onBindCompanionServer = onBindCompanionServer,
-                            onUnbindCompanionServer = onUnbindCompanionServer,
                             onOpenAddons = onOpenAddons,
                             onOpenServers = onOpenServers,
                             onRefresh = onRefresh
@@ -1100,13 +1094,8 @@ private fun continueCardWidth(cardSize: CardSizePreset = CardSizePreset.STANDARD
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EmptyHomeCard(
+private fun EmptyHomeActions(
     isTv: Boolean,
-    addonsQrUrl: String,
-    companionSession: CompanionSessionState,
-    onRefreshCompanionSession: () -> Unit,
-    onBindCompanionServer: () -> Unit,
-    onUnbindCompanionServer: () -> Unit,
     onOpenAddons: () -> Unit,
     onOpenServers: () -> Unit,
     onRefresh: () -> Unit
@@ -1244,17 +1233,62 @@ private fun EmptyHomeCard(
                 }
             }
 
-            if (addonsQrUrl.isNotBlank() && isTvHardware(LocalContext.current)) {
-                QuernCompanionSignInCard(
-                    url = addonsQrUrl,
-                    session = companionSession,
-                    onRefreshSession = onRefreshCompanionSession,
-                    onBindServer = onBindCompanionServer,
-                    onUnbindServer = onUnbindCompanionServer,
-                    compactVertical = true,
-                    modifier = Modifier.width(258.dp)
+        }
+    }
+}
+
+@Composable
+internal fun HomeEmptyTvQr(
+    signedIn: Boolean,
+    signInQr: @Composable (FocusRequester) -> Unit,
+    addonQr: @Composable () -> Unit,
+    onOpenAddons: () -> Unit
+) {
+    val entryRequester = remember(signedIn) { FocusRequester() }
+    val focusMemory = LocalContentFocusMemory.current
+    DisposableEffect(focusMemory, entryRequester) {
+        val entry: () -> Boolean = {
+            runCatching { entryRequester.requestFocus(); true }.getOrDefault(false)
+        }
+        focusMemory?.fallbackEntry = entry
+        onDispose {
+            if (focusMemory?.fallbackEntry === entry) focusMemory.fallbackEntry = null
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = LocalTvRailInset.current + 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (signedIn) {
+                addonQr()
+                SelectablePillOption(
+                    label = qString(R.string.first_run_open_settings),
+                    selected = false,
+                    modifier = Modifier.focusRequester(entryRequester),
+                    onClick = onOpenAddons
+                )
+            } else {
+                signInQr(entryRequester)
+                Text(
+                    text = qString(R.string.home_qr_after_sign_in),
+                    color = LumaTextSecondary,
+                    fontSize = 12.5.sp,
+                    lineHeight = 17.sp,
+                    textAlign = TextAlign.Center
                 )
             }
         }
+    }
+    LaunchedEffect(entryRequester) {
+        withFrameNanos { }
+        entryRequester.requestFocus()
     }
 }

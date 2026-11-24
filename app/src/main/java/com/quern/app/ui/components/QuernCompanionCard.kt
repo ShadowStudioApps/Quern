@@ -75,7 +75,8 @@ fun QuernCompanionSignInCard(
     onBindServer: () -> Unit = {},
     onUnbindServer: () -> Unit = {},
     compactVertical: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    titleRes: Int = R.string.companion_card_title
 ) {
     val palette = LocalQuernPalette.current
     var nowMs by remember(session.shortCode, session.expiresAtMs) { mutableLongStateOf(System.currentTimeMillis()) }
@@ -122,7 +123,7 @@ fun QuernCompanionSignInCard(
                 ) {
                     Icon(Icons.Default.QrCode2, null, tint = palette.focusRing, modifier = Modifier.size(18.dp))
                     Text(
-                        text = qString(R.string.companion_card_title),
+                        text = qString(titleRes),
                         color = LumaTextPrimary,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
@@ -228,7 +229,7 @@ fun QuernCompanionSignInCard(
                     ) {
                         Icon(Icons.Default.QrCode2, null, tint = palette.focusRing, modifier = Modifier.size(20.dp))
                         Text(
-                            text = qString(R.string.companion_card_title),
+                            text = qString(titleRes),
                             color = LumaTextPrimary,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,

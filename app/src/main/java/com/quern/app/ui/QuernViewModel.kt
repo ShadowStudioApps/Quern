@@ -251,14 +251,18 @@ class QuernViewModel(
         companionServer.refreshSession()
     }
 
+    private var deviceLinkBindings = 0
+
     /** Starts the TV QR device-linking session (5m TTL) and binds the local HTTP server. */
     fun startDeviceLink(deviceName: String) {
+        if (deviceLinkBindings++ > 0) return
         acquireCompanionServer()
         companionServer.startDeviceLinkSession(deviceName)
     }
 
     /** Immediately closes the device-linking endpoint, wipes the ephemeral key, and releases the server. */
     fun stopDeviceLink() {
+        if (deviceLinkBindings == 0 || --deviceLinkBindings > 0) return
         companionServer.stopDeviceLinkSession()
         releaseCompanionServer()
     }

@@ -115,6 +115,9 @@ import com.quern.app.ui.screens.LibraryScreen
 import com.quern.app.ui.screens.SearchScreen
 import com.quern.app.ui.screens.SettingsGroup
 import com.quern.app.ui.screens.AccountUi
+import com.quern.app.ui.screens.TvDeviceLinkQrPanel
+import com.quern.app.ui.screens.HomeEmptyTvQr
+import com.quern.app.ui.components.QuernCompanionSignInCard
 import com.quern.app.ui.screens.SettingsScreen
 import com.quern.app.ui.screens.ProfilePickerScreen
 import com.quern.app.ui.components.ProfileAvatarCircle
@@ -286,6 +289,36 @@ fun QuernApp(
             showingDetail = true
         }
 
+        val accountUi: @Composable () -> AccountUi = {
+            val deviceLinkState by viewModel.deviceLinkState.collectAsState()
+            val accountState by viewModel.accountState.collectAsState()
+            val accountBusy by viewModel.accountBusy.collectAsState()
+            val accountMessage by viewModel.accountMessage.collectAsState()
+            val syncStatus by viewModel.syncStatus.collectAsState()
+            AccountUi(
+                state = accountState,
+                busy = accountBusy,
+                message = accountMessage,
+                onSignIn = { e, p -> viewModel.accountSignIn(e, p) },
+                onSignUp = { e, p -> viewModel.accountSignUp(e, p) },
+                onResend = { e -> viewModel.accountResendConfirmation(e) },
+                onSignOut = viewModel::accountSignOut,
+                onDelete = { viewModel.accountDelete() },
+                sync = syncStatus,
+                onSyncNow = { viewModel.syncNow() },
+                deviceLink = deviceLinkState,
+                deviceLinkUrl = { viewModel.deviceLinkUrl },
+                onStartDeviceLink = { name -> viewModel.startDeviceLink(name) },
+                onStopDeviceLink = { viewModel.stopDeviceLink() },
+                onRefreshDeviceLink = { name -> viewModel.refreshDeviceLink(name) },
+                canApproveLink = viewModel.canApproveDeviceLink(),
+                httpClient = okHttpClient,
+                onApproveDeviceLink = { req, code6 ->
+                    viewModel.approveDeviceLink(req, code6, okHttpClient)
+                }
+            )
+        }
+
         val content: @Composable () -> Unit = {
             AnimatedContent(
                 targetState = Pair(showingDetail, currentTab),
@@ -320,10 +353,17 @@ fun QuernApp(
                             val activeBadge = remember(debridStatuses) {
                                 debridStatuses.entries.firstOrNull { it.value.isConnected }?.key?.displayName
                             }
+                            val homeAccount by viewModel.accountState.collectAsState()
+                            val homeSync by viewModel.syncStatus.collectAsState()
+                            val waitingForFirstPull = homeAccount.isSignedIn &&
+                                homeSync.firstPullAttemptedFor != homeAccount.userId
+                            val homeAddons by viewModel.addons.collectAsState()
+                            val showEmptyTvQr = isTvHardware(context) &&
+                                currentTab == QuernTab.HOME && !showingDetail && homeAddons.isEmpty()
                             HomeScreen(
                                 rows = homeRows,
                                 continueWatching = continueWatching,
-                                isLoading = isLoadingHome,
+                                isLoading = isLoadingHome || waitingForFirstPull,
                                 isTv = isTv,
                                 onItemClick = openItemDetail,
                                 onContinueClick = { progress ->
@@ -364,11 +404,36 @@ fun QuernApp(
                                     currentTab = QuernTab.SETTINGS
                                 },
                                 onRefresh = { viewModel.refreshHome() },
-                                addonsQrUrl = viewModel.addonsCompanionUrl,
-                                companionSession = companionSession,
-                                onRefreshCompanionSession = { viewModel.refreshCompanionSession() },
-                                onBindCompanionServer = { viewModel.acquireCompanionServer() },
-                                onUnbindCompanionServer = { viewModel.releaseCompanionServer() },
+                                emptyTvQr = if (showEmptyTvQr) {
+                                    {
+                                        val state by viewModel.accountState.collectAsState()
+                                        HomeEmptyTvQr(
+                                            signedIn = state.isSignedIn,
+                                            signInQr = { refreshRequester ->
+                                                TvDeviceLinkQrPanel(
+                                                    account = accountUi(),
+                                                    titleRes = R.string.home_qr_sign_in,
+                                                    stepsRes = R.string.home_qr_sign_in_steps,
+                                                    refreshModifier = Modifier.focusRequester(refreshRequester)
+                                                )
+                                            },
+                                            addonQr = {
+                                                QuernCompanionSignInCard(
+                                                    url = viewModel.addonsCompanionUrl,
+                                                    session = companionSession,
+                                                    onRefreshSession = viewModel::refreshCompanionSession,
+                                                    onBindServer = viewModel::acquireCompanionServer,
+                                                    onUnbindServer = viewModel::releaseCompanionServer,
+                                                    titleRes = R.string.home_qr_add_addons
+                                                )
+                                            },
+                                            onOpenAddons = {
+                                                settingsInitialGroup = SettingsGroup.ADDONS
+                                                currentTab = QuernTab.SETTINGS
+                                            }
+                                        )
+                                    }
+                                } else null,
                                 activeServiceBadge = activeBadge,
                                 showHeroBanner = settings.showHeroBanner,
                                 showPosterLabels = settings.showPosterLabels,
@@ -428,10 +493,6 @@ fun QuernApp(
 
                         QuernTab.SETTINGS -> {
                             val companionSession by viewModel.companionSession.collectAsState()
-                            val deviceLinkState by viewModel.deviceLinkState.collectAsState()
-                            val accountState by viewModel.accountState.collectAsState()
-                            val accountBusy by viewModel.accountBusy.collectAsState()
-                            val accountMessage by viewModel.accountMessage.collectAsState()
                             val addons by viewModel.addons.collectAsState()
                             val debridStatuses by viewModel.debridStatuses.collectAsState()
                             val mediaServers by viewModel.mediaServers.collectAsState()
@@ -441,7 +502,6 @@ fun QuernApp(
                             val addonHealthMap by viewModel.addonHealthMap.collectAsState()
                             val checkingHealthUrls by viewModel.checkingHealthUrls.collectAsState()
                             val isRefreshingAddons by viewModel.isRefreshingAddons.collectAsState()
-                            val syncStatus by viewModel.syncStatus.collectAsState()
                             val quernRes = LocalQuernResources.current ?: context.resources
                             SettingsScreen(
                                 settings = settings,
@@ -453,28 +513,7 @@ fun QuernApp(
                                 onRefreshCompanionSession = { viewModel.refreshCompanionSession() },
                                 onBindCompanionServer = { viewModel.acquireCompanionServer() },
                                 onUnbindCompanionServer = { viewModel.releaseCompanionServer() },
-                                account = AccountUi(
-                                    state = accountState,
-                                    busy = accountBusy,
-                                    message = accountMessage,
-                                    onSignIn = { e, p -> viewModel.accountSignIn(e, p) },
-                                    onSignUp = { e, p -> viewModel.accountSignUp(e, p) },
-                                    onResend = { e -> viewModel.accountResendConfirmation(e) },
-                                    onSignOut = viewModel::accountSignOut,
-                                    onDelete = { viewModel.accountDelete() },
-                                    sync = syncStatus,
-                                    onSyncNow = { viewModel.syncNow() },
-                                    deviceLink = deviceLinkState,
-                                    deviceLinkUrl = { viewModel.deviceLinkUrl },
-                                    onStartDeviceLink = { name -> viewModel.startDeviceLink(name) },
-                                    onStopDeviceLink = { viewModel.stopDeviceLink() },
-                                    onRefreshDeviceLink = { name -> viewModel.refreshDeviceLink(name) },
-                                    canApproveLink = viewModel.canApproveDeviceLink(),
-                                    httpClient = okHttpClient,
-                                    onApproveDeviceLink = { req, code6 ->
-                                        viewModel.approveDeviceLink(req, code6, okHttpClient)
-                                    }
-                                ),
+                                account = accountUi(),
                                 addons = addons,
                                 debridStatuses = debridStatuses,
                                 getDebridKey = { viewModel.repository.debridManager.getApiKey(it) },
