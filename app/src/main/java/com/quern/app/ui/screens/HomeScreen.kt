@@ -1,8 +1,13 @@
 package com.quern.app.ui.screens
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,6 +52,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.LaunchedEffect
@@ -55,7 +61,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -68,7 +73,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -112,6 +116,7 @@ import com.quern.app.domain.model.SourceOrigin
 import com.quern.app.domain.model.WatchProgress
 import java.util.Calendar
 import com.quern.app.ui.components.AmbientBlurredBackdrop
+import com.quern.app.ui.components.HomeEdgeScrolling
 import com.quern.app.ui.components.LocalContentFocusMemory
 import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.LumaHeroBanner
@@ -132,6 +137,7 @@ import com.quern.app.ui.theme.frostedSheen
 import com.quern.app.ui.theme.qString
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun HomeScreen(
     rows: List<CatalogRow>,
     continueWatching: List<WatchProgress>,
@@ -429,124 +435,93 @@ fun HomeScreen(
             // at the bottom of the first screen, zero horizontal clip cut, zero Offscreen FBO overdraw,
             // and rows get the full screen height as you browse down.
             val tvListState = rememberLazyListState()
-            val coroutineScope = rememberCoroutineScope()
             val heroItemIndex = if (updateBannerRelease != null) 1 else 0
+            var bannerStride by remember(heroItemIndex) { mutableIntStateOf(0) }
             LaunchedEffect(tvListState, heroItemIndex) {
-                snapshotFlow { tvListState.firstVisibleItemIndex <= heroItemIndex }
-                    .collect { heroVisibleRef[0] = it }
+                snapshotFlow { tvListState.layoutInfo }
+                    .collect { layout ->
+                        heroVisibleRef[0] = tvListState.firstVisibleItemIndex <= heroItemIndex
+                        if (heroItemIndex != 0) {
+                            layout.visibleItemsInfo.firstOrNull { it.index == 0 }?.let {
+                                bannerStride = it.size + layout.mainAxisItemSpacing
+                            }
+                        }
+                    }
             }
             LaunchedEffect(hasContinueWatching) {
                 if (hasContinueWatching && tvListState.firstVisibleItemIndex <= 2) {
                     tvListState.scrollToItem(0)
                 }
             }
-            val onHeroFocused: () -> Unit = remember(tvListState, coroutineScope) {
-                {
-                    coroutineScope.launch {
-                        // Wait a beat so Compose's BringIntoView settles before gliding all the way to y=0.
-                        delay(50L)
-                        if (tvListState.firstVisibleItemIndex > 0 || tvListState.firstVisibleItemScrollOffset > 0) {
-                            tvListState.animateScrollToItem(0)
+            val rowHeaderPx = with(LocalDensity.current) {
+                20.sp.toPx() + QuernHomeSpacing.titleToCardsGap(isTv = true).toPx()
+            }
+            val verticalFocusSpec = remember(tvListState, heroItemIndex, rowHeaderPx) {
+                object : BringIntoViewSpec {
+                    override val scrollAnimationSpec = spring<Float>(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+
+                    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                        val layout = tvListState.layoutInfo
+                        val visibleItems = layout.visibleItemsInfo
+                        val viewportStart = layout.viewportStartOffset
+                        val target = visibleItems.firstOrNull { item ->
+                            val top = item.offset - viewportStart
+                            offset >= top && offset < top + item.size
+                        }
+                        val hero = visibleItems.firstOrNull { it.key == "hero" }
+                        val heroFullyVisible = hero != null && hero.offset >= viewportStart &&
+                            hero.offset + hero.size <= layout.viewportEndOffset
+                        val first = visibleItems.firstOrNull { it.index == 0 }
+                        val distance = if (target?.key == "hero" || target?.index == 0 ||
+                            (target?.key == "continue_watching" && heroFullyVisible)
+                        ) {
+                            (first?.offset ?: hero?.let { it.offset - bannerStride } ?: viewportStart)
+                                .minus(viewportStart).toFloat()
+                        } else {
+                            val rowTop = target?.let { (it.offset - viewportStart).toFloat() }
+                                ?: (offset - rowHeaderPx)
+                            rowTop - containerSize * 0.10f
+                        }
+                        val last = visibleItems.lastOrNull()
+                        val maximum = if (last != null && last.index == layout.totalItemsCount - 1) {
+                            (last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset)
+                                .coerceAtLeast(0).toFloat()
+                        } else Float.POSITIVE_INFINITY
+                        val minimum = first?.let { (it.offset - viewportStart).coerceAtMost(0).toFloat() }
+                            ?: Float.NEGATIVE_INFINITY
+                        return distance.coerceIn(minimum, maximum)
+                    }
+                }
+            }
+
+            CompositionLocalProvider(LocalBringIntoViewSpec provides verticalFocusSpec) {
+                LazyColumn(
+                    state = tvListState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 0.dp, bottom = 44.dp),
+                    verticalArrangement = Arrangement.spacedBy(QuernHomeSpacing.rowVerticalGap)
+                ) {
+                    if (updateBannerRelease != null) {
+                        item(key = "update_banner", contentType = "update_banner") {
+                            HomeUpdateBanner(
+                                release = updateBannerRelease,
+                                isTv = true,
+                                onOpenUpdate = onOpenUpdate,
+                                onDismiss = onDismissUpdate
+                            )
                         }
                     }
-                }
-            }
 
-            LazyColumn(
-                state = tvListState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 0.dp, bottom = 44.dp),
-                verticalArrangement = Arrangement.spacedBy(QuernHomeSpacing.rowVerticalGap(isTv = true))
-            ) {
-                if (updateBannerRelease != null) {
-                    item(key = "update_banner", contentType = "update_banner") {
-                        HomeUpdateBanner(
-                            release = updateBannerRelease,
-                            isTv = true,
-                            onOpenUpdate = onOpenUpdate,
-                            onDismiss = onDismissUpdate
-                        )
-                    }
-                }
-
-                item(key = "hero", contentType = "hero") {
-                    HomeHeroSection(
-                        activeHeroState = activeHeroState,
-                        totalSlides = featuredSlides.size,
-                        heroHeight = heroHeight,
-                        heroAspectRatio = heroAspectRatio,
-                        isTv = true,
-                        onSelect = onItemClick,
-                        onResumeDirect = onResumeDirect,
-                        continueWatchingByBaseId = continueWatchingByBaseId,
-                        onResolveHeroMeta = onResolveHeroMeta,
-                        onRefresh = onRefresh,
-                        selectedCategory = selectedCategory,
-                        onCategorySelected = onSelectCategory,
-                        activeServiceBadge = activeServiceBadge,
-                        firstRowFocusRequester = if (hasAnyContentRow) firstRowFocusRequester else null,
-                        isFirstRowAttached = { attachedFirstRowTag == expectedFirstRowTag },
-                        onHeroFocused = onHeroFocused
-                    )
-                }
-
-                if (hasContinueWatching) {
-                    item(key = "continue_watching", contentType = "continue_watching") {
-                        ContinueWatchingRow(
-                            items = sortedContinueWatching,
-                            isTv = true,
-                            onClick = onContinueClick,
-                            onItemFocused = onContinueItemFocused,
-                            firstItemFocusRequester = firstRowFocusRequester,
-                            onFirstItemAttachedChanged = onCwFirstAttachedChanged
-                        )
-                    }
-                }
-
-                items(filteredRows, key = { it.id }, contentType = { "carousel" }) { row ->
-                    val attachFirstRow = !hasContinueWatching && row.id == filteredRows.firstOrNull()?.id
-                    LumaMediaCarouselRow(
-                        row = row,
-                        isTv = true,
-                        cardSize = cardSize,
-                        cardShape = cardShape,
-                        cardCorner = cardCorner,
-                        showPosterLabels = showPosterLabels,
-                        onItemClick = onItemClick,
-                        onItemFocused = onPosterFocused,
-                        onPreloadNextItems = onPreloadNextItems,
-                        firstItemFocusRequester = if (attachFirstRow) firstRowFocusRequester else null,
-                        onFirstItemAttachedChanged = if (attachFirstRow) onCatFirstAttachedChanged else null
-                    )
-                }
-            }
-        } else {
-            val phoneListState = rememberLazyListState()
-            val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            LazyColumn(
-                state = phoneListState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = navBarBottom + 104.dp),
-                verticalArrangement = Arrangement.spacedBy(QuernHomeSpacing.rowVerticalGap(isTv))
-            ) {
-                if (updateBannerRelease != null) {
-                    item(key = "update_banner") {
-                        HomeUpdateBanner(
-                            release = updateBannerRelease,
-                            isTv = isTv,
-                            onOpenUpdate = onOpenUpdate,
-                            onDismiss = onDismissUpdate
-                        )
-                    }
-                }
-                if (featuredSlides.isNotEmpty() && showHeroBanner) {
-                    item(key = "hero") {
+                    item(key = "hero", contentType = "hero") {
                         HomeHeroSection(
                             activeHeroState = activeHeroState,
                             totalSlides = featuredSlides.size,
                             heroHeight = heroHeight,
                             heroAspectRatio = heroAspectRatio,
-                            isTv = isTv,
+                            isTv = true,
                             onSelect = onItemClick,
                             onResumeDirect = onResumeDirect,
                             continueWatchingByBaseId = continueWatchingByBaseId,
@@ -555,43 +530,116 @@ fun HomeScreen(
                             selectedCategory = selectedCategory,
                             onCategorySelected = onSelectCategory,
                             activeServiceBadge = activeServiceBadge,
-                            firstRowFocusRequester = null,
-                            isFirstRowAttached = { false }
+                            firstRowFocusRequester = if (hasAnyContentRow) firstRowFocusRequester else null,
+                            isFirstRowAttached = { attachedFirstRowTag == expectedFirstRowTag }
                         )
                     }
-                } else if (rows.isEmpty()) {
-                    item(key = "welcome_empty") {
-                        EmptyHomeActions(
-                            isTv = isTv,
-                            onOpenAddons = onOpenAddons,
-                            onOpenServers = onOpenServers,
-                            onRefresh = onRefresh
+
+                    if (hasContinueWatching) {
+                        item(key = "continue_watching", contentType = "continue_watching") {
+                            ContinueWatchingRow(
+                                items = sortedContinueWatching,
+                                isTv = true,
+                                onClick = onContinueClick,
+                                onItemFocused = onContinueItemFocused,
+                                firstItemFocusRequester = firstRowFocusRequester,
+                                onFirstItemAttachedChanged = onCwFirstAttachedChanged
+                            )
+                        }
+                    }
+
+                    items(filteredRows, key = { it.id }, contentType = { "carousel" }) { row ->
+                        val attachFirstRow = !hasContinueWatching && row.id == filteredRows.firstOrNull()?.id
+                        LumaMediaCarouselRow(
+                            row = row,
+                            isTv = true,
+                            cardSize = cardSize,
+                            cardShape = cardShape,
+                            cardCorner = cardCorner,
+                            showPosterLabels = showPosterLabels,
+                            onItemClick = onItemClick,
+                            onItemFocused = onPosterFocused,
+                            onPreloadNextItems = onPreloadNextItems,
+                            firstItemFocusRequester = if (attachFirstRow) firstRowFocusRequester else null,
+                            onFirstItemAttachedChanged = if (attachFirstRow) onCatFirstAttachedChanged else null
                         )
                     }
                 }
+            }
+        } else {
+            val phoneListState = rememberLazyListState()
+            val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            HomeEdgeScrolling(isTv, 0.dp, 44.dp) {
+                LazyColumn(
+                    state = phoneListState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = navBarBottom + 104.dp),
+                    verticalArrangement = Arrangement.spacedBy(QuernHomeSpacing.rowVerticalGap)
+                ) {
+                    if (updateBannerRelease != null) {
+                        item(key = "update_banner") {
+                            HomeUpdateBanner(
+                                release = updateBannerRelease,
+                                isTv = isTv,
+                                onOpenUpdate = onOpenUpdate,
+                                onDismiss = onDismissUpdate
+                            )
+                        }
+                    }
+                    if (featuredSlides.isNotEmpty() && showHeroBanner) {
+                        item(key = "hero") {
+                            HomeHeroSection(
+                                activeHeroState = activeHeroState,
+                                totalSlides = featuredSlides.size,
+                                heroHeight = heroHeight,
+                                heroAspectRatio = heroAspectRatio,
+                                isTv = isTv,
+                                onSelect = onItemClick,
+                                onResumeDirect = onResumeDirect,
+                                continueWatchingByBaseId = continueWatchingByBaseId,
+                                onResolveHeroMeta = onResolveHeroMeta,
+                                onRefresh = onRefresh,
+                                selectedCategory = selectedCategory,
+                                onCategorySelected = onSelectCategory,
+                                activeServiceBadge = activeServiceBadge,
+                                firstRowFocusRequester = null,
+                                isFirstRowAttached = { false }
+                            )
+                        }
+                    } else if (rows.isEmpty()) {
+                        item(key = "welcome_empty") {
+                            EmptyHomeActions(
+                                isTv = isTv,
+                                onOpenAddons = onOpenAddons,
+                                onOpenServers = onOpenServers,
+                                onRefresh = onRefresh
+                            )
+                        }
+                    }
 
-                if (hasContinueWatching) {
-                    item(key = "continue_watching", contentType = "continue_watching") {
-                        ContinueWatchingRow(
-                            items = sortedContinueWatching,
+                    if (hasContinueWatching) {
+                        item(key = "continue_watching", contentType = "continue_watching") {
+                            ContinueWatchingRow(
+                                items = sortedContinueWatching,
+                                isTv = isTv,
+                                cardSize = cardSize,
+                                onClick = onContinueClick
+                            )
+                        }
+                    }
+
+                    items(filteredRows, key = { it.id }, contentType = { "carousel" }) { row ->
+                        LumaMediaCarouselRow(
+                            row = row,
                             isTv = isTv,
                             cardSize = cardSize,
-                            onClick = onContinueClick
+                            cardShape = cardShape,
+                            cardCorner = cardCorner,
+                            showPosterLabels = showPosterLabels,
+                            onItemClick = onItemClick,
+                            onItemFocused = if (isTv) onPosterFocused else null
                         )
                     }
-                }
-
-                items(filteredRows, key = { it.id }, contentType = { "carousel" }) { row ->
-                    LumaMediaCarouselRow(
-                        row = row,
-                        isTv = isTv,
-                        cardSize = cardSize,
-                        cardShape = cardShape,
-                        cardCorner = cardCorner,
-                        showPosterLabels = showPosterLabels,
-                        onItemClick = onItemClick,
-                        onItemFocused = if (isTv) onPosterFocused else null
-                    )
                 }
             }
         }
@@ -828,159 +876,162 @@ private fun ContinueWatchingRow(
             )
         }
 
-        LazyRow(
-            contentPadding = PaddingValues(
-                start = startPad,
-                end = endPad,
-                top = QuernHomeSpacing.titleToCardsGap(isTv),
-                bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
-            ),
-            horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(LocalQuernLayout.current))
-        ) {
-            itemsIndexed(items, key = { _, it -> it.contentId }, contentType = { _, _ -> "cw_card" }) { index, progress ->
-                val isFirst = index == 0
-                if (isFirst && firstItemFocusRequester != null && onFirstItemAttachedChanged != null) {
-                    DisposableEffect(progress.contentId) {
-                        onDispose { onFirstItemAttachedChanged(false) }
-                    }
-                }
-                var focused by remember { mutableStateOf(false) }
-                val focusProgress = animateFloatAsState(
-                    targetValue = if (focused) 1f else 0f,
-                    animationSpec = tween(150, easing = FastOutSlowInEasing),
-                    label = "cwFocus"
-                )
-                val remainingMins = ((progress.durationMs - progress.positionMs).coerceAtLeast(0L) / 60_000L)
-                val timeLeftText = if (isAr) "متبقي ${remainingMins} د" else "${remainingMins}m left"
-                val subLabel = progress.episodeLabel?.takeIf { it.isNotBlank() } ?: nextUpLabel
-                val imgReq = remember(progress.backdropUrl, progress.posterUrl, cwDecodeW, cwDecodeH) {
-                    val url = progress.backdropUrl ?: progress.posterUrl
-                    if (url.isNullOrBlank()) null else {
-                        ImageRequest.Builder(context).data(url).size(cwDecodeW, cwDecodeH).crossfade(false).build()
-                    }
-                }
-
-                // Stable modifier chain (no conditional Modifier.border before tvClickable) so the
-                // remembered FocusRequester never detaches when focus leaves this card.
-                Box(
-                    modifier = Modifier
-                        .then(
-                            if (isFirst && firstItemFocusRequester != null) {
-                                Modifier
-                                    .focusRequester(firstItemFocusRequester)
-                                    .onGloballyPositioned { coords ->
-                                        onFirstItemAttachedChanged?.invoke(coords.isAttached)
-                                    }
-                            } else Modifier
-                        )
-                        .width(cwWidth)
-                        .aspectRatio(16f / 9f)
-                        .zIndex(if (focused) 10f else 0f)
-                        .graphicsLayer {
-                            val s = 1f + 0.06f * focusProgress.value
-                            scaleX = s
-                            scaleY = s
+        val cardGap = QuernHomeSpacing.cardHorizontalGap(LocalQuernLayout.current)
+        HomeEdgeScrolling(isTv, startPad + cardGap, endPad + cardGap, horizontal = true) {
+            LazyRow(
+                contentPadding = PaddingValues(
+                    start = startPad,
+                    end = endPad,
+                    top = QuernHomeSpacing.titleToCardsGap(isTv),
+                    bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
+                ),
+                horizontalArrangement = Arrangement.spacedBy(cardGap)
+            ) {
+                itemsIndexed(items, key = { _, it -> it.contentId }, contentType = { _, _ -> "cw_card" }) { index, progress ->
+                    val isFirst = index == 0
+                    if (isFirst && firstItemFocusRequester != null && onFirstItemAttachedChanged != null) {
+                        DisposableEffect(progress.contentId) {
+                            onDispose { onFirstItemAttachedChanged(false) }
                         }
-                        .clip(ContinueCardShape)
-                        .background(palette.glassElevated)
-                        .drawWithCache {
-                            val outline = ContinueCardShape.createOutline(size, layoutDirection, this)
-                            val thick = 2.dp.toPx()
-                            val glowWidth = 7.dp.toPx()
-                            onDrawWithContent {
-                                drawContent()
-                                val p = focusProgress.value
-                                if (p > 0.01f) {
-                                    drawOutline(
-                                        outline = outline,
-                                        color = focusGlowColor.copy(alpha = 0.28f * p),
-                                        style = Stroke(width = glowWidth * p)
-                                    )
-                                    drawOutline(
-                                        outline = outline,
-                                        color = focusBorderColor.copy(alpha = p),
-                                        style = Stroke(width = 2f * thick * p)
-                                    )
+                    }
+                    var focused by remember { mutableStateOf(false) }
+                    val focusProgress = animateFloatAsState(
+                        targetValue = if (focused) 1f else 0f,
+                        animationSpec = tween(150, easing = FastOutSlowInEasing),
+                        label = "cwFocus"
+                    )
+                    val remainingMins = ((progress.durationMs - progress.positionMs).coerceAtLeast(0L) / 60_000L)
+                    val timeLeftText = if (isAr) "متبقي ${remainingMins} د" else "${remainingMins}m left"
+                    val subLabel = progress.episodeLabel?.takeIf { it.isNotBlank() } ?: nextUpLabel
+                    val imgReq = remember(progress.backdropUrl, progress.posterUrl, cwDecodeW, cwDecodeH) {
+                        val url = progress.backdropUrl ?: progress.posterUrl
+                        if (url.isNullOrBlank()) null else {
+                            ImageRequest.Builder(context).data(url).size(cwDecodeW, cwDecodeH).crossfade(false).build()
+                        }
+                    }
+
+                    // Stable modifier chain (no conditional Modifier.border before tvClickable) so the
+                    // remembered FocusRequester never detaches when focus leaves this card.
+                    Box(
+                        modifier = Modifier
+                            .then(
+                                if (isFirst && firstItemFocusRequester != null) {
+                                    Modifier
+                                        .focusRequester(firstItemFocusRequester)
+                                        .onGloballyPositioned { coords ->
+                                            onFirstItemAttachedChanged?.invoke(coords.isAttached)
+                                        }
+                                } else Modifier
+                            )
+                            .width(cwWidth)
+                            .aspectRatio(16f / 9f)
+                            .zIndex(if (focused) 10f else 0f)
+                            .graphicsLayer {
+                                val s = 1f + 0.06f * focusProgress.value
+                                scaleX = s
+                                scaleY = s
+                            }
+                            .clip(ContinueCardShape)
+                            .background(palette.glassElevated)
+                            .drawWithCache {
+                                val outline = ContinueCardShape.createOutline(size, layoutDirection, this)
+                                val thick = 2.dp.toPx()
+                                val glowWidth = 7.dp.toPx()
+                                onDrawWithContent {
+                                    drawContent()
+                                    val p = focusProgress.value
+                                    if (p > 0.01f) {
+                                        drawOutline(
+                                            outline = outline,
+                                            color = focusGlowColor.copy(alpha = 0.28f * p),
+                                            style = Stroke(width = glowWidth * p)
+                                        )
+                                        drawOutline(
+                                            outline = outline,
+                                            color = focusBorderColor.copy(alpha = p),
+                                            style = Stroke(width = 2f * thick * p)
+                                        )
+                                    }
                                 }
                             }
+                            .tvClickable(
+                                onFocusChangedState = { focused = it },
+                                onFocused = { onItemFocused?.invoke(progress, index) },
+                                onClick = { onClick(progress) }
+                            )
+                    ) {
+                        if (imgReq != null) {
+                            AsyncImage(
+                                model = imgReq,
+                                contentDescription = progress.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
                         }
-                        .tvClickable(
-                            onFocusChangedState = { focused = it },
-                            onFocused = { onItemFocused?.invoke(progress, index) },
-                            onClick = { onClick(progress) }
-                        )
-                ) {
-                    if (imgReq != null) {
-                        AsyncImage(
-                            model = imgReq,
-                            contentDescription = progress.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(ContinueOverlayScrim)
-                    )
-
-                    if (remainingMins > 0) {
-                        Text(
-                            text = timeLeftText,
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(7.dp)
-                                .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(999.dp))
-                                .padding(horizontal = 6.5.dp, vertical = 2.dp)
-                        )
-                    }
-
-                    // Bottom-left overlay: episode label / "Next up" + title right above the progress bar
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .fillMaxWidth()
-                            .padding(start = 10.dp, end = 10.dp, bottom = 9.dp)
-                    ) {
-                        Text(
-                            text = subLabel,
-                            color = palette.focusRing.copy(alpha = 0.95f),
-                            fontSize = 9.5.sp,
-                            lineHeight = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(1.dp))
-                        Text(
-                            text = progress.title,
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            lineHeight = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // Thin accent progress bar pinned to the bottom edge
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .align(Alignment.BottomCenter)
-                            .background(Color.White.copy(alpha = 0.22f))
-                    ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth(progress.progressFraction.coerceIn(0.05f, 1f))
-                                .fillMaxHeight()
-                                .background(palette.focusRing)
+                                .fillMaxSize()
+                                .background(ContinueOverlayScrim)
                         )
+
+                        if (remainingMins > 0) {
+                            Text(
+                                text = timeLeftText,
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(7.dp)
+                                    .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(999.dp))
+                                    .padding(horizontal = 6.5.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        // Bottom-left overlay: episode label / "Next up" + title right above the progress bar
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .padding(start = 10.dp, end = 10.dp, bottom = 9.dp)
+                        ) {
+                            Text(
+                                text = subLabel,
+                                color = palette.focusRing.copy(alpha = 0.95f),
+                                fontSize = 9.5.sp,
+                                lineHeight = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.height(1.dp))
+                            Text(
+                                text = progress.title,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                lineHeight = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        // Thin accent progress bar pinned to the bottom edge
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .align(Alignment.BottomCenter)
+                                .background(Color.White.copy(alpha = 0.22f))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(progress.progressFraction.coerceIn(0.05f, 1f))
+                                    .fillMaxHeight()
+                                    .background(palette.focusRing)
+                            )
+                        }
                     }
                 }
             }
@@ -1016,7 +1067,7 @@ private fun HomeSkeletonScreen(
         modifier = Modifier.fillMaxSize(),
         userScrollEnabled = false,
         contentPadding = PaddingValues(top = 0.dp, bottom = 44.dp),
-        verticalArrangement = Arrangement.spacedBy(QuernHomeSpacing.rowVerticalGap(isTv))
+        verticalArrangement = Arrangement.spacedBy(QuernHomeSpacing.rowVerticalGap)
     ) {
         // Hero skeleton matching heroHeight
         item(key = "sk_hero") {
@@ -1046,7 +1097,11 @@ private fun HomeSkeletonScreen(
                 Box(Modifier.padding(start = startPad).width(150.dp).height(16.dp).clip(RoundedCornerShape(6.dp)).background(fillStrong))
                 Spacer(Modifier.height(QuernHomeSpacing.titleToCardsGap(isTv)))
                 Row(
-                    modifier = Modifier.padding(start = startPad, end = endPad),
+                    modifier = Modifier.padding(
+                        start = startPad,
+                        end = endPad,
+                        bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(cardGap)
                 ) {
                     repeat(if (isTv) 5 else 3) {
@@ -1061,14 +1116,23 @@ private fun HomeSkeletonScreen(
                 Box(Modifier.padding(start = startPad).width(180.dp).height(16.dp).clip(RoundedCornerShape(6.dp)).background(fillStrong))
                 Spacer(Modifier.height(QuernHomeSpacing.titleToCardsGap(isTv)))
                 Row(
-                    modifier = Modifier.padding(start = startPad, end = endPad),
+                    modifier = Modifier.padding(
+                        start = startPad,
+                        end = endPad,
+                        bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(cardGap)
                 ) {
                     repeat(if (isTv) 9 else 4) {
                         Column(modifier = Modifier.width(posterWidth)) {
                             Box(Modifier.fillMaxWidth().aspectRatio(cardShape.aspectRatio).clip(posterCorner).background(fill))
-                            Spacer(Modifier.height(6.dp))
-                            Box(Modifier.fillMaxWidth(0.78f).height(10.dp).clip(RoundedCornerShape(4.dp)).background(fill))
+                            Column(
+                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(1.dp)
+                            ) {
+                                Box(Modifier.fillMaxWidth(0.78f).height(13.dp).clip(RoundedCornerShape(4.dp)).background(fill))
+                                Box(Modifier.fillMaxWidth(0.28f).height(11.dp).clip(RoundedCornerShape(4.dp)).background(fill))
+                            }
                         }
                     }
                 }

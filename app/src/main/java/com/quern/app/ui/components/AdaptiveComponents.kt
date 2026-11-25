@@ -4,11 +4,16 @@ import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -283,9 +288,8 @@ object QuernHomeSpacing {
     fun rowCardsBottomPadding(isTv: Boolean): Dp =
         if (isTv) 8.dp else 6.dp
 
-    /** Uniform vertical gap between rows in the Home LazyColumn. */
-    fun rowVerticalGap(isTv: Boolean): Dp =
-        if (isTv) 14.dp else 12.dp
+    /** Space between rows, in addition to the LazyRow's focus clearance. */
+    val rowVerticalGap = 1.dp
 }
 
 fun isTvHardware(
@@ -1028,6 +1032,59 @@ private fun GlassCategoryPill(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun HomeEdgeScrolling(
+    enabled: Boolean,
+    leadingInset: Dp,
+    trailingInset: Dp,
+    horizontal: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    if (!enabled) {
+        content()
+        return
+    }
+
+    val density = LocalDensity.current
+    val isRtl = horizontal && LocalLayoutDirection.current == LayoutDirection.Rtl
+    val leadingPx = with(density) { leadingInset.toPx() }
+    val trailingPx = with(density) { trailingInset.toPx() }
+    val stiffness = if (horizontal) Spring.StiffnessMedium else Spring.StiffnessMediumLow
+    val spec = remember(leadingPx, trailingPx, stiffness, isRtl) {
+        val startInset = if (isRtl) trailingPx else leadingPx
+        val endInset = if (isRtl) leadingPx else trailingPx
+        object : BringIntoViewSpec {
+            override val scrollAnimationSpec = spring<Float>(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = stiffness
+            )
+
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val start = startInset
+                val end = containerSize - endInset
+                val itemEnd = offset + size
+
+                if (end <= start) return 0f
+                // An oversized item can cover the entire usable viewport without needing to move.
+                if (offset <= start && itemEnd >= end) return 0f
+
+                val toStart = offset - start
+                val toEnd = itemEnd - end
+                return if (size > end - start) {
+                    if (kotlin.math.abs(toStart) <= kotlin.math.abs(toEnd)) toStart else toEnd
+                } else when {
+                    offset < start -> toStart
+                    itemEnd > end -> toEnd
+                    else -> 0f
+                }
+            }
+        }
+    }
+
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
+}
+
 @Composable
 fun LumaMediaCarouselRow(
     row: CatalogRow,
@@ -1084,54 +1141,57 @@ fun LumaMediaCarouselRow(
         }
 
         val uniqueItems = remember(row.items) { row.items.distinctBy { "${it.type}_${it.id}" } }
-        LazyRow(
-            contentPadding = PaddingValues(
-                start = startPad,
-                end = endPad,
-                top = QuernHomeSpacing.titleToCardsGap(isTv),
-                bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
-            ),
-            horizontalArrangement = Arrangement.spacedBy(QuernHomeSpacing.cardHorizontalGap(LocalQuernLayout.current))
-        ) {
-            itemsIndexed(
-                items = uniqueItems,
-                key = { _, item -> "${row.id}_${item.type}_${item.id}" },
-                contentType = { _, _ -> "poster" }
-            ) { index, item ->
-                val isFirst = index == 0
-                if (isFirst && firstItemFocusRequester != null && onFirstItemAttachedChanged != null) {
-                    DisposableEffect(row.id, item.id) {
-                        onDispose { onFirstItemAttachedChanged(false) }
-                    }
-                }
-                LumaPosterCard(
-                    item = item,
-                    isTv = isTv,
-                    cardSize = cardSize,
-                    cardShape = cardShape,
-                    cardCorner = cardCorner,
-                    showPosterLabels = showPosterLabels,
-                    onClick = { onItemClick(item) },
-                    onFocused = if (onItemFocused != null || onPreloadNextItems != null) {
-                        {
-                            onItemFocused?.invoke(item, index)
-                            if (onPreloadNextItems != null) {
-                                val nextTwo = buildList(2) {
-                                    uniqueItems.getOrNull(index + 1)?.let(::add)
-                                    uniqueItems.getOrNull(index + 2)?.let(::add)
-                                }
-                                if (nextTwo.isNotEmpty()) onPreloadNextItems(nextTwo)
-                            }
+        val cardGap = QuernHomeSpacing.cardHorizontalGap(LocalQuernLayout.current)
+        HomeEdgeScrolling(isTv, startPad + cardGap, endPad + cardGap, horizontal = true) {
+            LazyRow(
+                contentPadding = PaddingValues(
+                    start = startPad,
+                    end = endPad,
+                    top = QuernHomeSpacing.titleToCardsGap(isTv),
+                    bottom = QuernHomeSpacing.rowCardsBottomPadding(isTv)
+                ),
+                horizontalArrangement = Arrangement.spacedBy(cardGap)
+            ) {
+                itemsIndexed(
+                    items = uniqueItems,
+                    key = { _, item -> "${row.id}_${item.type}_${item.id}" },
+                    contentType = { _, _ -> "poster" }
+                ) { index, item ->
+                    val isFirst = index == 0
+                    if (isFirst && firstItemFocusRequester != null && onFirstItemAttachedChanged != null) {
+                        DisposableEffect(row.id, item.id) {
+                            onDispose { onFirstItemAttachedChanged(false) }
                         }
-                    } else null,
-                    modifier = if (isFirst && firstItemFocusRequester != null) {
-                        Modifier
-                            .focusRequester(firstItemFocusRequester)
-                            .onGloballyPositioned { coords ->
-                                onFirstItemAttachedChanged?.invoke(coords.isAttached)
+                    }
+                    LumaPosterCard(
+                        item = item,
+                        isTv = isTv,
+                        cardSize = cardSize,
+                        cardShape = cardShape,
+                        cardCorner = cardCorner,
+                        showPosterLabels = showPosterLabels,
+                        onClick = { onItemClick(item) },
+                        onFocused = if (onItemFocused != null || onPreloadNextItems != null) {
+                            {
+                                onItemFocused?.invoke(item, index)
+                                if (onPreloadNextItems != null) {
+                                    val nextTwo = buildList(2) {
+                                        uniqueItems.getOrNull(index + 1)?.let(::add)
+                                        uniqueItems.getOrNull(index + 2)?.let(::add)
+                                    }
+                                    if (nextTwo.isNotEmpty()) onPreloadNextItems(nextTwo)
+                                }
                             }
-                    } else Modifier
-                )
+                        } else null,
+                        modifier = if (isFirst && firstItemFocusRequester != null) {
+                            Modifier
+                                .focusRequester(firstItemFocusRequester)
+                                .onGloballyPositioned { coords ->
+                                    onFirstItemAttachedChanged?.invoke(coords.isAttached)
+                                }
+                        } else Modifier
+                    )
+                }
             }
         }
     }
