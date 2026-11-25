@@ -61,6 +61,13 @@ class MainActivity : ComponentActivity() {
         container.updateManager.checkIfDue(container.settingsStore.settings.value.updateChannel)
     }
 
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            (application as QuernApplication).applySavedLauncherIcon()
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)

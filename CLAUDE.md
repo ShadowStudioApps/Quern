@@ -42,7 +42,7 @@ Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, server
 - Install with `adb install -r` only. Never `adb uninstall` or `pm clear` without the user's explicit approval for that one time: user data lives on the device.
 - The TV has two profiles (user 0 and user 10). A package removed from one profile is still installed in the other.
 - If the adb server restarts, reconnect with `adb connect`. The TV may show an "Allow USB debugging?" prompt that the user must approve.
-- After every release install, run `adb shell cmd package compile -f -m speed-profile com.quern.app`.
+- After every release install, run `adb shell am start -W -n com.quern.app/.MainActivity`, wait about 10 seconds, and run `adb shell am force-stop com.quern.app`. Then run `adb shell cmd package compile -f -m speed-profile com.quern.app`. Compiling before the first launch can leave the package at `status=verify` because the profile is empty.
 - Don't change any TV system settings.
 - Drive the UI with `adb shell input keyevent …` and capture with `adb exec-out screencap -p`. Keycodes: 19 up, 20 down, 21 left, 22 right, 23 OK, 4 back, 224 wake.
 - Inside Settings, never send OK (23) blind: take a screenshot first and confirm what has focus. A blind OK once applied the "TV" device preset and changed the user's navigation style.
@@ -50,7 +50,7 @@ Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, server
 
 ## Performance measurement protocol (identical every time)
 
-Run `.\tools\measure.ps1` from the repo root after installing the release build and compiling speed-profile. Don't change its path or timing; if it must change, take a new baseline first.
+Run `.\tools\measure.ps1` from the repo root after installing the release build, launching once with `am start -W`, waiting about 10 seconds, force-stopping the app, and compiling with `speed-profile` in that order. Don't change its path or timing; if it must change, take a new baseline first.
 
 1. Cold start ×3: `am force-stop`, then `am start -W -n com.quern.app/.MainActivity`, and record `TotalTime`.
 2. If the "Who's watching?" picker is showing (checked with `uiautomator dump`), presses OK to keep the active profile. Then waits 10 s for Home to load.
@@ -59,7 +59,7 @@ Run `.\tools\measure.ps1` from the repo root after installing the release build 
 5. Discards runs with fewer than 100 frames.
 6. Prints cold starts, per-run frames, janky %, p50/p90/p95/p99, totals and TOTAL PSS.
 
-Latest baseline (after the glass theme + floating rail, Shadow profile, same path): janky about 6–6.4%, p50 40–48 ms, p90 48–61 ms, PSS about 83–88 MB. The commit before it measured 3%, p50 34–38 ms on the same content, so the translucent design costs a few ms per frame. Home content (synced addons) changes these numbers, so compare builds on the same day. Older: after STEP 4 janky about 37–38%, p50 61–65 ms. Earlier B1 (after SB): janky 56.4%, p50 73–77 ms, PSS 88.8 MB. Cold start varies by about 100 ms between sessions; treat it as noise unless the change is larger. The first run after launch often has a p99 spike.
+Latest baseline (19 Home rows, Glossy Black, after the first-launch speed-profile compile): cold start 591–598 ms, janky 3.8–6%, p50 30–34 ms, PSS ~110 MB. Compare builds on the same day with the same content. The first run after launch often has a p99 spike.
 
 ## How key pieces work (don't regress)
 

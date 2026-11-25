@@ -167,7 +167,8 @@ fun HomeScreen(
     cardCorner: CardCornerPreset = CardCornerPreset.ROUNDED,
     updateBannerRelease: AvailableUpdate? = null,
     onOpenUpdate: () -> Unit = {},
-    onDismissUpdate: () -> Unit = {}
+    onDismissUpdate: () -> Unit = {},
+    hasCustomProfileBackground: Boolean = false
 ) {
     val palette = LocalQuernPalette.current
     val context = LocalContext.current
@@ -421,7 +422,10 @@ fun HomeScreen(
         }
 
         // Full-screen blurred artwork backdrop (48x27 Coil bilinear stretch) behind hero, rail, and rows.
-        HomeAmbientBackdropLayer(activeHeroState = activeHeroState)
+        HomeAmbientBackdropLayer(
+            activeHeroState = activeHeroState,
+            ambientAlpha = if (hasCustomProfileBackground) 0.42f else 1f
+        )
 
         if (isLoading && rows.isEmpty()) {
             HomeSkeletonScreen(
@@ -859,12 +863,13 @@ private fun HomeUpdateBanner(
 
 @Composable
 private fun HomeAmbientBackdropLayer(
-    activeHeroState: StateFlow<Pair<MediaItem, Int>?>
+    activeHeroState: StateFlow<Pair<MediaItem, Int>?>,
+    ambientAlpha: Float = 1f
 ) {
     val activePair by activeHeroState.collectAsState()
     val item = activePair?.first
     val imageUrl = item?.backdropUrl ?: item?.posterUrl
-    AmbientBlurredBackdrop(imageUrl = imageUrl)
+    AmbientBlurredBackdrop(imageUrl = imageUrl, alpha = ambientAlpha)
 }
 
 @Composable

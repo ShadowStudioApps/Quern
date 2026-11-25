@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
@@ -139,7 +140,6 @@ import com.quern.app.data.update.UpdateUiState
 
 import com.quern.app.domain.model.AccentColorChoice
 import com.quern.app.domain.model.AppFontChoice
-import com.quern.app.domain.model.AppIconOption
 import com.quern.app.domain.model.AppLanguage
 import com.quern.app.domain.model.AppSettings
 import com.quern.app.domain.model.AppThemePreset
@@ -178,6 +178,7 @@ import com.quern.app.ui.components.QuernCompanionSignInCard
 import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.ui.components.WhatsNewDialog
 import com.quern.app.ui.components.buildReleaseNotesPreview
+import com.quern.app.ui.components.AppIconGrid
 import com.quern.app.ui.components.isTvHardware
 import com.quern.app.ui.components.parseAvailableUpdateNotes
 import com.quern.app.ui.components.parseReleaseEntries
@@ -295,7 +296,6 @@ fun SettingsScreen(
     checkingHealthUrls: Set<String> = emptySet(),
     isRefreshingAddons: Boolean = false,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
-    onApplyAppIcon: (AppIconOption) -> Unit,
     onSyncStremio: (String, String) -> Unit = { _, _ -> },
     onImportNuvio: (String) -> Unit = {},
     onInstallAddon: (String, () -> Unit) -> Unit,
@@ -499,7 +499,6 @@ fun SettingsScreen(
                     settings = settings,
                     isModified = isGroupModified(SettingsGroup.APPEARANCE, settings),
                     onUpdateSettings = onUpdateSettings,
-                    onApplyAppIcon = onApplyAppIcon,
                     onResetSection = {
                         val d = AppSettings()
                         val iconChanged = settings.appIcon != d.appIcon
@@ -517,7 +516,6 @@ fun SettingsScreen(
                             )
                         }
                         if (iconChanged) {
-                            onApplyAppIcon(d.appIcon)
                         }
                         onShowToast(resetToast)
                     }
@@ -997,7 +995,6 @@ private fun AppearanceSectionPane(
     settings: AppSettings,
     isModified: Boolean,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
-    onApplyAppIcon: (AppIconOption) -> Unit,
     onResetSection: () -> Unit
 ) {
     val palette = LocalQuernPalette.current
@@ -1250,99 +1247,12 @@ private fun AppearanceSectionPane(
             }
         }
 
-        // 6. App Icon & TV Banner Choice (with restart-warning confirmation dialog)
         item(key = "app_icon") {
-            var pendingIcon by remember { mutableStateOf<AppIconOption?>(null) }
-
             SettingSectionCard(title = qString(R.string.appearance_icon_title)) {
                 HelpTextLine(qString(R.string.appearance_icon_help))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    AppIconOption.entries.forEach { iconOpt ->
-                        val selected = settings.appIcon == iconOpt
-                        var focused by remember { mutableStateOf(false) }
-                        val gradColors = iconOpt.gradientHexColors?.map { Color(it) }
-                        Surface(
-                            color = if (focused) palette.accent else if (selected) palette.surfaceElevated else palette.surface,
-                            shape = RoundedCornerShape(14.dp),
-                            border = if (focused) BorderStroke(2.dp, palette.focusRing) else null,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .tvClickable(
-                                    onFocusChangedState = { focused = it },
-                                    onClick = {
-                                        if (iconOpt != settings.appIcon) {
-                                            pendingIcon = iconOpt
-                                        }
-                                    }
-                                )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .then(
-                                            if (gradColors != null) {
-                                                Modifier.background(Brush.linearGradient(gradColors))
-                                            } else {
-                                                Modifier.background(Color(iconOpt.previewColorHex).copy(alpha = 0.22f))
-                                            }
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        "Q",
-                                        color = if (gradColors != null) Color.White else Color(iconOpt.previewColorHex),
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                                Text(
-                                    text = if (isAr) iconOpt.displayNameAr else iconOpt.displayNameEn,
-                                    color = if (focused) palette.onAccent else LumaTextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
+                AppIconGrid(settings.appIcon, isAr) { chosen ->
+                    onUpdateSettings { it.copy(appIcon = chosen) }
                 }
-            }
-
-            pendingIcon?.let { chosen ->
-                AlertDialog(
-                    onDismissRequest = { pendingIcon = null },
-                    containerColor = palette.surfaceElevated,
-                    title = {
-                        Text(qString(R.string.icon_confirm_title), color = Color.White, fontWeight = FontWeight.Bold)
-                    },
-                    text = {
-                        Text(qString(R.string.icon_confirm_body), color = LumaTextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
-                    },
-                    confirmButton = {
-                        SelectablePillOption(
-                            label = qString(R.string.icon_confirm_apply),
-                            selected = true,
-                            onClick = {
-                                pendingIcon = null
-                                onUpdateSettings { it.copy(appIcon = chosen) }
-                                onApplyAppIcon(chosen)
-                            }
-                        )
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { pendingIcon = null }) {
-                            Text(qString(R.string.common_cancel), color = LumaTextSecondary)
-                        }
-                    }
-                )
             }
         }
     }
@@ -2657,7 +2567,21 @@ private fun SystemSectionPane(
     }
 
     if (showLicensesDialog) {
+        val fluentMitText = """
+            MIT License
+
+            Copyright (c) Microsoft Corporation.
+
+            Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+            The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+            THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+        """.trimIndent()
         val licenses = listOf(
+            "Microsoft Fluent Emoji 3D (30 bundled profile avatars)" to fluentMitText,
+            "DiceBear Lorelei (15 bundled profile avatars, generated offline)" to "CC0 1.0 Universal (Public Domain Dedication) — artwork by Lisa Wischofsky; DiceBear tooling under MIT License",
+            "Quern Glass Medallion, Monogram & Light-Painting Backgrounds" to "Original code-drawn artwork — MIT License (bundled offline)",
             "AndroidX & Jetpack Compose / Material3" to "Apache License 2.0",
             "AndroidX Media3 (ExoPlayer)" to "Apache License 2.0",
             "Jellyfin Media3 FFmpeg Decoder" to "LGPL-2.1+ / GPL-compatible native decoder",
@@ -3566,6 +3490,7 @@ private fun ProfilesManagerSection(
     var failedMigrationProfileId by remember { mutableStateOf<String?>(null) }
     var setPinTargetProfile by remember { mutableStateOf<UserProfile?>(null) }
     var avatarPickerProfileId by remember { mutableStateOf<String?>(null) }
+    var backgroundPickerProfileId by remember { mutableStateOf<String?>(null) }
 
     // Deterministic single-profile authority for gating Manage Profiles when any profile is locked:
     // Primary profile (index 0) if it is locked; otherwise the first locked profile in profile order.
@@ -3759,6 +3684,13 @@ private fun ProfilesManagerSection(
                                 onClick = { avatarPickerProfileId = profile.id }
                             )
                             Spacer(Modifier.height(6.dp))
+                            MiniActionChip(
+                                icon = Icons.Default.Image,
+                                label = qString(R.string.profile_background_label),
+                                tint = palette.focusRing,
+                                onClick = { backgroundPickerProfileId = profile.id }
+                            )
+                            Spacer(Modifier.height(6.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 MiniActionChip(
                                     icon = if (profile.isLocked) Icons.Default.LockOpen else Icons.Default.Lock,
@@ -3833,10 +3765,10 @@ private fun ProfilesManagerSection(
         CreateProfileDialog(
             isAr = isAr,
             onDismiss = { showCreateDialog = false },
-            onCreate = { name, colorHex, pin, avatarKey ->
+            onCreate = { name, colorHex, pin, avatarKey, avatarUrl ->
                 showCreateDialog = false
                 profileScope.launch {
-                    val newProfile = buildNewProfile(name, colorHex, pin, avatarKey)
+                    val newProfile = buildNewProfile(name, colorHex, pin, avatarKey, avatarUrl)
                     onUpdateSettings { st ->
                         st.copy(
                             profiles = st.profiles + newProfile,
@@ -3855,6 +3787,7 @@ private fun ProfilesManagerSection(
         AlertDialog(
             onDismissRequest = { avatarPickerProfileId = null },
             containerColor = palette.surfaceElevated,
+            modifier = Modifier.widthIn(max = 580.dp),
             title = {
                 Text(
                     text = "${qString(R.string.profile_choose_picture)} — ${target.name}",
@@ -3865,20 +3798,41 @@ private fun ProfilesManagerSection(
             text = {
                 Column(
                     modifier = Modifier
-                        .heightIn(max = 340.dp)
+                        .heightIn(max = 480.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
                     ProfileAvatarGrid(
                         profileName = target.name,
                         colorHex = target.avatarColorHex,
                         selectedKey = target.avatarKey,
+                        customUrl = target.avatarUrl,
+                        itemSize = 72.dp,
                         onSelect = { key ->
                             avatarPickerProfileId = null
                             onUpdateSettings { st ->
                                 st.copy(profiles = st.profiles.map {
-                                    if (it.id == target.id) it.copy(avatarKey = key) else it
+                                    if (it.id == target.id) it.copy(avatarKey = key, avatarUrl = null) else it
                                 })
                             }
+                        },
+                        onSelectMonogram = { tintHex ->
+                            onUpdateSettings { st ->
+                                st.copy(profiles = st.profiles.map {
+                                    if (it.id == target.id) {
+                                        it.copy(avatarKey = null, avatarUrl = null, avatarColorHex = tintHex)
+                                    } else {
+                                        it
+                                    }
+                                })
+                            }
+                        },
+                        onApplyCustomUrl = { url ->
+                            onUpdateSettings { st ->
+                                st.copy(profiles = st.profiles.map {
+                                    if (it.id == target.id) it.copy(avatarUrl = url) else it
+                                })
+                            }
+                            if (url != null) avatarPickerProfileId = null
                         }
                     )
                 }
@@ -3886,7 +3840,62 @@ private fun ProfilesManagerSection(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { avatarPickerProfileId = null }) {
-                    Text(qString(R.string.common_cancel), color = LumaTextSecondary)
+                    Text(qString(R.string.common_close), color = LumaTextSecondary)
+                }
+            }
+        )
+    }
+
+    val backgroundPickerProfile = backgroundPickerProfileId?.let { id ->
+        settings.profiles.firstOrNull { it.id == id }
+    }
+    backgroundPickerProfile?.let { target ->
+        AlertDialog(
+            onDismissRequest = { backgroundPickerProfileId = null },
+            containerColor = palette.surfaceElevated,
+            modifier = Modifier.widthIn(max = 640.dp),
+            title = {
+                Text(
+                    text = "${qString(R.string.profile_choose_background)} — ${target.name}",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    com.quern.app.ui.components.ProfileBackgroundPicker(
+                        selectedKey = target.backgroundKey,
+                        customUrl = target.backgroundUrl,
+                        onSelectPreset = { key ->
+                            onUpdateSettings { st ->
+                                st.copy(profiles = st.profiles.map {
+                                    if (it.id == target.id) {
+                                        it.copy(backgroundKey = key, backgroundUrl = null)
+                                    } else {
+                                        it
+                                    }
+                                })
+                            }
+                        },
+                        onApplyCustomUrl = { url ->
+                            onUpdateSettings { st ->
+                                st.copy(profiles = st.profiles.map {
+                                    if (it.id == target.id) it.copy(backgroundUrl = url) else it
+                                })
+                            }
+                            if (url != null) backgroundPickerProfileId = null
+                        }
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { backgroundPickerProfileId = null }) {
+                    Text(qString(R.string.common_close), color = LumaTextSecondary)
                 }
             }
         )
@@ -4188,14 +4197,21 @@ private fun MiniActionChip(
 }
 
 /** New profile from the create dialog; a 4-digit PIN is hashed off the main thread. */
-internal suspend fun buildNewProfile(name: String, colorHex: Long, pin: String, avatarKey: String?): UserProfile {
+internal suspend fun buildNewProfile(
+    name: String,
+    colorHex: Long,
+    pin: String,
+    avatarKey: String?,
+    avatarUrl: String? = null
+): UserProfile {
     val hashedPin = pin.takeIf { it.length == 4 }?.let { PinHasher.hashPinAsync(it) }
     return UserProfile(
         id = "prof_${UUID.randomUUID().toString().take(8)}",
         name = name.trim(),
         avatarColorHex = colorHex,
         pinCode = hashedPin,
-        avatarKey = avatarKey
+        avatarKey = avatarKey,
+        avatarUrl = avatarUrl
     )
 }
 
@@ -4203,7 +4219,7 @@ internal suspend fun buildNewProfile(name: String, colorHex: Long, pin: String, 
 internal fun CreateProfileDialog(
     isAr: Boolean,
     onDismiss: () -> Unit,
-    onCreate: (String, Long, String, String?) -> Unit
+    onCreate: (String, Long, String, String?, String?) -> Unit
 ) {
     val palette = LocalQuernPalette.current
     val focusManager = LocalFocusManager.current
@@ -4211,6 +4227,7 @@ internal fun CreateProfileDialog(
     var name by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
     var avatarKey by remember { mutableStateOf<String?>(null) }
+    var avatarUrl by remember { mutableStateOf<String?>(null) }
     val avatarColors = listOf(
         0xFFD97736L,
         0xFF8C3B5EL,
@@ -4312,8 +4329,18 @@ internal fun CreateProfileDialog(
                     profileName = name,
                     colorHex = selectedColor,
                     selectedKey = avatarKey,
-                    itemSize = 44.dp,
-                    onSelect = { avatarKey = it }
+                    customUrl = avatarUrl,
+                    itemSize = 56.dp,
+                    onSelect = {
+                        avatarKey = it
+                        avatarUrl = null
+                    },
+                    onSelectMonogram = { tintHex ->
+                        selectedColor = tintHex
+                        avatarKey = null
+                        avatarUrl = null
+                    },
+                    onApplyCustomUrl = { url -> avatarUrl = url }
                 )
 
                 OutlinedTextField(
@@ -4357,7 +4384,7 @@ internal fun CreateProfileDialog(
                 label = qString(R.string.profile_create_btn),
                 selected = true,
                 onClick = {
-                    if (name.isNotBlank()) onCreate(name, selectedColor, pin, avatarKey)
+                    if (name.isNotBlank()) onCreate(name, selectedColor, pin, avatarKey, avatarUrl)
                 }
             )
         },

@@ -385,8 +385,14 @@ data class UserProfile(
     val name: String,
     val avatarColorHex: Long,
     val pinCode: String? = null, // 4-digit optional PIN lock
-    /** Built-in picture (see ui/components/ProfileAvatars.kt); null = initials on avatarColorHex. */
-    val avatarKey: String? = null
+    /** Built-in picture key (see ui/components/ProfileAvatars.kt); null = serif Monogram on avatarColorHex. */
+    val avatarKey: String? = null,
+    /** Optional custom HTTPS avatar image URL; takes precedence over avatarKey when valid. */
+    val avatarUrl: String? = null,
+    /** Built-in light-painting background key (see ui/components/ProfileBackgrounds.kt); null = Midnight (theme default). */
+    val backgroundKey: String? = null,
+    /** Optional custom HTTPS background image URL; dimmed for readability, falls back to backgroundKey on error. */
+    val backgroundUrl: String? = null
 ) {
     val isLocked: Boolean get() = !pinCode.isNullOrBlank()
 }
@@ -398,7 +404,7 @@ data class AppSettings(
     val accentColor: AccentColorChoice = AccentColorChoice.THEME_DEFAULT,
     val fontChoice: AppFontChoice = AppFontChoice.DEFAULT,
     val fontScale: FontScalePreset = FontScalePreset.STANDARD,
-    val appIcon: AppIconOption = AppIconOption.SLATE_BLUE,
+    val appIcon: AppIconOption = AppIconOption.AMOLED,
     val navigationStyle: NavigationStyle = NavigationStyle.SIDEBAR_LEFT,
     val subtitleLanguage: SubtitleLanguage = SubtitleLanguage.ARABIC,
     val subtitleSize: SubtitleSize = SubtitleSize.MEDIUM,

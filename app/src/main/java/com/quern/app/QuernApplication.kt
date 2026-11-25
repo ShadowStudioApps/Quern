@@ -5,6 +5,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.quern.app.data.local.AppIconManager
 import com.quern.app.di.AppContainer
 import kotlinx.coroutines.runBlocking
 
@@ -18,7 +19,14 @@ class QuernApplication : Application(), ImageLoaderFactory {
         if (container.syncEngine.hasPendingAccountReset()) {
             runBlocking { container.syncEngine.finishPendingAccountReset() }
         }
+        applySavedLauncherIcon()
         container.syncEngine.start()
+    }
+
+    internal fun applySavedLauncherIcon() {
+        runCatching {
+            AppIconManager.applySavedIcon(this, container.settingsStore.settings.value.appIcon)
+        }
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

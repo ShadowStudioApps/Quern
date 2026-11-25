@@ -35,9 +35,9 @@
     <application
         android:name=".QuernApplication"
         android:allowBackup="false"
-        android:banner="@drawable/tv_banner"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:banner="@drawable/prism_tv_banner_glossy"
+        android:icon="@mipmap/ic_launcher_amoled"
+        android:roundIcon="@mipmap/ic_launcher_amoled"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Quern"
@@ -67,12 +67,12 @@
             </intent-filter>
         </activity>
 
-        <!-- Dynamic Launcher Icon 1: Slate Blue (#345372) [Default] -->
+        <!-- Dynamic Launcher Icon 1: Slate Blue -->
         <activity-alias
             android:name=".IconSlateBlue"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true"
-            android:banner="@drawable/tv_banner"
+            android:banner="@drawable/prism_tv_banner_slate"
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher_round"
             android:label="@string/app_name"
@@ -92,7 +92,7 @@
             android:name=".IconLightGray"
             android:enabled="false"
             android:exported="true"
-            android:banner="@drawable/tv_banner_gray"
+            android:banner="@drawable/prism_tv_banner_platinum"
             android:icon="@mipmap/ic_launcher_gray"
             android:roundIcon="@mipmap/ic_launcher_gray"
             android:label="@string/app_name"
@@ -107,12 +107,12 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- Dynamic Launcher Icon 3: Pure AMOLED Monochrome -->
+        <!-- Dynamic Launcher Icon 3: Glossy Black [Default] -->
         <activity-alias
             android:name=".IconAmoled"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="true"
-            android:banner="@drawable/tv_banner_amoled"
+            android:banner="@drawable/prism_tv_banner_glossy"
             android:icon="@mipmap/ic_launcher_amoled"
             android:roundIcon="@mipmap/ic_launcher_amoled"
             android:label="@string/app_name"
@@ -132,7 +132,7 @@
             android:name=".IconOceanBlue"
             android:enabled="false"
             android:exported="true"
-            android:banner="@drawable/tv_banner_ocean"
+            android:banner="@drawable/prism_tv_banner_ocean"
             android:icon="@mipmap/ic_launcher_ocean"
             android:roundIcon="@mipmap/ic_launcher_ocean"
             android:label="@string/app_name"
@@ -152,7 +152,7 @@
             android:name=".IconAuroraGradient"
             android:enabled="false"
             android:exported="true"
-            android:banner="@drawable/tv_banner_aurora"
+            android:banner="@drawable/prism_tv_banner_aurora"
             android:icon="@mipmap/ic_launcher_aurora"
             android:roundIcon="@mipmap/ic_launcher_aurora"
             android:label="@string/app_name"
@@ -172,7 +172,7 @@
             android:name=".IconSunsetGradient"
             android:enabled="false"
             android:exported="true"
-            android:banner="@drawable/tv_banner_sunset"
+            android:banner="@drawable/prism_tv_banner_sunset"
             android:icon="@mipmap/ic_launcher_sunset"
             android:roundIcon="@mipmap/ic_launcher_sunset"
             android:label="@string/app_name"

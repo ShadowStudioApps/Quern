@@ -98,9 +98,9 @@ Device-class routing uses Android hardware TV detection (`UiModeManager.currentM
 
 ### `profiles`
 ```json
-{ "formatVersion": 1, "profiles": [ { "id": "main", "name": "…", "avatarColorHex": 4282339954, "avatarKey": "rocket" } ] }
+{ "formatVersion": 1, "profiles": [ { "id": "main", "name": "…", "avatarColorHex": 4282339954, "avatarKey": "astronaut", "avatarUrl": null, "backgroundKey": "aurora", "backgroundUrl": null } ] }
 ```
-`avatarKey` is one of the built-in picture keys in `ui/components/ProfileAvatars.kt` (`paw`, `rocket`, `gamer`, …) or `null` for initials on `avatarColorHex`. Unknown keys fall back to initials. PIN hashes travel only in the encrypted `secrets` section.
+`avatarKey` is one of the built-in picture keys in `ui/components/ProfileAvatars.kt` (`fox`, `astronaut`, `person_nora`, …) or `null` for a serif Monogram tinted by `avatarColorHex`. Legacy keys (`paw`, `rocket`, `gamer`, …) map transparently to their closest built-in picture; unknown keys fall back to Monogram. `avatarUrl` is an optional `https://` custom avatar image URL (non-HTTPS values are ignored; load failures fall back to Monogram; older releases ignore the field). `backgroundKey` is one of the built-in light-painting background keys in `ui/components/ProfileBackgrounds.kt` (`midnight`, `ember`, `aurora`, `orchid`, `tide`, `dune`, `nebula`, `monsoon`, `obsidian`) or `null` for `midnight` (theme default); unknown keys fall back to `midnight`. `backgroundUrl` is an optional `https://` custom background image URL (non-HTTPS values are ignored; dimmed for readability and falls back to `backgroundKey` on error; older releases ignore the field). PIN hashes travel only in the encrypted `secrets` section.
 
 ### `favorites` and `progress`
 ```json

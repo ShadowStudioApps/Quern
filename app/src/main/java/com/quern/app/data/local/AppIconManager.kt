@@ -10,21 +10,37 @@ import com.quern.app.domain.model.AppIconOption
  * using PackageManager activity-alias switching.
  */
 object AppIconManager {
-    fun applyIcon(context: Context, selected: AppIconOption) {
+    fun applySavedIcon(context: Context, selected: AppIconOption) {
         val pm = context.packageManager
         val pkg = context.packageName
-        // Enable target first so the app always has an active launcher entry
-        pm.setComponentEnabledSetting(
-            ComponentName(pkg, selected.aliasName),
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-            PackageManager.DONT_KILL_APP
-        )
-        AppIconOption.entries.filter { it != selected }.forEach { other ->
+        val target = ComponentName(pkg, selected.aliasName)
+        // Enable the target before changing any other launcher entry.
+        if (!pm.isAliasEnabled(target)) {
             pm.setComponentEnabledSetting(
-                ComponentName(pkg, other.aliasName),
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                target,
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                 PackageManager.DONT_KILL_APP
             )
         }
+        AppIconOption.entries.forEach { option ->
+            if (option != selected) {
+                val alias = ComponentName(pkg, option.aliasName)
+                if (pm.isAliasEnabled(alias)) {
+                    pm.setComponentEnabledSetting(
+                        alias,
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP
+                    )
+                }
+            }
+        }
     }
+
+    private fun PackageManager.isAliasEnabled(alias: ComponentName): Boolean =
+        when (getComponentEnabledSetting(alias)) {
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
+            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT ->
+                getActivityInfo(alias, PackageManager.MATCH_DISABLED_COMPONENTS).enabled
+            else -> false
+        }
 }

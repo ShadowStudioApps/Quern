@@ -210,7 +210,8 @@ fun buildHeroBackdropRequest(
 @Composable
 fun AmbientBlurredBackdrop(
     imageUrl: String?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    alpha: Float = 1f
 ) {
     if (imageUrl.isNullOrBlank()) return
     val context = LocalContext.current
@@ -231,6 +232,7 @@ fun AmbientBlurredBackdrop(
         model = request,
         contentDescription = null,
         contentScale = ContentScale.Crop,
+        alpha = alpha.coerceIn(0f, 1f),
         filterQuality = FilterQuality.Low,
         onSuccess = { shownKey[0] = it.result.memoryCacheKey },
         modifier = modifier.fillMaxSize()

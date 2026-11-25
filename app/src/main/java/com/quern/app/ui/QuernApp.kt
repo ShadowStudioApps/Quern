@@ -94,7 +94,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.annotation.ExperimentalCoilApi
 import coil.imageLoader
-import com.quern.app.data.local.AppIconManager
 import com.quern.app.data.sync.PendingDeviceLink
 import com.quern.app.domain.model.ContinueWatchingAction
 import com.quern.app.domain.model.MediaItem
@@ -124,6 +123,8 @@ import com.quern.app.ui.components.QuernCompanionSignInCard
 import com.quern.app.ui.screens.SettingsScreen
 import com.quern.app.ui.screens.ProfilePickerScreen
 import com.quern.app.ui.components.ProfileAvatarCircle
+import com.quern.app.ui.components.ProfileBackgroundLayer
+import com.quern.app.ui.components.hasCustomBackground
 import com.quern.app.domain.model.AppLanguage
 import com.quern.app.domain.model.UserProfile
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -472,7 +473,8 @@ fun QuernApp(
                                     settingsInitialGroup = SettingsGroup.SYSTEM
                                     currentTab = QuernTab.SETTINGS
                                 },
-                                onDismissUpdate = { viewModel.dismissUpdateBanner() }
+                                onDismissUpdate = { viewModel.dismissUpdateBanner() },
+                                hasCustomProfileBackground = settings.activeProfile.hasCustomBackground()
                             )
                         }
 
@@ -550,10 +552,6 @@ fun QuernApp(
                                 checkingHealthUrls = checkingHealthUrls,
                                 isRefreshingAddons = isRefreshingAddons,
                                 onUpdateSettings = { viewModel.updateSettings(it) },
-                                onApplyAppIcon = { iconOpt ->
-                                    runCatching { AppIconManager.applyIcon(context, iconOpt) }
-                                    viewModel.showToast("App icon updated!")
-                                },
                                 onSyncStremio = { email, pass -> viewModel.syncFromStremio(email, pass) },
                                 onImportNuvio = { raw -> viewModel.importFromNuvio(raw) },
                                 onInstallAddon = { url, done -> viewModel.installAddon(url) { done() } },
@@ -610,18 +608,10 @@ fun QuernApp(
             }
         }
 
-        // One soft, blurred colour background behind every page and theme; pages are transparent on top.
-        val glowColors = remember(palette.isGlossy, palette.accent, palette.ambientGlow, palette.surfaceElevated) {
-            if (palette.isGlossy) {
-                listOf(Color(0xFF1F2B3D), Color(0xFF2B384C), Color(0xFF141C28), Color(0xFF222D3F))
-            } else {
-                listOf(palette.ambientGlow, palette.accent, palette.surfaceElevated, palette.ambientGlow)
-            }
-        }
-        SoftGlowBackground(
-            baseColor = palette.background,
-            glowColors = glowColors,
-            intensity = if (palette.isGlossy) 0.78f else 0.86f
+        // Profile-specific light-painting or custom HTTPS background behind every page; pages are transparent on top.
+        ProfileBackgroundLayer(
+            profile = settings.activeProfile,
+            palette = palette
         )
 
         if (isTv) {

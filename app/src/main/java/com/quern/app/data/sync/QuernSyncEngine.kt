@@ -12,7 +12,6 @@ import com.quern.app.data.KIND_FAVORITE
 import com.quern.app.data.KIND_PROGRESS
 import com.quern.app.data.local.AddonDao
 import com.quern.app.data.local.QuernDatabase
-import com.quern.app.data.local.AppIconManager
 import com.quern.app.data.local.FavoriteDao
 import com.quern.app.data.local.FavoriteEntity
 import com.quern.app.data.local.TombstoneDao
@@ -276,7 +275,6 @@ class QuernSyncEngine(
         database.clearAllTables()
         debridManager.applySyncedKeys(emptyMap())
         settingsStore.reset()
-        AppIconManager.applyIcon(context, settingsStore.settings.value.appIcon)
         vault.commitStrings(mapOf(KEY_RESTORE_PENDING to "true"))
         // Finish by atomically removing credentials, metadata and the reset marker.
         vault.commitRemoveExcept(setOf(QuernAccount.KEY_DEVICE_ID, KEY_RESTORE_PENDING))
@@ -425,12 +423,8 @@ class QuernSyncEngine(
                 _addonsApplied.tryEmit(Unit)
             }
             Section.SETTINGS -> obj["values"]?.jsonObject?.let(settingsStore::applySyncSettingsValues)
-            Section.SETTINGS_TV, Section.SETTINGS_PHONE -> obj["values"]?.jsonObject?.let { vals ->
-                val prevIcon = settingsStore.settings.value.appIcon
-                settingsStore.applySyncDeviceSettingsValues(vals)
-                val nextIcon = settingsStore.settings.value.appIcon
-                if (nextIcon != prevIcon) runCatching { AppIconManager.applyIcon(context, nextIcon) }
-            }
+            Section.SETTINGS_TV, Section.SETTINGS_PHONE ->
+                obj["values"]?.jsonObject?.let(settingsStore::applySyncDeviceSettingsValues)
             Section.PROFILES -> applyProfiles(obj, union = firstLink)
             Section.SECRETS -> applySecrets(obj, union = firstLink)
             Section.FAVORITES, Section.PROGRESS -> needsUpload = mergeItems(s, obj)
@@ -683,6 +677,11 @@ class QuernSyncEngine(
         }
     }
 
+    private fun sanitizeHttpsImageUrl(raw: String?): String? {
+        val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() && it.length <= 2048 } ?: return null
+        return if (trimmed.startsWith("https://", ignoreCase = true)) trimmed else null
+    }
+
     private fun applyProfiles(obj: JsonObject, union: Boolean) {
         val remote = obj["profiles"]?.jsonArray.orEmpty()
             .mapNotNull { it as? JsonObject }
@@ -693,7 +692,10 @@ class QuernSyncEngine(
                     id = id,
                     name = name.take(40),
                     avatarColorHex = p["avatarColorHex"]?.jsonPrimitive?.longOrNull ?: 0xFF345372L,
-                    avatarKey = p["avatarKey"]?.jsonPrimitive?.contentOrNull
+                    avatarKey = p["avatarKey"]?.jsonPrimitive?.contentOrNull,
+                    avatarUrl = sanitizeHttpsImageUrl(p["avatarUrl"]?.jsonPrimitive?.contentOrNull),
+                    backgroundKey = p["backgroundKey"]?.jsonPrimitive?.contentOrNull?.take(32),
+                    backgroundUrl = sanitizeHttpsImageUrl(p["backgroundUrl"]?.jsonPrimitive?.contentOrNull)
                 )
             }
             .distinctBy { it.id }
@@ -702,7 +704,14 @@ class QuernSyncEngine(
             val localById = cur.profiles.associateBy { it.id }
             // PIN hashes never travel in this section: keep this device's PIN for known profiles.
             val merged = remote.map { r ->
-                localById[r.id]?.copy(name = r.name, avatarColorHex = r.avatarColorHex, avatarKey = r.avatarKey) ?: r
+                localById[r.id]?.copy(
+                    name = r.name,
+                    avatarColorHex = r.avatarColorHex,
+                    avatarKey = r.avatarKey,
+                    avatarUrl = r.avatarUrl,
+                    backgroundKey = r.backgroundKey,
+                    backgroundUrl = r.backgroundUrl
+                ) ?: r
             }
             val remoteIds = merged.map { it.id }.toSet()
             val profiles = if (union) merged + cur.profiles.filter { it.id !in remoteIds } else merged
@@ -836,11 +845,16 @@ class QuernSyncEngine(
             put("formatVersion", 1)
             put("profiles", buildJsonArray {
                 settingsStore.settings.value.profiles.forEach { p ->
+                    val cleanAvatarUrl = sanitizeHttpsImageUrl(p.avatarUrl)
+                    val cleanBackgroundUrl = sanitizeHttpsImageUrl(p.backgroundUrl)
                     add(buildJsonObject {
                         put("id", p.id)
                         put("name", p.name)
                         put("avatarColorHex", p.avatarColorHex)
                         put("avatarKey", p.avatarKey?.let { JsonPrimitive(it) } ?: JsonNull)
+                        put("avatarUrl", cleanAvatarUrl?.let { JsonPrimitive(it) } ?: JsonNull)
+                        put("backgroundKey", p.backgroundKey?.let { JsonPrimitive(it) } ?: JsonNull)
+                        put("backgroundUrl", cleanBackgroundUrl?.let { JsonPrimitive(it) } ?: JsonNull)
                     })
                 }
             })

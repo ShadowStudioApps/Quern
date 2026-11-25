@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Lock
@@ -52,9 +53,9 @@ import com.quern.app.R
 import com.quern.app.domain.model.UserProfile
 import com.quern.app.ui.components.LocalQuernLayout
 import com.quern.app.ui.components.ProfileAvatarCircle
+import com.quern.app.ui.components.ProfileBackgroundLayer
 import com.quern.app.ui.components.QuernBrandMark
 import com.quern.app.ui.components.QuernLayoutClass
-import com.quern.app.ui.components.SoftGlowBackground
 import com.quern.app.ui.components.profileAvatarFor
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
@@ -137,6 +138,12 @@ fun ProfilePickerScreen(
     val activeFocus = remember { FocusRequester() }
     var pinTarget by remember { mutableStateOf<UserProfile?>(null) }
     var showCreate by remember { mutableStateOf(false) }
+    var focusedProfileId by remember(activeProfileId) { mutableStateOf(activeProfileId) }
+    val focusedProfile = remember(profiles, focusedProfileId, activeProfileId) {
+        profiles.firstOrNull { it.id == focusedProfileId }
+            ?: profiles.firstOrNull { it.id == activeProfileId }
+            ?: profiles.firstOrNull()
+    }
     val scope = rememberCoroutineScope()
 
     // BACK keeps the current profile and closes the picker.
@@ -148,12 +155,16 @@ fun ProfilePickerScreen(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        SoftGlowBackground(baseColor = lerp(Color(0xFF0A0A0F), palette.background, 0.07f),
-            glowColors = listOf(palette.accent), intensity = 0.17f, picker = true)
+        ProfileBackgroundLayer(
+            profile = focusedProfile,
+            palette = palette
+        )
 
         val isCompact = LocalQuernLayout.current == QuernLayoutClass.COMPACT
-        val avatarSize = if (isCompact) 96.dp else 132.dp
-        val avatarFontSp = if (isCompact) 30f else 40f
+        val avatarSize = if (isCompact) 88.dp else 118.dp
+        val avatarFontSp = if (isCompact) 28f else 36f
+        val tileWidth = if (isCompact) 132.dp else 174.dp
+        val tileHeight = if (isCompact) 168.dp else 214.dp
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -176,70 +187,94 @@ fun ProfilePickerScreen(
             )
             Spacer(Modifier.height(if (isCompact) 28.dp else 44.dp))
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 20.dp else 36.dp)
+                modifier = Modifier.horizontalScroll(rememberScrollState()).padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 16.dp else 24.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 profiles.forEach { profile ->
                     var focused by remember { mutableStateOf(false) }
                     val scale = animateFloatAsState(
-                        targetValue = if (focused) 1.1f else 1f,
+                        targetValue = if (focused) 1.07f else 1f,
                         animationSpec = tween(150, easing = FastOutSlowInEasing),
                         label = "profilePickScale"
                     )
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                    val tileShape = RoundedCornerShape(22.dp)
+                    Box(
                         modifier = Modifier
+                            .size(width = tileWidth, height = tileHeight)
                             .then(if (profile.id == activeProfileId) Modifier.focusRequester(activeFocus) else Modifier)
                             .graphicsLayer {
                                 scaleX = scale.value
                                 scaleY = scale.value
-                                alpha = if (focused) 1f else 0.7f
+                                alpha = if (focused) 1f else 0.84f
                             }
+                            .clip(tileShape)
+                            .border(
+                                width = if (focused) 2.5.dp else 1.dp,
+                                color = if (focused) Color.White else Color.White.copy(alpha = 0.16f),
+                                shape = tileShape
+                            )
                             .tvClickable(
-                                onFocusChangedState = { focused = it },
+                                onFocusChangedState = { isF ->
+                                    focused = isF
+                                    if (isF) focusedProfileId = profile.id
+                                },
                                 onClick = {
                                     if (profile.isLocked) pinTarget = profile else onProfileChosen(profile.id)
                                 }
-                            )
-                            .padding(8.dp)
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .drawWithCache {
-                                    val tint = Color(profileAvatarFor(profile.avatarKey)?.from ?: profile.avatarColorHex)
-                                    val radius = size.minDimension * 0.61f
-                                    val glow = Brush.radialGradient(listOf(tint.copy(alpha = if (focused) 0.42f else 0.09f), Color.Transparent), radius = radius)
-                                    onDrawBehind { drawCircle(glow, radius) }
-                                }
-                                .clip(CircleShape)
-                                .border(
-                                    width = if (focused) 2.dp else 0.dp,
-                                    color = if (focused) Color.White else Color.Transparent,
-                                    shape = CircleShape
-                                )
-                                .padding(if (focused) 2.dp else 0.dp)
+                        // Each profile tile previews that profile's own light-painting / custom background
+                        ProfileBackgroundLayer(
+                            profile = profile,
+                            palette = palette,
+                            isTile = true,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp)
                         ) {
-                            ProfileAvatarCircle(profile, size = avatarSize, fontSizeSp = avatarFontSp)
-                        }
-                        Spacer(Modifier.height(14.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (profile.isLocked) {
-                                Icon(
-                                    Icons.Default.Lock,
-                                    contentDescription = null,
-                                    tint = if (focused) Color.White else LumaTextSecondary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .drawWithCache {
+                                        val tint = Color(profileAvatarFor(profile.avatarKey)?.from ?: profile.avatarColorHex)
+                                        val radius = size.minDimension * 0.61f
+                                        val glow = Brush.radialGradient(listOf(tint.copy(alpha = if (focused) 0.42f else 0.12f), Color.Transparent), radius = radius)
+                                        onDrawBehind { drawCircle(glow, radius) }
+                                    }
+                                    .clip(CircleShape)
+                                    .border(
+                                        width = if (focused) 2.dp else 0.dp,
+                                        color = if (focused) Color.White else Color.Transparent,
+                                        shape = CircleShape
+                                    )
+                                    .padding(if (focused) 2.dp else 0.dp)
+                            ) {
+                                ProfileAvatarCircle(profile, size = avatarSize, fontSizeSp = avatarFontSp)
                             }
-                            Text(
-                                text = profile.name,
-                                color = if (focused) Color.White else LumaTextSecondary,
-                                fontSize = if (isCompact) 15.sp else 18.sp,
-                                fontWeight = if (focused) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Spacer(Modifier.height(14.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (profile.isLocked) {
+                                    Icon(
+                                        Icons.Default.Lock,
+                                        contentDescription = null,
+                                        tint = if (focused) Color.White else LumaTextSecondary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                }
+                                Text(
+                                    text = profile.name,
+                                    color = if (focused) Color.White else Color.White.copy(alpha = 0.86f),
+                                    fontSize = if (isCompact) 15.sp else 17.sp,
+                                    fontWeight = if (focused) FontWeight.Bold else FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
@@ -254,9 +289,9 @@ fun ProfilePickerScreen(
         CreateProfileDialog(
             isAr = isAr,
             onDismiss = { showCreate = false },
-            onCreate = { name, colorHex, pin, avatarKey ->
+            onCreate = { name, colorHex, pin, avatarKey, avatarUrl ->
                 showCreate = false
-                scope.launch { onCreateProfile(buildNewProfile(name, colorHex, pin, avatarKey)) }
+                scope.launch { onCreateProfile(buildNewProfile(name, colorHex, pin, avatarKey, avatarUrl)) }
             }
         )
     }
