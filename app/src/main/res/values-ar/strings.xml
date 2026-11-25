@@ -275,6 +275,12 @@
     <string name="detail_back">رجوع</string>
     <string name="detail_favorite">المفضلة</string>
     <string name="detail_all_sources">كل المصادر</string>
+    <string name="detail_finding_best_source">جاري البحث عن أفضل مصدر…</string>
+    <string name="detail_more_options">خيارات إضافية</string>
+    <string name="detail_start_over">البدء من البداية</string>
+    <string name="detail_add_favorite">إضافة إلى المفضلة</string>
+    <string name="detail_remove_favorite">إزالة من المفضلة</string>
+    <string name="detail_watch_trailer">الإعلان التشويقي</string>
     <string name="detail_play">تشغيل</string>
     <string name="detail_play_count">تشغيل (%1$d)</string>
     <string name="detail_resume">استمرار</string>
@@ -434,4 +440,13 @@
     <string name="home_qr_sign_in_steps">امسح الرمز بكاميرا موبايلك لتسجيل الدخول أو إنشاء حساب Quern مجاني. ترجع إضافاتك وإعداداتك تلقائياً.</string>
     <string name="home_qr_after_sign_in">حساب جديد؟ بعد تسجيل الدخول فعّل خدماتك وإضافاتك من الإعدادات.</string>
     <string name="home_qr_add_addons">أضف الإضافات من موبايلك</string>
+    <string name="player_switched_source">تم التبديل إلى مصدر آخر</string>
+    <string name="player_switching_source">جاري التبديل لمصدر آخر…</string>
+    <string name="player_switch_source">تبديل المصدر</string>
+    <string name="player_switch_source_title">تبديل المصدر</string>
+    <string name="player_source_playing">قيد التشغيل</string>
+    <string name="player_source_failed">فشل</string>
+    <string name="player_failover_exhausted">تعذّر تشغيل 3 مصادر. اختر مصدراً آخر من القائمة.</string>
+    <string name="player_source_unplayable">تعذّر تشغيل هذا المصدر مباشرة. اربط خدمة Debrid أو اختر مصدراً آخر.</string>
+    <string name="player_source_resolve_failed">تعذّر تجهيز هذا المصدر. اختر مصدراً آخر.</string>
 </resources>

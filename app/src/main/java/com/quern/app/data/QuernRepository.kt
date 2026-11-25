@@ -4,6 +4,8 @@ import com.quern.app.data.addons.AddonRepository
 import com.quern.app.data.debrid.DebridManager
 import com.quern.app.data.local.FavoriteDao
 import com.quern.app.data.local.FavoriteEntity
+import com.quern.app.data.local.SourceMemoryDao
+import com.quern.app.data.local.SourceMemoryEntity
 import com.quern.app.data.local.TombstoneDao
 import com.quern.app.data.local.TombstoneEntity
 import com.quern.app.data.local.WatchHistoryDao
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import java.util.concurrent.ConcurrentHashMap
+import java.security.MessageDigest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -48,12 +51,79 @@ class QuernRepository(
     private val historyDao: WatchHistoryDao,
     private val favoriteDao: FavoriteDao,
     private val tombstoneDao: TombstoneDao,
+    private val sourceMemoryDao: SourceMemoryDao,
     /** Active profile id; history and favorites are kept per profile. */
     activeProfileId: Flow<String>,
     /** Current active profile id, read at write time. */
     private val currentProfileId: () -> String
 ) {
     private val profileId: Flow<String> = activeProfileId.distinctUntilChanged()
+
+    suspend fun rankPlaybackSources(
+        title: MediaItem,
+        sources: List<StreamSource>,
+        preferredQuality: String? = null,
+        preferredService: SourceOrigin? = null
+    ): List<StreamSource> {
+        val memory = sourceMemoryDao.forTitle(sourceMemoryTitleId(title))
+            .associateBy { Triple(it.addonId, it.quality, it.service) }
+        return sources
+            .mapNotNull { source ->
+                if (!source.isDirectlyPlayable && !source.needsDebridResolution) return@mapNotNull null
+                val result = memory[sourceMemoryKey(source)]
+                val score = if (result == null) 0.0 else {
+                    (result.successes.toDouble() - result.failures) /
+                        (result.successes.toDouble() + result.failures + 2.0)
+                }
+                source to score
+            }
+            .sortedWith(
+                compareByDescending<Pair<StreamSource, Double>> { it.second }
+                    .thenByDescending { preferredQuality != null && sourceQuality(it.first) == preferredQuality }
+                    .thenByDescending { it.first.origin == preferredService }
+                    .thenByDescending { it.first.isCached }
+            )
+            .map { it.first }
+    }
+
+    suspend fun recordPlaybackSourceResult(title: MediaItem, source: StreamSource, succeeded: Boolean) {
+        if (source.addonId.isNullOrBlank()) return
+        val (addonId, quality, service) = sourceMemoryKey(source)
+        sourceMemoryDao.record(
+            SourceMemoryEntity(
+                titleId = sourceMemoryTitleId(title),
+                addonId = addonId,
+                quality = quality,
+                service = service,
+                successes = if (succeeded) 1 else 0,
+                failures = if (succeeded) 0 else 1,
+                lastResultAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    private fun sourceMemoryTitleId(title: MediaItem): String =
+        hashSourceMemoryId("${title.type.name}:${title.imdbId ?: title.id}")
+
+    private fun sourceMemoryKey(source: StreamSource): Triple<String, String, String> {
+        val addonId = source.addonId?.let(::hashSourceMemoryId) ?: source.origin.name
+        val service = when (source.origin) {
+            SourceOrigin.TORBOX, SourceOrigin.REAL_DEBRID, SourceOrigin.ALL_DEBRID,
+            SourceOrigin.PREMIUMIZE -> source.origin.name
+            else -> ""
+        }
+        return Triple(addonId, sourceQuality(source), service)
+    }
+
+    private fun sourceQuality(source: StreamSource): String =
+        source.qualityBadges.firstOrNull {
+            it == "4K" || it == "1080p" || it == "720p" || it == "480p"
+        }.orEmpty()
+
+    private fun hashSourceMemoryId(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val continueWatching: Flow<List<WatchProgress>> = profileId.flatMapLatest { historyDao.observeRecent(it) }.map { list ->

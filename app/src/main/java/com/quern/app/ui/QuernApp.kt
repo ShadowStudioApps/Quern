@@ -279,6 +279,9 @@ fun QuernApp(
                 onProgressUpdate = { pos, dur, playing -> viewModel.onPlaybackProgress(pos, dur, playing) },
                 onPlaybackStop = { pos, dur -> viewModel.onPlaybackStopped(pos, dur) },
                 onPlayNextEpisode = { viewModel.playNextEpisode() },
+                onResolveStream = { stream -> viewModel.resolveStreamForPlayer(stream) },
+                onActiveStreamChanged = { stream -> viewModel.onPlayerActiveStreamChanged(stream) },
+                onRecordSourceResult = { stream, ok -> viewModel.recordPlaybackSourceResult(stream, ok) },
                 onBack = { viewModel.closePlayer() }
             )
             return@QuernTheme
@@ -336,11 +339,27 @@ fun QuernApp(
                         state = detailState,
                         isFavorite = isFav,
                         isTv = isTv,
-                        onBack = { showingDetail = false },
+                        onBack = {
+                            viewModel.cancelBestSourceSearch()
+                            showingDetail = false
+                        },
                         onToggleFavorite = { item -> viewModel.toggleFavorite(item, isFav) },
                         onSelectSeason = { viewModel.selectSeason(it) },
                         onSelectEpisode = { viewModel.selectEpisode(it) },
-                        onPlayStream = { viewModel.playStream(it) }
+                        onPlayStream = { viewModel.playStream(it) },
+                        onPlayBestSource = { startOver, onNoPlayable ->
+                            viewModel.playBestSource(startOver = startOver, onNoPlayableSource = onNoPlayable)
+                        },
+                        onDebugTestFailover = if (com.quern.app.BuildConfig.DEBUG) {
+                            val fixtureId = context.resources.getIdentifier("debug_failover_url", "string", context.packageName)
+                            if (fixtureId == 0) null else {
+                                { onNoPlayable ->
+                                    viewModel.debugPlayWithBrokenFirstSource(context.getString(fixtureId), onNoPlayable)
+                                }
+                            }
+                        } else {
+                            null
+                        }
                     )
                 } else {
                     when (tab) {

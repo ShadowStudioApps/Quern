@@ -1,0 +1,3 @@
+<resources>
+    <string name="debug_failover_url" translatable="false">http://127.0.0.1:1/broken-debug-test.mp4</string>
+</resources>

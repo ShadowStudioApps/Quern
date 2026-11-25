@@ -39,11 +39,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -56,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +74,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +86,7 @@ import coil.request.ImageRequest
 import coil.size.Precision
 import com.quern.app.ui.components.LocalQuernLayout
 import com.quern.app.ui.components.QuernLayoutClass
+import com.quern.app.BuildConfig
 import com.quern.app.R
 import com.quern.app.domain.model.Episode
 import com.quern.app.domain.model.MediaItem
@@ -93,6 +98,7 @@ import com.quern.app.ui.components.HERO_DECODE_HEIGHT_PX
 import com.quern.app.ui.components.HERO_DECODE_WIDTH_PX
 import com.quern.app.ui.components.HeroMeltTransformation
 import com.quern.app.ui.components.LumaBadgeChip
+import com.quern.app.ui.components.QuernAlertDialog
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaAmber
@@ -103,6 +109,7 @@ import com.quern.app.ui.theme.LumaRose
 import com.quern.app.ui.theme.LumaTextPrimary
 import com.quern.app.ui.theme.LumaTextSecondary
 import com.quern.app.ui.theme.qString
+import kotlinx.coroutines.delay
 
 private const val FILTER_ALL = "__ALL__"
 private const val FILTER_4K = "__4K__"
@@ -117,7 +124,11 @@ fun DetailScreen(
     onToggleFavorite: (MediaItem) -> Unit,
     onSelectSeason: (Int) -> Unit,
     onSelectEpisode: (Episode) -> Unit,
-    onPlayStream: (StreamSource) -> Unit
+    onPlayStream: (StreamSource) -> Unit,
+    onPlayBestSource: (startOver: Boolean, onNoPlayableSource: () -> Unit) -> Unit = { _, onNoPlayableSource ->
+        onNoPlayableSource()
+    },
+    onDebugTestFailover: ((onNoPlayableSource: () -> Unit) -> Unit)? = null
 ) {
     val palette = LocalQuernPalette.current
     val context = LocalContext.current
@@ -130,6 +141,15 @@ fun DetailScreen(
     }
 
     val item = detail.item
+    val trailerUrl = detail.trailerUrl?.takeIf { it.isNotBlank() }
+        ?: "https://www.youtube.com/results?search_query=${Uri.encode("${item.title} ${item.year.orEmpty()} official trailer")}"
+    val openTrailer: (String) -> Unit = { url ->
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }
+    }
     var showStreamsOverlay by remember(item.id) { mutableStateOf(false) }
     var streamFilter by remember(item.id) { mutableStateOf(FILTER_ALL) }
 
@@ -389,8 +409,27 @@ fun DetailScreen(
                 // Title + Metadata + Big White Play Pill + Cast Circles + Trailers + Movie Details
                 // =========================================================================
                 val playCtaFocus = remember { FocusRequester() }
+                val moreBtnFocus = remember { FocusRequester() }
+                var showMoreMenu by remember { mutableStateOf(false) }
+                var pendingMoreFocusReturn by remember { mutableStateOf(false) }
+                val windowInfo = LocalWindowInfo.current
+                val hasResume = state.savedPositionMs > 5_000L &&
+                    (state.savedDurationMs <= 0L || state.savedPositionMs < (state.savedDurationMs * 0.95).toLong())
+
                 LaunchedEffect(Unit) {
                     if (isTv) runCatching { playCtaFocus.requestFocus() }
+                }
+
+                LaunchedEffect(showMoreMenu, windowInfo.isWindowFocused, pendingMoreFocusReturn) {
+                    if (!isTv || showMoreMenu || !pendingMoreFocusReturn || !windowInfo.isWindowFocused) {
+                        return@LaunchedEffect
+                    }
+                    withFrameNanos { }
+                    delay(50L)
+                    if (!showMoreMenu) {
+                        runCatching { moreBtnFocus.requestFocus() }
+                        pendingMoreFocusReturn = false
+                    }
                 }
 
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -508,12 +547,11 @@ fun DetailScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     var playFocused by remember { mutableStateOf(false) }
-                                    val hasResume = state.savedPositionMs > 5_000L &&
-                                        (state.savedDurationMs <= 0L || state.savedPositionMs < (state.savedDurationMs * 0.95).toLong())
                                     val resumeFraction = if (hasResume && state.savedDurationMs > 0L) {
                                         (state.savedPositionMs.toFloat() / state.savedDurationMs.toFloat()).coerceIn(0.04f, 0.96f)
                                     } else 0f
                                     val ctaText = when {
+                                        state.isFindingBestSource -> qString(R.string.detail_finding_best_source)
                                         hasResume -> qString(R.string.detail_resume_time, formatTimeShort(state.savedPositionMs))
                                         state.streams.isNotEmpty() -> qString(R.string.detail_play_count, state.streams.size)
                                         else -> qString(R.string.detail_play)
@@ -528,8 +566,9 @@ fun DetailScreen(
                                             .focusRequester(playCtaFocus)
                                             .clip(RoundedCornerShape(999.dp))
                                             .tvClickable(
+                                                enabled = !state.isFindingBestSource,
                                                 onFocusChangedState = { playFocused = it },
-                                                onClick = { showStreamsOverlay = true }
+                                                onClick = { onPlayBestSource(false) { showStreamsOverlay = true } }
                                             )
                                     ) {
                                         Box(modifier = Modifier.fillMaxSize()) {
@@ -538,12 +577,20 @@ fun DetailScreen(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.Center
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.PlayArrow,
-                                                    contentDescription = null,
-                                                    tint = if (playFocused) palette.onAccent else Color.Black,
-                                                    modifier = Modifier.size(22.dp)
-                                                )
+                                                if (state.isFindingBestSource) {
+                                                    CircularProgressIndicator(
+                                                        color = if (playFocused) palette.onAccent else Color.Black,
+                                                        strokeWidth = 2.dp,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.Default.PlayArrow,
+                                                        contentDescription = null,
+                                                        tint = if (playFocused) palette.onAccent else Color.Black,
+                                                        modifier = Modifier.size(22.dp)
+                                                    )
+                                                }
                                                 Spacer(Modifier.width(6.dp))
                                                 Text(
                                                     text = ctaText,
@@ -576,11 +623,15 @@ fun DetailScreen(
                                         }
                                     }
 
-                                    // Circular "More / Sources" button matching Image #3
+                                    // Circular "More" menu button
                                     DetailCircleButton(
                                         icon = Icons.Default.MoreHoriz,
-                                        contentDescription = qString(R.string.detail_all_sources),
-                                        onClick = { showStreamsOverlay = true }
+                                        contentDescription = qString(R.string.detail_more_options),
+                                        modifier = Modifier.focusRequester(moreBtnFocus),
+                                        onClick = {
+                                            pendingMoreFocusReturn = true
+                                            showMoreMenu = true
+                                        }
                                     )
                                 }
                             }
@@ -766,15 +817,7 @@ fun DetailScreen(
                                         .tvClickable(
                                             onFocusChangedState = { trailerFocused = it },
                                             onClick = {
-                                                val targetUrl = detail.trailerUrl?.takeIf { it.isNotBlank() }
-                                                    ?: "https://www.youtube.com/results?search_query=${Uri.encode("${item.title} ${item.year.orEmpty()} official trailer")}"
-                                                runCatching {
-                                                    context.startActivity(
-                                                        Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
-                                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                        }
-                                                    )
-                                                }
+                                                openTrailer(trailerUrl)
                                             }
                                         )
                                 ) {
@@ -899,6 +942,40 @@ fun DetailScreen(
                                 }
                             }
                         }
+                    }
+
+                    if (showMoreMenu) {
+                        DetailMoreMenuDialog(
+                            hasResume = hasResume,
+                            isFavorite = isFavorite,
+                            trailerUrl = trailerUrl,
+                            onAllSources = {
+                                pendingMoreFocusReturn = false
+                                showMoreMenu = false
+                                showStreamsOverlay = true
+                            },
+                            onStartOver = {
+                                pendingMoreFocusReturn = false
+                                showMoreMenu = false
+                                onPlayBestSource(true) { showStreamsOverlay = true }
+                            },
+                            onToggleFavorite = {
+                                showMoreMenu = false
+                                onToggleFavorite(item)
+                            },
+                            onWatchTrailer = { url ->
+                                showMoreMenu = false
+                                openTrailer(url)
+                            },
+                            onDebugTestFailover = if (BuildConfig.DEBUG && onDebugTestFailover != null) {
+                                {
+                                    pendingMoreFocusReturn = false
+                                    showMoreMenu = false
+                                    onDebugTestFailover { showStreamsOverlay = true }
+                                }
+                            } else null,
+                            onDismiss = { showMoreMenu = false }
+                        )
                     }
                 }
             }
@@ -1065,10 +1142,156 @@ private fun StreamsPanelCard(
 }
 
 @Composable
+private fun DetailMoreMenuDialog(
+    hasResume: Boolean,
+    isFavorite: Boolean,
+    trailerUrl: String?,
+    onAllSources: () -> Unit,
+    onStartOver: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onWatchTrailer: (String) -> Unit,
+    onDebugTestFailover: (() -> Unit)?,
+    onDismiss: () -> Unit
+) {
+    val palette = LocalQuernPalette.current
+    val firstItemFocus = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        runCatching { firstItemFocus.requestFocus() }
+    }
+
+    QuernAlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = palette.surfaceElevated,
+        title = {
+            Text(
+                text = qString(R.string.detail_more_options),
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DetailMenuOptionRow(
+                    icon = Icons.AutoMirrored.Filled.List,
+                    label = qString(R.string.detail_all_sources),
+                    modifier = Modifier.focusRequester(firstItemFocus),
+                    onClick = onAllSources
+                )
+                if (hasResume) {
+                    DetailMenuOptionRow(
+                        icon = Icons.Default.Replay,
+                        label = qString(R.string.detail_start_over),
+                        onClick = onStartOver
+                    )
+                }
+                DetailMenuOptionRow(
+                    icon = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    label = qString(
+                        if (isFavorite) R.string.detail_remove_favorite else R.string.detail_add_favorite
+                    ),
+                    iconTintOverride = if (isFavorite) LumaRose else null,
+                    onClick = onToggleFavorite
+                )
+                if (!trailerUrl.isNullOrBlank()) {
+                    DetailMenuOptionRow(
+                        icon = Icons.Default.PlayArrow,
+                        label = qString(R.string.detail_watch_trailer),
+                        onClick = { onWatchTrailer(trailerUrl) }
+                    )
+                }
+                if (BuildConfig.DEBUG && onDebugTestFailover != null) {
+                    DetailMenuOptionRow(
+                        icon = Icons.Default.Bolt,
+                        label = "Debug: Test failover (broken URL)",
+                        onClick = onDebugTestFailover
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            var closeFocused by remember { mutableStateOf(false) }
+            Surface(
+                color = if (closeFocused) palette.accent else Color.White.copy(alpha = 0.14f),
+                shape = RoundedCornerShape(999.dp),
+                border = BorderStroke(
+                    width = if (closeFocused) 2.5.dp else 1.dp,
+                    color = if (closeFocused) palette.focusRing else Color.White.copy(alpha = 0.22f)
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .tvClickable(
+                        onFocusChangedState = { closeFocused = it },
+                        onClick = onDismiss
+                    )
+            ) {
+                Text(
+                    text = qString(R.string.common_close),
+                    color = if (closeFocused) palette.onAccent else Color.White,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+        }
+    )
+}
+
+@Composable
+private fun DetailMenuOptionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    iconTintOverride: Color? = null,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val palette = LocalQuernPalette.current
+    var focused by remember { mutableStateOf(false) }
+    Surface(
+        color = if (focused) palette.accent else palette.surface,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(
+            width = if (focused) 2.dp else 1.dp,
+            color = if (focused) palette.focusRing else palette.border
+        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .tvClickable(
+                onFocusChangedState = { focused = it },
+                onClick = onClick
+            )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (focused) palette.onAccent else (iconTintOverride ?: Color.White),
+                modifier = Modifier.size(19.dp)
+            )
+            Text(
+                text = label,
+                color = if (focused) palette.onAccent else Color.White,
+                fontSize = 14.sp,
+                fontWeight = if (focused) FontWeight.Bold else FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
 private fun DetailCircleButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
     tintOverride: Color? = null,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val palette = LocalQuernPalette.current
@@ -1077,7 +1300,7 @@ private fun DetailCircleButton(
         color = if (focused) palette.accent else LumaGlassFillStrong,
         shape = CircleShape,
         border = BorderStroke(if (focused) 2.5.dp else 1.dp, if (focused) palette.focusRing else LumaGlassBorder),
-        modifier = Modifier
+        modifier = modifier
             .size(if (LocalQuernLayout.current == QuernLayoutClass.COMPACT) 48.dp else 42.dp)
             .clip(CircleShape)
             .tvClickable(

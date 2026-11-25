@@ -92,6 +92,7 @@ class AppContainer(context: Context) {
         historyDao = database.watchHistoryDao(),
         favoriteDao = database.favoriteDao(),
         tombstoneDao = database.tombstoneDao(),
+        sourceMemoryDao = database.sourceMemoryDao(),
         activeProfileId = settingsStore.settings.map { it.activeProfileId },
         currentProfileId = { settingsStore.settings.value.activeProfileId }
     )

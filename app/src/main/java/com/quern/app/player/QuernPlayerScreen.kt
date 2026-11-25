@@ -5,6 +5,7 @@ import android.graphics.Color as AndroidColor
 import android.graphics.Typeface
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
+import android.os.SystemClock
 import android.util.TypedValue
 import android.view.KeyEvent
 import android.view.ViewGroup
@@ -36,11 +37,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -61,6 +65,7 @@ import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
 import com.quern.app.ui.components.QuernAlertDialog as AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -76,7 +81,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,6 +104,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.onKeyEvent
@@ -125,6 +133,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.Consumer
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -138,9 +147,11 @@ import androidx.media3.extractor.text.SubtitleParser
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import com.quern.app.R
 import com.quern.app.domain.model.AppLanguage
 import com.quern.app.domain.model.AppSettings
 import com.quern.app.domain.model.DefaultAspectMode
+import com.quern.app.domain.model.MediaItem
 import com.quern.app.domain.model.MediaType
 import com.quern.app.domain.model.PlayerEngine
 import com.quern.app.domain.model.StreamSource
@@ -151,11 +162,17 @@ import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernAccent
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LumaCyan
+import com.quern.app.ui.theme.LumaGreen
+import com.quern.app.ui.theme.LumaRed
 import com.quern.app.ui.theme.LumaSurfaceElevated
+import com.quern.app.ui.theme.qString
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 data class PlaybackRequest(
     val contentId: String,
@@ -173,7 +190,11 @@ data class PlaybackRequest(
     val introStartMs: Long? = null,
     val introEndMs: Long? = null,
     val outroStartMs: Long? = null,
-    val outroEndMs: Long? = null
+    val outroEndMs: Long? = null,
+    val sessionId: Long = System.nanoTime(),
+    val sourceMemoryTitle: MediaItem? = null,
+    val availableSources: List<StreamSource> = emptyList(),
+    val failoverQueue: List<StreamSource> = emptyList()
 )
 
 private data class TrackOption(
@@ -182,6 +203,18 @@ private data class TrackOption(
     val trackIndex: Int,
     val selected: Boolean
 )
+
+private data class TrackPreferenceState(
+    val audioLanguage: String? = null,
+    val audioLabel: String? = null,
+    val subtitlesDisabled: Boolean? = null,
+    val subtitleLanguage: String? = null,
+    val subtitleLabel: String? = null
+)
+
+private const val MAX_AUTO_FAILOVER_ATTEMPTS = 3
+private const val EARLY_ERROR_WINDOW_MS = 15_000L
+private const val SOURCE_SUCCESS_STABILITY_MS = 5_000L
 
 @UnstableApi
 private class OffsetSubtitleParserFactory(
@@ -230,19 +263,30 @@ fun QuernPlayerScreen(
     onProgressUpdate: (positionMs: Long, durationMs: Long, isPlaying: Boolean) -> Unit,
     onPlaybackStop: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     onPlayNextEpisode: () -> Unit = {},
+    onResolveStream: suspend (StreamSource) -> StreamSource? = { it.takeIf { s -> s.isDirectlyPlayable } },
+    onActiveStreamChanged: (StreamSource) -> Unit = {},
+    onRecordSourceResult: (StreamSource, Boolean) -> Unit = { _, _ -> },
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
     val accent = LocalQuernAccent.current
     val palette = LocalQuernPalette.current
     val isAr = settings.effectiveLanguage == AppLanguage.ARABIC
     var engineNotice by remember { mutableStateOf<String?>(null) }
     var seekToast by remember { mutableStateOf<String?>(null) }
 
+    val switchedSourceText = qString(R.string.player_switched_source)
+    val switchingSourceText = qString(R.string.player_switching_source)
+    val failoverExhaustedText = qString(R.string.player_failover_exhausted)
+
+    var activeStream by remember(request.sessionId) { mutableStateOf(request.stream) }
+    val activeHeadersRef = remember(request.sessionId) { AtomicReference(request.stream.headers) }
+
     // Respect user's Player Engine preference: External Player (incl. installed mpv/VLC/MX/Just) vs Media3 ExoPlayer
-    LaunchedEffect(request.stream.url, settings.playerEngine, settings.preferExternalPlayer, settings.preferredExternalPlayerPackage) {
-        val url = request.stream.url
+    LaunchedEffect(request.sessionId, settings.playerEngine, settings.preferExternalPlayer, settings.preferredExternalPlayerPackage) {
+        val url = activeStream.url
         if (url.isNullOrBlank()) return@LaunchedEffect
         val prefSubIso = settings.subtitleLanguage.isoCode.takeIf { it.isNotBlank() }
 
@@ -250,7 +294,7 @@ fun QuernPlayerScreen(
             when (
                 val res = ExternalPlayerHelper.launchExternalPlayer(
                     context = context,
-                    request = request,
+                    request = request.copy(stream = activeStream),
                     targetPackage = settings.preferredExternalPlayerPackage.takeIf { it.isNotBlank() },
                     preferredSubLangIso = prefSubIso
                 )
@@ -292,10 +336,19 @@ fun QuernPlayerScreen(
     var controlsVisible by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(true) }
     var isBuffering by remember { mutableStateOf(true) }
-    var hasRenderedFirstFrame by remember(request.stream.url) { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var currentPosMs by remember { mutableLongStateOf(request.startPositionMs) }
-    var durationMs by remember { mutableLongStateOf(0L) }
+    var hasRenderedFirstFrame by remember(request.sessionId) { mutableStateOf(false) }
+    var isSwitchingSource by remember(request.sessionId) { mutableStateOf(false) }
+    var firstFrameAtMs by remember(request.sessionId) { mutableLongStateOf(0L) }
+    var autoAttemptsUsed by remember(request.sessionId) { mutableIntStateOf(1) }
+    var failoverCursor by remember(request.sessionId) { mutableIntStateOf(0) }
+    var failedSourceIds by remember(request.sessionId) { mutableStateOf<Set<String>>(emptySet()) }
+    var recordedOutcomeForAttempt by remember(request.sessionId) { mutableStateOf(false) }
+    var failoverJob by remember(request.sessionId) { mutableStateOf<Job?>(null) }
+
+    var errorMessage by remember(request.sessionId) { mutableStateOf<String?>(null) }
+    var targetResumePosMs by remember(request.sessionId) { mutableLongStateOf(request.startPositionMs) }
+    var currentPosMs by remember(request.sessionId) { mutableLongStateOf(request.startPositionMs) }
+    var durationMs by remember(request.sessionId) { mutableLongStateOf(0L) }
     var playbackSpeed by remember(settings.defaultPlaybackSpeed) { mutableFloatStateOf(settings.defaultPlaybackSpeed) }
     var resizeMode by remember(settings.defaultAspectMode) {
         mutableIntStateOf(
@@ -311,25 +364,32 @@ fun QuernPlayerScreen(
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var showSpeedDialog by remember { mutableStateOf(false) }
     var showEngineDialog by remember { mutableStateOf(false) }
+    var showSwitchSourceDialog by remember(request.sessionId) { mutableStateOf(false) }
+    var switchDialogNotice by remember(request.sessionId) { mutableStateOf<String?>(null) }
+    var resolvingManualSourceId by remember(request.sessionId) { mutableStateOf<String?>(null) }
     var showSubtitleSyncBar by remember { mutableStateOf(false) }
 
-    // Subtitle Timing Sync Offset (in ms: negative = earlier, positive = later)
-    val subtitleOffsetRef = remember { AtomicLong(0L) }
-    var subtitleOffsetMs by remember(request.contentId) { mutableLongStateOf(0L) }
-    var appliedSubtitleOffsetMs by remember(request.contentId) { mutableLongStateOf(0L) }
+    // Preserved track preferences and subtitle sync offset across automatic/manual source switches
+    var trackPref by remember(request.sessionId) { mutableStateOf(TrackPreferenceState()) }
+    var pendingTrackReapply by remember(request.sessionId) { mutableStateOf(false) }
+    val subtitleOffsetRef = remember(request.sessionId) { AtomicLong(0L) }
+    var subtitleOffsetMs by remember(request.sessionId) { mutableLongStateOf(0L) }
+    var appliedSubtitleOffsetMs by remember(request.sessionId) { mutableLongStateOf(0L) }
 
-    var introDismissed by remember(request.contentId) { mutableStateOf(false) }
-    var nextEpisodeCancelled by remember(request.contentId) { mutableStateOf(false) }
-    var nextEpisodeTriggered by remember(request.contentId) { mutableStateOf(false) }
-    var countdownRemaining by remember(request.contentId, settings.nextEpisodeCountdownSec) {
+    var introDismissed by remember(request.sessionId) { mutableStateOf(false) }
+    var nextEpisodeCancelled by remember(request.sessionId) { mutableStateOf(false) }
+    var nextEpisodeTriggered by remember(request.sessionId) { mutableStateOf(false) }
+    var countdownRemaining by remember(request.sessionId, settings.nextEpisodeCountdownSec) {
         mutableIntStateOf(settings.nextEpisodeCountdownSec)
     }
 
-    val anyModalOpen = showAudioDialog || showSubtitleDialog || showSpeedDialog || showEngineDialog || showSubtitleSyncBar
+    val anyModalOpen = showAudioDialog || showSubtitleDialog || showSpeedDialog ||
+        showEngineDialog || showSwitchSourceDialog || showSubtitleSyncBar
 
     BackHandler {
         when {
             showSubtitleSyncBar -> showSubtitleSyncBar = false
+            showSwitchSourceDialog -> showSwitchSourceDialog = false
             showEngineDialog -> showEngineDialog = false
             showAudioDialog -> showAudioDialog = false
             showSubtitleDialog -> showSubtitleDialog = false
@@ -339,10 +399,10 @@ fun QuernPlayerScreen(
         }
     }
 
-    var detectedIntroStartMs by remember(request.contentId) { mutableStateOf<Long?>(null) }
-    var detectedIntroEndMs by remember(request.contentId) { mutableStateOf<Long?>(null) }
-    var detectedOutroStartMs by remember(request.contentId) { mutableStateOf<Long?>(null) }
-    var detectedOutroEndMs by remember(request.contentId) { mutableStateOf<Long?>(null) }
+    var detectedIntroStartMs by remember(request.sessionId) { mutableStateOf<Long?>(null) }
+    var detectedIntroEndMs by remember(request.sessionId) { mutableStateOf<Long?>(null) }
+    var detectedOutroStartMs by remember(request.sessionId) { mutableStateOf<Long?>(null) }
+    var detectedOutroEndMs by remember(request.sessionId) { mutableStateOf<Long?>(null) }
 
     val effectiveIntroStartMs = request.introStartMs ?: detectedIntroStartMs
     val effectiveIntroEndMs = request.introEndMs ?: detectedIntroEndMs
@@ -398,32 +458,35 @@ fun QuernPlayerScreen(
     val engineFocusRequester = remember { FocusRequester() }
     // HUD button that opened the current dialog; focus goes back to it when the dialog closes.
     var dialogReturnFocus by remember { mutableStateOf<FocusRequester?>(null) }
+    var pendingDialogReturn by remember { mutableStateOf(false) }
+    val windowInfo = LocalWindowInfo.current
     // Bumped on every remote key press while the HUD is visible so auto-hide restarts.
     var hudInteraction by remember { mutableIntStateOf(0) }
 
-    val buildExoMediaItem = remember(request.stream.url, request.stream.subtitles, request.externalSubtitles) {
-        {
-            val subConfigs = (request.stream.subtitles + request.externalSubtitles)
-                .distinctBy { it.url }
-                .map { sub ->
-                    ExoMediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
-                        .setMimeType(sub.mimeType)
-                        .setLanguage(sub.language)
-                        .setLabel(sub.label)
-                        .build()
-                }
-            ExoMediaItem.Builder()
-                .setUri(request.stream.url.orEmpty())
-                .setSubtitleConfigurations(subConfigs)
-                .build()
-        }
+    fun buildExoMediaItemFor(stream: StreamSource): ExoMediaItem {
+        val subConfigs = (stream.subtitles + request.externalSubtitles)
+            .distinctBy { it.url }
+            .map { sub ->
+                ExoMediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
+                    .setMimeType(sub.mimeType)
+                    .setLanguage(sub.language)
+                    .setLabel(sub.label)
+                    .build()
+            }
+        return ExoMediaItem.Builder()
+            .setUri(stream.url.orEmpty())
+            .setSubtitleConfigurations(subConfigs)
+            .build()
     }
 
-    val exoPlayer = remember(request.stream.url, settings.subtitleLanguage, settings.audioLanguage, settings.bufferProfile) {
-        val dataSourceFactory = OkHttpDataSource.Factory(okHttpClient).apply {
-            if (request.stream.headers.isNotEmpty()) {
-                setDefaultRequestProperties(request.stream.headers)
-            }
+    val exoPlayer = remember(request.sessionId, settings.subtitleLanguage, settings.audioLanguage, settings.bufferProfile) {
+        val dataSourceFactory = DataSource.Factory {
+            OkHttpDataSource.Factory(okHttpClient).apply {
+                val headers = activeHeadersRef.get()
+                if (headers.isNotEmpty()) {
+                    setDefaultRequestProperties(headers)
+                }
+            }.createDataSource()
         }
         val subtitleParserFactory = OffsetSubtitleParserFactory(subtitleOffsetRef)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
@@ -475,13 +538,101 @@ fun QuernPlayerScreen(
                 }.build()
                 trackSelectionParameters = trackParams
 
-                setMediaItem(buildExoMediaItem())
+                setMediaItem(buildExoMediaItemFor(request.stream))
                 if (request.startPositionMs > 5_000L) {
                     seekTo(request.startPositionMs)
                 }
                 playWhenReady = true
                 prepare()
             }
+    }
+
+    fun switchToResolvedStream(
+        next: StreamSource,
+        isAutoFailover: Boolean,
+        resetAutoBudget: Boolean
+    ) {
+        val preservePos = if (hasRenderedFirstFrame && exoPlayer.currentPosition > 0L) {
+            exoPlayer.currentPosition
+        } else {
+            targetResumePosMs
+        }
+        targetResumePosMs = preservePos
+        currentPosMs = preservePos
+        activeStream = next
+        activeHeadersRef.set(next.headers)
+        hasRenderedFirstFrame = false
+        firstFrameAtMs = 0L
+        recordedOutcomeForAttempt = false
+        errorMessage = null
+        isBuffering = true
+        isSwitchingSource = false
+        if (resetAutoBudget) {
+            autoAttemptsUsed = 1
+        }
+
+        // Preserve subtitle timing offset across the new stream without triggering a second reload
+        subtitleOffsetRef.set(subtitleOffsetMs)
+        appliedSubtitleOffsetMs = subtitleOffsetMs
+
+        val paramsBuilder = exoPlayer.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+
+        val prefSubDisabled = trackPref.subtitlesDisabled
+        when {
+            prefSubDisabled == true -> paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            prefSubDisabled == false -> {
+                paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                val subLang = trackPref.subtitleLanguage
+                if (subLang == "ar") {
+                    paramsBuilder.setPreferredTextLanguages("ar", "ara", "arb")
+                } else if (!subLang.isNullOrBlank()) {
+                    paramsBuilder.setPreferredTextLanguage(subLang)
+                }
+            }
+            settings.subtitleLanguage == SubtitleLanguage.OFF -> {
+                paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            }
+            else -> {
+                paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                val code = settings.subtitleLanguage.isoCode
+                if (code == "ar") {
+                    paramsBuilder.setPreferredTextLanguages("ar", "ara", "arb")
+                } else if (code.isNotBlank()) {
+                    paramsBuilder.setPreferredTextLanguage(code)
+                }
+            }
+        }
+        val audioLang = trackPref.audioLanguage ?: settings.audioLanguage.isoCode
+        if (!audioLang.isNullOrBlank()) {
+            paramsBuilder.setPreferredAudioLanguage(audioLang)
+        }
+        exoPlayer.trackSelectionParameters = paramsBuilder.build()
+        pendingTrackReapply = trackPref.audioLabel != null ||
+            trackPref.audioLanguage != null ||
+            trackPref.subtitlesDisabled == false
+
+        exoPlayer.stop()
+        exoPlayer.setMediaItem(buildExoMediaItemFor(next), if (preservePos > 5_000L) preservePos else 0L)
+        exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed)
+        exoPlayer.playWhenReady = true
+        exoPlayer.prepare()
+        onActiveStreamChanged(next)
+        if (isAutoFailover) {
+            engineNotice = switchedSourceText
+        }
+    }
+
+    // Record source success after sustained playback (~5 s past the first frame)
+    LaunchedEffect(activeStream.id, hasRenderedFirstFrame, isPlaying, errorMessage) {
+        if (hasRenderedFirstFrame && isPlaying && errorMessage == null && !recordedOutcomeForAttempt) {
+            delay(SOURCE_SUCCESS_STABILITY_MS)
+            if (hasRenderedFirstFrame && isPlaying && errorMessage == null && !recordedOutcomeForAttempt) {
+                recordedOutcomeForAttempt = true
+                onRecordSourceResult(activeStream, true)
+            }
+        }
     }
 
     // Debounced live application of Subtitle Timing Shift (shifts both external & embedded subtitles!)
@@ -493,7 +644,7 @@ fun QuernPlayerScreen(
         val resumePos = exoPlayer.currentPosition.coerceAtLeast(0L)
         val wasPlaying = exoPlayer.isPlaying
         val savedParams = exoPlayer.trackSelectionParameters
-        exoPlayer.setMediaItem(buildExoMediaItem(), resumePos)
+        exoPlayer.setMediaItem(buildExoMediaItemFor(activeStream), resumePos)
         exoPlayer.trackSelectionParameters = savedParams
         exoPlayer.prepare()
         exoPlayer.playWhenReady = wasPlaying
@@ -539,7 +690,7 @@ fun QuernPlayerScreen(
     // Keep the TV/phone screen awake while a video is playing or buffering, so the system
     // screen saver never starts mid-playback. Paused playback lets the screen sleep normally.
     val hostView = LocalView.current
-    val keepAwake = isPlaying || isBuffering
+    val keepAwake = isPlaying || isBuffering || isSwitchingSource
     DisposableEffect(hostView, keepAwake) {
         hostView.keepScreenOn = keepAwake
         onDispose { hostView.keepScreenOn = false }
@@ -549,11 +700,17 @@ fun QuernPlayerScreen(
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                val pos = if (hasRenderedFirstFrame && exoPlayer.currentPosition > 0L) {
+                    exoPlayer.currentPosition
+                } else {
+                    targetResumePosMs
+                }
                 val dur = exoPlayer.duration.coerceAtLeast(0L)
                 exoPlayer.playWhenReady = false
                 exoPlayer.pause()
-                onProgressUpdate(pos, dur, false)
+                if (!isSwitchingSource && (hasRenderedFirstFrame || pos > 0L || targetResumePosMs == 0L)) {
+                    onProgressUpdate(pos, dur, false)
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -566,7 +723,10 @@ fun QuernPlayerScreen(
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
-                onProgressUpdate(exoPlayer.currentPosition, exoPlayer.duration.coerceAtLeast(0L), playing)
+                val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                if (!isSwitchingSource && (hasRenderedFirstFrame || pos > 0L || targetResumePosMs == 0L)) {
+                    onProgressUpdate(pos, exoPlayer.duration.coerceAtLeast(0L), playing)
+                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -590,6 +750,41 @@ fun QuernPlayerScreen(
             override fun onRenderedFirstFrame() {
                 hasRenderedFirstFrame = true
                 isBuffering = false
+                firstFrameAtMs = SystemClock.elapsedRealtime()
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                if (pendingTrackReapply && tracks.groups.isNotEmpty()) {
+                    val paramsBuilder = exoPlayer.trackSelectionParameters.buildUpon()
+                    var modified = false
+                    if (trackPref.audioLabel != null || trackPref.audioLanguage != null) {
+                        findMatchingTrack(
+                            tracks = tracks,
+                            trackType = C.TRACK_TYPE_AUDIO,
+                            preferredLabel = trackPref.audioLabel,
+                            preferredLanguage = trackPref.audioLanguage
+                        )?.let { (grp, idx) ->
+                            paramsBuilder.setOverrideForType(TrackSelectionOverride(grp.mediaTrackGroup, idx))
+                            modified = true
+                        }
+                    }
+                    if (trackPref.subtitlesDisabled == false) {
+                        findMatchingTrack(
+                            tracks = tracks,
+                            trackType = C.TRACK_TYPE_TEXT,
+                            preferredLabel = trackPref.subtitleLabel,
+                            preferredLanguage = trackPref.subtitleLanguage
+                        )?.let { (grp, idx) ->
+                            paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            paramsBuilder.setOverrideForType(TrackSelectionOverride(grp.mediaTrackGroup, idx))
+                            modified = true
+                        }
+                    }
+                    if (modified) {
+                        exoPlayer.trackSelectionParameters = paramsBuilder.build()
+                    }
+                    pendingTrackReapply = false
+                }
             }
 
             override fun onMetadata(metadata: Metadata) {
@@ -622,14 +817,81 @@ fun QuernPlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                errorMessage = error.localizedMessage ?: "Playback failed (${error.errorCodeName})"
+                if (hasRenderedFirstFrame && exoPlayer.currentPosition > 0L) {
+                    targetResumePosMs = exoPlayer.currentPosition
+                    currentPosMs = targetResumePosMs
+                }
+                val failingSource = activeStream
+                if (!recordedOutcomeForAttempt) {
+                    recordedOutcomeForAttempt = true
+                    onRecordSourceResult(failingSource, false)
+                }
+                failedSourceIds = failedSourceIds + failingSource.id
+
+                val isEarlyError = !hasRenderedFirstFrame ||
+                    (firstFrameAtMs > 0L && (SystemClock.elapsedRealtime() - firstFrameAtMs) <= EARLY_ERROR_WINDOW_MS)
+                val errText = error.localizedMessage ?: "Playback failed (${error.errorCodeName})"
+
+                if (isEarlyError && !isSwitchingSource && request.failoverQueue.isNotEmpty()) {
+                    failoverJob?.cancel()
+                    failoverJob = scope.launch {
+                        isSwitchingSource = true
+                        isBuffering = true
+                        errorMessage = null
+
+                        while (autoAttemptsUsed < MAX_AUTO_FAILOVER_ATTEMPTS &&
+                            failoverCursor < request.failoverQueue.size
+                        ) {
+                            val candidate = request.failoverQueue[failoverCursor++]
+                            if (candidate.id in failedSourceIds || candidate.id == activeStream.id) continue
+                            autoAttemptsUsed++
+
+                            val resolved = if (candidate.isDirectlyPlayable) {
+                                candidate
+                            } else {
+                                onResolveStream(candidate)
+                            }
+                            if (resolved != null && resolved.isDirectlyPlayable) {
+                                switchToResolvedStream(
+                                    next = resolved,
+                                    isAutoFailover = true,
+                                    resetAutoBudget = false
+                                )
+                                return@launch
+                            } else {
+                                failedSourceIds = failedSourceIds + candidate.id
+                                onRecordSourceResult(candidate, false)
+                            }
+                        }
+
+                        isSwitchingSource = false
+                        isBuffering = false
+                        errorMessage = errText
+                        if (request.availableSources.isNotEmpty()) {
+                            if (controlsVisible) {
+                                dialogReturnFocus = engineFocusRequester
+                                pendingDialogReturn = true
+                            }
+                            switchDialogNotice = failoverExhaustedText
+                            showSwitchSourceDialog = true
+                        }
+                    }
+                } else {
+                    isSwitchingSource = false
+                    isBuffering = false
+                    errorMessage = errText
+                }
             }
         }
         exoPlayer.addListener(listener)
         onDispose {
-            val finalPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+            failoverJob?.cancel()
+            val livePos = exoPlayer.currentPosition.coerceAtLeast(0L)
+            val finalPos = if (hasRenderedFirstFrame && livePos > 0L) livePos else targetResumePosMs
             val finalDur = exoPlayer.duration.coerceAtLeast(0L)
-            onProgressUpdate(finalPos, finalDur, false)
+            if (!isSwitchingSource && (hasRenderedFirstFrame || finalPos > 0L || targetResumePosMs == 0L)) {
+                onProgressUpdate(finalPos, finalDur, false)
+            }
             onPlaybackStop(finalPos, finalDur)
             exoPlayer.playWhenReady = false
             exoPlayer.pause()
@@ -642,11 +904,13 @@ fun QuernPlayerScreen(
     LaunchedEffect(exoPlayer) {
         var tick = 0
         while (true) {
-            currentPosMs = exoPlayer.currentPosition.coerceAtLeast(0L)
-            durationMs = exoPlayer.duration.coerceAtLeast(0L)
-            tick++
-            if (tick % 10 == 0 && durationMs > 0L) {
-                onProgressUpdate(currentPosMs, durationMs, exoPlayer.isPlaying)
+            if (!isSwitchingSource && (hasRenderedFirstFrame || exoPlayer.currentPosition > 0L)) {
+                currentPosMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+                durationMs = exoPlayer.duration.coerceAtLeast(0L)
+                tick++
+                if (tick % 10 == 0 && durationMs > 0L) {
+                    onProgressUpdate(currentPosMs, durationMs, exoPlayer.isPlaying)
+                }
             }
             delay(1000L)
         }
@@ -665,7 +929,9 @@ fun QuernPlayerScreen(
     // - When Controls HUD opens -> focus Play/Pause so user can navigate ALL HUD buttons (Subtitles, Sync, Audio, Skip, etc.)
     // - When Controls HUD hides -> focus Skip Intro if visible, else root box
     LaunchedEffect(controlsVisible, showSubtitleSyncBar, showSkipIntro) {
+        if (anyModalOpen || pendingDialogReturn) return@LaunchedEffect
         delay(60L)
+        if (anyModalOpen || pendingDialogReturn) return@LaunchedEffect
         when {
             showSubtitleSyncBar -> runCatching { syncBarFocusRequester.requestFocus() }
             controlsVisible -> runCatching { playPauseFocusRequester.requestFocus() }
@@ -675,17 +941,23 @@ fun QuernPlayerScreen(
     }
 
     // A closed dialog leaves Compose with no focused node, so the remote would stop reaching
-    // the HUD. Put focus back on the button that opened the dialog (or Play/Pause).
-    LaunchedEffect(anyModalOpen) {
+    // the HUD. Wait for the host window to regain focus before restoring focus to the caller button.
+    LaunchedEffect(anyModalOpen, windowInfo.isWindowFocused, pendingDialogReturn) {
+        if (anyModalOpen || !pendingDialogReturn || !windowInfo.isWindowFocused) return@LaunchedEffect
+        withFrameNanos { }
+        delay(60L)
         if (anyModalOpen) return@LaunchedEffect
-        delay(80L)
+        val target = dialogReturnFocus ?: playPauseFocusRequester
         when {
-            controlsVisible -> runCatching {
-                (dialogReturnFocus ?: playPauseFocusRequester).requestFocus()
-            }.onFailure { runCatching { playPauseFocusRequester.requestFocus() } }
+            controlsVisible -> {
+                hudInteraction++
+                runCatching { target.requestFocus() }
+                    .onFailure { runCatching { playPauseFocusRequester.requestFocus() } }
+            }
             !showSkipIntro -> runCatching { rootFocusRequester.requestFocus() }
         }
         dialogReturnFocus = null
+        pendingDialogReturn = false
     }
 
     Box(
@@ -804,12 +1076,16 @@ fun QuernPlayerScreen(
         )
 
         // Full-Bleed Cinema Backdrop Starting Screen (Screenshot #2) or Animated Logo on re-buffer
-        if ((isBuffering || !hasRenderedFirstFrame) && errorMessage == null) {
+        if ((isBuffering || !hasRenderedFirstFrame || isSwitchingSource) && errorMessage == null) {
             QuernPlayerLoadingOverlay(
                 title = request.title,
                 backdropUrl = request.backdropUrl ?: request.posterUrl,
-                showFullBackdrop = !hasRenderedFirstFrame,
-                subtitle = if (isAr) "جاري بدء التشغيل..." else "Starting stream...",
+                showFullBackdrop = !hasRenderedFirstFrame && !isSwitchingSource,
+                subtitle = when {
+                    isSwitchingSource -> switchingSourceText
+                    isAr -> "جاري بدء التشغيل..."
+                    else -> "Starting stream..."
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -1088,14 +1364,28 @@ fun QuernPlayerScreen(
                     )
                     Spacer(Modifier.height(18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (request.availableSources.isNotEmpty()) {
+                            PlayerPillButton(
+                                label = qString(R.string.player_switch_source),
+                                isPrimary = true,
+                                onClick = {
+                                    if (controlsVisible) {
+                                        dialogReturnFocus = engineFocusRequester
+                                        pendingDialogReturn = true
+                                    }
+                                    switchDialogNotice = null
+                                    showSwitchSourceDialog = true
+                                }
+                            )
+                        }
                         PlayerPillButton(
                             label = if (isAr) "فتح بمشغل خارجي" else "Open in External Player",
-                            isPrimary = true,
+                            isPrimary = request.availableSources.isEmpty(),
                             onClick = {
                                 when (
                                     val res = ExternalPlayerHelper.launchExternalPlayer(
                                         context = context,
-                                        request = request.copy(startPositionMs = currentPosMs),
+                                        request = request.copy(stream = activeStream, startPositionMs = currentPosMs),
                                         targetPackage = settings.preferredExternalPlayerPackage.takeIf { it.isNotBlank() },
                                         preferredSubLangIso = settings.subtitleLanguage.isoCode.takeIf { it.isNotBlank() }
                                     )
@@ -1176,8 +1466,8 @@ fun QuernPlayerScreen(
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = listOfNotNull(
-                                    request.stream.title.takeIf { it.isNotBlank() },
-                                    request.stream.providerName.takeIf { it.isNotBlank() }
+                                    activeStream.title.takeIf { it.isNotBlank() },
+                                    activeStream.providerName.takeIf { it.isNotBlank() }
                                 ).joinToString("  "),
                                 color = Color(0xFFD0D5DD),
                                 fontSize = 12.sp,
@@ -1295,6 +1585,7 @@ fun QuernPlayerScreen(
                             modifier = Modifier.focusRequester(speedFocusRequester),
                             onClick = {
                                 dialogReturnFocus = speedFocusRequester
+                                pendingDialogReturn = true
                                 showSpeedDialog = true
                             }
                         )
@@ -1306,6 +1597,7 @@ fun QuernPlayerScreen(
                             modifier = Modifier.focusRequester(subtitlesFocusRequester),
                             onClick = {
                                 dialogReturnFocus = subtitlesFocusRequester
+                                pendingDialogReturn = true
                                 showSubtitleDialog = true
                             }
                         )
@@ -1317,6 +1609,7 @@ fun QuernPlayerScreen(
                             modifier = Modifier.focusRequester(audioFocusRequester),
                             onClick = {
                                 dialogReturnFocus = audioFocusRequester
+                                pendingDialogReturn = true
                                 showAudioDialog = true
                             }
                         )
@@ -1328,6 +1621,7 @@ fun QuernPlayerScreen(
                             modifier = Modifier.focusRequester(engineFocusRequester),
                             onClick = {
                                 dialogReturnFocus = engineFocusRequester
+                                pendingDialogReturn = true
                                 showEngineDialog = true
                             }
                         )
@@ -1351,22 +1645,36 @@ fun QuernPlayerScreen(
     if (showEngineDialog) {
         val installedPlayers = remember(context) { ExternalPlayerHelper.detectInstalledPlayers(context) }
         val prefSubIso = settings.subtitleLanguage.isoCode.takeIf { it.isNotBlank() }
+        val hasSwitchableSources = request.availableSources.isNotEmpty()
         AlertDialog(
             onDismissRequest = { showEngineDialog = false },
             containerColor = palette.surfaceElevated,
             title = { Text(if (isAr) "المشغل الخارجي والمصادر" else "External Players & Sources", color = Color.White, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (hasSwitchableSources) {
+                        PlayerPillButton(
+                            label = qString(R.string.player_switch_source),
+                            isPrimary = true,
+                            onClick = {
+                                dialogReturnFocus = engineFocusRequester
+                                pendingDialogReturn = true
+                                showEngineDialog = false
+                                switchDialogNotice = null
+                                showSwitchSourceDialog = true
+                            }
+                        )
+                    }
                     installedPlayers.forEachIndexed { idx, player ->
                         PlayerPillButton(
                             label = if (isAr) "تشغيل عبر ${player.displayName}" else "Play in ${player.displayName}",
-                            isPrimary = idx == 0,
+                            isPrimary = !hasSwitchableSources && idx == 0,
                             onClick = {
                                 showEngineDialog = false
                                 exoPlayer.pause()
                                 val res = ExternalPlayerHelper.launchExternalPlayer(
                                     context = context,
-                                    request = request.copy(startPositionMs = currentPosMs),
+                                    request = request.copy(stream = activeStream, startPositionMs = currentPosMs),
                                     targetPackage = player.packageName,
                                     preferredSubLangIso = prefSubIso
                                 )
@@ -1383,13 +1691,13 @@ fun QuernPlayerScreen(
                     }
                     PlayerPillButton(
                         label = if (isAr) "اختيار مشغل من النظام…" else "Open with System Chooser…",
-                        isPrimary = installedPlayers.isEmpty(),
+                        isPrimary = !hasSwitchableSources && installedPlayers.isEmpty(),
                         onClick = {
                             showEngineDialog = false
                             exoPlayer.pause()
                             val res = ExternalPlayerHelper.launchExternalPlayer(
                                 context = context,
-                                request = request.copy(startPositionMs = currentPosMs),
+                                request = request.copy(stream = activeStream, startPositionMs = currentPosMs),
                                 targetPackage = null,
                                 preferredSubLangIso = prefSubIso
                             )
@@ -1419,6 +1727,59 @@ fun QuernPlayerScreen(
         )
     }
 
+    if (showSwitchSourceDialog && request.availableSources.isNotEmpty()) {
+        val unplayableText = qString(R.string.player_source_unplayable)
+        val resolveFailedText = qString(R.string.player_source_resolve_failed)
+        SwitchSourceDialog(
+            sources = request.availableSources,
+            activeStream = activeStream,
+            failedSourceIds = failedSourceIds,
+            resolvingSourceId = resolvingManualSourceId,
+            notice = switchDialogNotice,
+            onSelectSource = { candidate ->
+                val isPlayingCurrent = candidate.id == activeStream.id ||
+                    (!candidate.url.isNullOrBlank() && candidate.url == activeStream.url)
+                if (isPlayingCurrent) {
+                    showSwitchSourceDialog = false
+                    return@SwitchSourceDialog
+                }
+                if (!candidate.isDirectlyPlayable && !candidate.needsDebridResolution) {
+                    switchDialogNotice = unplayableText
+                    return@SwitchSourceDialog
+                }
+                if (resolvingManualSourceId != null) return@SwitchSourceDialog
+                scope.launch {
+                    failoverJob?.cancel()
+                    resolvingManualSourceId = candidate.id
+                    switchDialogNotice = null
+                    val resolved = if (candidate.isDirectlyPlayable) {
+                        candidate
+                    } else {
+                        onResolveStream(candidate)
+                    }
+                    resolvingManualSourceId = null
+                    if (resolved != null && resolved.isDirectlyPlayable) {
+                        showSwitchSourceDialog = false
+                        switchToResolvedStream(
+                            next = resolved,
+                            isAutoFailover = false,
+                            resetAutoBudget = true
+                        )
+                    } else {
+                        failedSourceIds = failedSourceIds + candidate.id
+                        onRecordSourceResult(candidate, false)
+                        switchDialogNotice = resolveFailedText
+                    }
+                }
+            },
+            onDismiss = {
+                resolvingManualSourceId = null
+                switchDialogNotice = null
+                showSwitchSourceDialog = false
+            }
+        )
+    }
+
     if (showAudioDialog) {
         val options = remember(exoPlayer.currentTracks) { extractTrackOptions(exoPlayer.currentTracks, C.TRACK_TYPE_AUDIO) }
         TrackPickerDialog(
@@ -1427,7 +1788,12 @@ fun QuernPlayerScreen(
             onSelect = { opt ->
                 val params = exoPlayer.trackSelectionParameters.buildUpon()
                 if (opt.group != null) {
+                    val fmt = opt.group.getTrackFormat(opt.trackIndex)
+                    trackPref = trackPref.copy(audioLanguage = fmt.language, audioLabel = fmt.label)
                     params.setOverrideForType(TrackSelectionOverride(opt.group.mediaTrackGroup, opt.trackIndex))
+                    if (!fmt.language.isNullOrBlank()) {
+                        params.setPreferredAudioLanguage(fmt.language)
+                    }
                 }
                 exoPlayer.trackSelectionParameters = params.build()
                 showAudioDialog = false
@@ -1446,6 +1812,8 @@ fun QuernPlayerScreen(
             options = options,
             extraActionLabel = if (isAr) "تعديل توقيت الترجمة (Sync)" else "Adjust Subtitle Timing (Sync)",
             onExtraAction = {
+                pendingDialogReturn = false
+                dialogReturnFocus = null
                 showSubtitleDialog = false
                 controlsVisible = false
                 showSubtitleSyncBar = true
@@ -1453,10 +1821,24 @@ fun QuernPlayerScreen(
             onSelect = { opt ->
                 val params = exoPlayer.trackSelectionParameters.buildUpon()
                 if (opt.group == null) {
+                    trackPref = trackPref.copy(subtitlesDisabled = true, subtitleLanguage = null, subtitleLabel = null)
                     params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 } else {
+                    val fmt = opt.group.getTrackFormat(opt.trackIndex)
+                    trackPref = trackPref.copy(
+                        subtitlesDisabled = false,
+                        subtitleLanguage = fmt.language,
+                        subtitleLabel = fmt.label
+                    )
                     params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                     params.setOverrideForType(TrackSelectionOverride(opt.group.mediaTrackGroup, opt.trackIndex))
+                    if (!fmt.language.isNullOrBlank()) {
+                        if (fmt.language == "ar") {
+                            params.setPreferredTextLanguages("ar", "ara", "arb")
+                        } else {
+                            params.setPreferredTextLanguage(fmt.language!!)
+                        }
+                    }
                 }
                 exoPlayer.trackSelectionParameters = params.build()
                 showSubtitleDialog = false
@@ -1767,6 +2149,233 @@ private fun TrackPickerDialog(
             PlayerPillButton(label = "Close", isPrimary = false, onClick = onDismiss)
         }
     )
+}
+
+private val COMPACT_SIZE_REGEX =
+    Regex("""\b\d+(?:\.\d+)?\s*(?:TiB|GiB|MiB|TB|GB|MB)\b""", RegexOption.IGNORE_CASE)
+
+private fun extractCompactSourceFileName(src: StreamSource): String {
+    val firstLine = src.subtitle
+        ?.lineSequence()
+        ?.map { it.trim() }
+        ?.firstOrNull { it.isNotEmpty() }
+    return firstLine ?: src.title.ifBlank { src.providerName }
+}
+
+private fun extractCompactSourceSize(src: StreamSource): String? {
+    val bytes = src.sizeBytes
+    if (bytes != null && bytes > 0L) {
+        val gb = 1024.0 * 1024.0 * 1024.0
+        val mb = 1024.0 * 1024.0
+        return if (bytes >= gb) {
+            String.format(Locale.US, "%.1f GB", bytes / gb)
+        } else {
+            String.format(Locale.US, "%.0f MB", (bytes / mb).coerceAtLeast(1.0))
+        }
+    }
+    val match = src.subtitle?.let { COMPACT_SIZE_REGEX.find(it) }
+        ?: COMPACT_SIZE_REGEX.find(src.title)
+    return match?.value?.replace(Regex("""\s+"""), " ")?.trim()
+}
+
+@Composable
+private fun SwitchSourceDialog(
+    sources: List<StreamSource>,
+    activeStream: StreamSource,
+    failedSourceIds: Set<String>,
+    resolvingSourceId: String?,
+    notice: String?,
+    onSelectSource: (StreamSource) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val palette = LocalQuernPalette.current
+    val initialFocusIndex = remember(sources, activeStream.id, activeStream.url) {
+        sources.indexOfFirst { src ->
+            src.id == activeStream.id || (!src.url.isNullOrBlank() && src.url == activeStream.url)
+        }.coerceAtLeast(0)
+    }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialFocusIndex)
+    val targetFocus = remember { FocusRequester() }
+    val playingLabel = qString(R.string.player_source_playing)
+    val failedLabel = qString(R.string.player_source_failed)
+
+    LaunchedEffect(initialFocusIndex, sources.size) {
+        if (sources.isNotEmpty()) {
+            runCatching { listState.scrollToItem(initialFocusIndex) }
+            withFrameNanos { }
+            runCatching { targetFocus.requestFocus() }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = palette.surfaceElevated,
+        title = {
+            Text(
+                text = qString(R.string.player_switch_source_title),
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!notice.isNullOrBlank()) {
+                    Surface(
+                        color = LumaRed.copy(alpha = 0.16f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, LumaRed.copy(alpha = 0.55f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = notice,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                ) {
+                    itemsIndexed(sources, key = { idx, src -> "${idx}_${src.id}" }) { idx, src ->
+                        val isPlayingCurrent = src.id == activeStream.id ||
+                            (!src.url.isNullOrBlank() && src.url == activeStream.url)
+                        val isFailed = src.id in failedSourceIds
+                        val isResolving = resolvingSourceId == src.id
+                        var focused by remember { mutableStateOf(false) }
+
+                        val fileNameLine = remember(src.id, src.subtitle, src.title, src.providerName) {
+                            extractCompactSourceFileName(src)
+                        }
+                        val metaLine = remember(src.id, src.sizeBytes, src.subtitle, src.title, src.providerName, src.qualityBadges) {
+                            listOfNotNull(
+                                extractCompactSourceSize(src),
+                                src.providerName.takeIf { it.isNotBlank() },
+                                src.qualityBadges.take(4).joinToString(" • ").takeIf { it.isNotBlank() }
+                            ).joinToString(" • ")
+                        }
+
+                        Surface(
+                            color = when {
+                                focused -> palette.accent
+                                isPlayingCurrent -> palette.accent.copy(alpha = 0.25f)
+                                else -> palette.surface
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(
+                                width = if (focused) 2.dp else 1.dp,
+                                color = if (focused) palette.focusRing else palette.border
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(if (idx == initialFocusIndex) Modifier.focusRequester(targetFocus) else Modifier)
+                                .clip(RoundedCornerShape(10.dp))
+                                .tvClickable(
+                                    onFocusChangedState = { focused = it },
+                                    onClick = { onSelectSource(src) }
+                                )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = fileNameLine,
+                                        color = if (focused) palette.onAccent else Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isPlayingCurrent || focused) FontWeight.Bold else FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (metaLine.isNotBlank()) {
+                                        Text(
+                                            text = metaLine,
+                                            color = if (focused) palette.onAccent.copy(alpha = 0.85f) else Color(0xFF94A3B8),
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                when {
+                                    isResolving -> {
+                                        CircularProgressIndicator(
+                                            color = if (focused) palette.onAccent else palette.focusRing,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    isPlayingCurrent -> {
+                                        Text(
+                                            text = playingLabel,
+                                            color = if (focused) palette.onAccent else LumaGreen,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    isFailed -> {
+                                        Text(
+                                            text = failedLabel,
+                                            color = if (focused) palette.onAccent else LumaRed,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            PlayerPillButton(
+                label = qString(R.string.common_close),
+                isPrimary = false,
+                onClick = onDismiss
+            )
+        }
+    )
+}
+
+@OptIn(UnstableApi::class)
+private fun findMatchingTrack(
+    tracks: Tracks,
+    trackType: Int,
+    preferredLabel: String?,
+    preferredLanguage: String?
+): Pair<Tracks.Group, Int>? {
+    var fallbackByLabel: Pair<Tracks.Group, Int>? = null
+    var fallbackByLanguage: Pair<Tracks.Group, Int>? = null
+    val wantLabel = preferredLabel?.trim().orEmpty()
+    val wantLang = preferredLanguage?.trim().orEmpty()
+
+    for (group in tracks.groups) {
+        if (group.type != trackType) continue
+        for (i in 0 until group.length) {
+            if (!group.isTrackSupported(i)) continue
+            val fmt = group.getTrackFormat(i)
+            val labelMatches = wantLabel.isNotBlank() && fmt.label?.trim().equals(wantLabel, ignoreCase = true)
+            val langMatches = wantLang.isNotBlank() && (
+                fmt.language?.trim().equals(wantLang, ignoreCase = true) ||
+                    (wantLang.equals("ar", true) && fmt.language?.trim()?.lowercase() in setOf("ar", "ara", "arb"))
+                )
+            if (labelMatches && langMatches) return group to i
+            if (labelMatches && fallbackByLabel == null) fallbackByLabel = group to i
+            if (langMatches && fallbackByLanguage == null) fallbackByLanguage = group to i
+        }
+    }
+    return fallbackByLabel ?: fallbackByLanguage
 }
 
 @OptIn(UnstableApi::class)

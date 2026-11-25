@@ -102,7 +102,8 @@ data class StreamSource(
     val qualityBadges: List<String> = emptyList(),
     val isCached: Boolean = false,
     val sizeBytes: Long? = null,
-    val subtitles: List<SubtitleTrack> = emptyList()
+    val subtitles: List<SubtitleTrack> = emptyList(),
+    val addonId: String? = null
 ) {
     val isDirectlyPlayable: Boolean
         get() = !url.isNullOrBlank()

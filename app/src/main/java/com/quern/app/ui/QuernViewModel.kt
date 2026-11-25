@@ -63,6 +63,7 @@ data class DetailUiState(
     val streams: List<StreamSource> = emptyList(),
     val subtitles: List<SubtitleTrack> = emptyList(),
     val resolvingStreamId: String? = null,
+    val isFindingBestSource: Boolean = false,
     val statusMessage: String? = null,
     val savedPositionMs: Long = 0L,
     val savedDurationMs: Long = 0L
@@ -356,6 +357,7 @@ class QuernViewModel(
     private var searchJob: Job? = null
     private var detailJob: Job? = null
     private var streamsJob: Job? = null
+    private var bestSourceJob: Job? = null
 
     private var lastScrobbleContentId: String? = null
     private var lastScrobbleAction: String? = null
@@ -463,6 +465,7 @@ class QuernViewModel(
     fun openDetail(item: MediaItem) {
         detailJob?.cancel()
         streamsJob?.cancel()
+        bestSourceJob?.cancel()
         detailJob = viewModelScope.launch {
             val initialProgress = runCatching { repository.getSavedWatchProgress(item.id) }.getOrNull()
             _detailState.value = DetailUiState(
@@ -488,7 +491,7 @@ class QuernViewModel(
             val detail = runCatching { repository.loadDetail(item) }.getOrDefault(MediaDetail(item))
             val historyList = continueWatching.value
             val resumedEpisode = if (detail.item.type == MediaType.SERIES) {
-                // If the user previously watched an episode of this series, pre-select that episode for Resume!
+                // If the user previously watched an episode of this series, pre-select it (or the next one if finished).
                 val seriesPrefix = detail.item.imdbId ?: detail.item.id
                 val matchingHistory = historyList.firstOrNull { hp ->
                     hp.episodeId != null && (
@@ -497,8 +500,16 @@ class QuernViewModel(
                             hp.episodeId.startsWith("$seriesPrefix:")
                         )
                 }
-                matchingHistory?.episodeId?.let { epId ->
+                val matchedEp = matchingHistory?.episodeId?.let { epId ->
                     detail.episodes.firstOrNull { it.id == epId }
+                }
+                val isEpisodeFinished = matchingHistory != null &&
+                    matchingHistory.durationMs > 0L &&
+                    matchingHistory.positionMs >= (matchingHistory.durationMs * 0.92).toLong()
+                if (matchedEp != null && isEpisodeFinished) {
+                    findNextEpisode(detail, matchedEp) ?: matchedEp
+                } else {
+                    matchedEp
                 }
             } else null
 
@@ -547,12 +558,14 @@ class QuernViewModel(
         val detail = current.detail ?: return
         val ep = detail.episodesForSeason(season).firstOrNull()
         streamsJob?.cancel()
+        bestSourceJob?.cancel()
         streamsJob = viewModelScope.launch {
             val saved = ep?.let { runCatching { repository.getSavedWatchProgress(it.id) }.getOrNull() }
             _detailState.value = current.copy(
                 selectedSeason = season,
                 selectedEpisode = ep,
                 isLoadingStreams = true,
+                isFindingBestSource = false,
                 streams = emptyList(),
                 savedPositionMs = saved?.positionMs ?: 0L,
                 savedDurationMs = saved?.durationMs ?: 0L
@@ -565,16 +578,26 @@ class QuernViewModel(
         val current = _detailState.value
         val detail = current.detail ?: return
         streamsJob?.cancel()
+        bestSourceJob?.cancel()
         streamsJob = viewModelScope.launch {
             val saved = runCatching { repository.getSavedWatchProgress(episode.id) }.getOrNull()
             _detailState.value = current.copy(
                 selectedEpisode = episode,
                 isLoadingStreams = true,
+                isFindingBestSource = false,
                 streams = emptyList(),
                 savedPositionMs = saved?.positionMs ?: 0L,
                 savedDurationMs = saved?.durationMs ?: 0L
             )
             fetchStreamsForCurrentDetail(detail, episode)
+        }
+    }
+
+    fun cancelBestSourceSearch() {
+        bestSourceJob?.cancel()
+        bestSourceJob = null
+        if (_detailState.value.isFindingBestSource) {
+            _detailState.value = _detailState.value.copy(isFindingBestSource = false, resolvingStreamId = null)
         }
     }
 
@@ -605,6 +628,48 @@ class QuernViewModel(
         )
     }
 
+    private fun preferredConnectedDebridOrigin(): SourceOrigin? {
+        val connected = debridStatuses.value.entries.firstOrNull { it.value.isConnected }?.key ?: return null
+        return when (connected) {
+            DebridServiceType.TORBOX -> SourceOrigin.TORBOX
+            DebridServiceType.REAL_DEBRID -> SourceOrigin.REAL_DEBRID
+            DebridServiceType.ALL_DEBRID -> SourceOrigin.ALL_DEBRID
+            DebridServiceType.PREMIUMIZE -> SourceOrigin.PREMIUMIZE
+        }
+    }
+
+    private fun buildPlaybackRequest(
+        detail: MediaDetail,
+        ep: Episode?,
+        stream: StreamSource,
+        availableSources: List<StreamSource>,
+        failoverQueue: List<StreamSource>,
+        externalSubtitles: List<SubtitleTrack>,
+        startPositionMs: Long
+    ): PlaybackRequest {
+        val contentKey = ep?.id ?: detail.item.id
+        val epLabel = ep?.let { "S${it.seasonNumber} E${it.episodeNumber} • ${it.title}" }
+        val nextEp = ep?.let { findNextEpisode(detail, it) }
+        val nextEpLabel = nextEp?.let { "S${it.seasonNumber} E${it.episodeNumber} • ${it.title}" }
+        return PlaybackRequest(
+            contentId = contentKey,
+            title = detail.item.title,
+            subtitle = epLabel ?: detail.item.year,
+            mediaType = detail.item.type,
+            imdbId = detail.item.imdbId,
+            posterUrl = detail.item.posterUrl,
+            backdropUrl = detail.item.backdropUrl,
+            episodeId = ep?.id,
+            nextEpisodeTitle = nextEpLabel,
+            stream = stream,
+            externalSubtitles = externalSubtitles,
+            startPositionMs = startPositionMs,
+            sourceMemoryTitle = detail.item,
+            availableSources = availableSources,
+            failoverQueue = failoverQueue
+        )
+    }
+
     fun playStream(stream: StreamSource) {
         val state = _detailState.value
         val detail = state.detail ?: return
@@ -624,26 +689,148 @@ class QuernViewModel(
                 resolved
             }
 
+            val ranked = repository.rankPlaybackSources(
+                title = detail.item,
+                sources = state.streams,
+                preferredService = preferredConnectedDebridOrigin()
+            )
+            val failoverQueue = ranked.filter { it.id != stream.id && (it.url == null || it.url != playable.url) }
             val contentKey = ep?.id ?: detail.item.id
             val savedPos = repository.getSavedPositionMs(contentKey)
-            val epLabel = ep?.let { "S${it.seasonNumber} E${it.episodeNumber} • ${it.title}" }
-            val nextEp = ep?.let { findNextEpisode(detail, it) }
-            val nextEpLabel = nextEp?.let { "S${it.seasonNumber} E${it.episodeNumber} • ${it.title}" }
 
-            _activePlayback.value = PlaybackRequest(
-                contentId = contentKey,
-                title = detail.item.title,
-                subtitle = epLabel ?: detail.item.year,
-                mediaType = detail.item.type,
-                imdbId = detail.item.imdbId,
-                posterUrl = detail.item.posterUrl,
-                backdropUrl = detail.item.backdropUrl,
-                episodeId = ep?.id,
-                nextEpisodeTitle = nextEpLabel,
+            _activePlayback.value = buildPlaybackRequest(
+                detail = detail,
+                ep = ep,
                 stream = playable,
+                availableSources = state.streams,
+                failoverQueue = failoverQueue,
                 externalSubtitles = state.subtitles,
                 startPositionMs = savedPos
             )
+        }
+    }
+
+    fun playBestSource(
+        startOver: Boolean = false,
+        onNoPlayableSource: () -> Unit
+    ) {
+        bestSourceJob?.cancel()
+        bestSourceJob = viewModelScope.launch {
+            _detailState.value = _detailState.value.copy(isFindingBestSource = true)
+            try {
+                detailJob?.takeIf { it.isActive }?.join()
+                streamsJob?.takeIf { it.isActive }?.join()
+
+                val state = _detailState.value
+                val detail = state.detail ?: return@launch
+                val ranked = repository.rankPlaybackSources(
+                    title = detail.item,
+                    sources = state.streams,
+                    preferredService = preferredConnectedDebridOrigin()
+                )
+                if (ranked.isEmpty()) {
+                    onNoPlayableSource()
+                    return@launch
+                }
+
+                var chosenIndex = -1
+                var chosenOriginal: StreamSource? = null
+                var playable: StreamSource? = null
+                val candidates = ranked.take(3)
+                for ((idx, cand) in candidates.withIndex()) {
+                    val resolved = if (cand.isDirectlyPlayable) {
+                        cand
+                    } else {
+                        _detailState.value = _detailState.value.copy(resolvingStreamId = cand.id)
+                        runCatching { repository.debridManager.resolveStream(cand) }.getOrNull()
+                    }
+                    if (resolved != null && resolved.isDirectlyPlayable) {
+                        chosenIndex = idx
+                        chosenOriginal = cand
+                        playable = resolved
+                        break
+                    } else if (!cand.addonId.isNullOrBlank()) {
+                        runCatching { repository.recordPlaybackSourceResult(detail.item, cand, false) }
+                    }
+                }
+
+                if (playable == null || chosenOriginal == null) {
+                    onNoPlayableSource()
+                    return@launch
+                }
+
+                val failoverQueue = ranked.drop(chosenIndex + 1).filter {
+                    it.id != chosenOriginal.id && (it.url == null || it.url != playable.url)
+                }
+                val ep = state.selectedEpisode
+                val contentKey = ep?.id ?: detail.item.id
+                val startPos = if (startOver) 0L else repository.getSavedPositionMs(contentKey)
+
+                _activePlayback.value = buildPlaybackRequest(
+                    detail = detail,
+                    ep = ep,
+                    stream = playable,
+                    availableSources = state.streams,
+                    failoverQueue = failoverQueue,
+                    externalSubtitles = state.subtitles,
+                    startPositionMs = startPos
+                )
+            } finally {
+                _detailState.value = _detailState.value.copy(
+                    isFindingBestSource = false,
+                    resolvingStreamId = null
+                )
+            }
+        }
+    }
+
+    internal fun startDebugFailoverFixture(request: PlaybackRequest) {
+        if (com.quern.app.BuildConfig.DEBUG) _activePlayback.value = request
+    }
+
+    fun debugPlayWithBrokenFirstSource(brokenUrl: String, onNoPlayableSource: () -> Unit) {
+        if (!com.quern.app.BuildConfig.DEBUG) return
+        bestSourceJob?.cancel()
+        bestSourceJob = viewModelScope.launch {
+            _detailState.value = _detailState.value.copy(isFindingBestSource = true)
+            try {
+                detailJob?.takeIf { it.isActive }?.join()
+                streamsJob?.takeIf { it.isActive }?.join()
+                val state = _detailState.value
+                val detail = state.detail ?: return@launch
+                val ranked = repository.rankPlaybackSources(
+                    title = detail.item,
+                    sources = state.streams,
+                    preferredService = preferredConnectedDebridOrigin()
+                )
+                if (ranked.isEmpty()) {
+                    onNoPlayableSource()
+                    return@launch
+                }
+                val brokenLocal = StreamSource(
+                    id = "debug-broken-local-${System.currentTimeMillis()}",
+                    title = "[DEBUG] Broken Local URL",
+                    subtitle = null,
+                    url = brokenUrl,
+                    providerName = "Debug",
+                    origin = SourceOrigin.DIRECT,
+                    addonId = null
+                )
+                val ep = state.selectedEpisode
+                val contentKey = ep?.id ?: detail.item.id
+                val savedPos = repository.getSavedPositionMs(contentKey)
+                _activePlayback.value = buildPlaybackRequest(
+                    detail = detail,
+                    ep = ep,
+                    stream = brokenLocal,
+                    availableSources = state.streams,
+                    failoverQueue = ranked,
+                    externalSubtitles = state.subtitles,
+                    startPositionMs = savedPos
+                )
+            } finally {
+                _detailState.value = _detailState.value.copy(isFindingBestSource = false)
+            }
         }
     }
 
@@ -659,13 +846,33 @@ class QuernViewModel(
                 repository.loadStreamsAndSubtitles(detail, nextEp.id)
             }.getOrDefault(emptyList<StreamSource>() to emptyList())
             _detailState.value = _detailState.value.copy(isLoadingStreams = false, streams = streams, subtitles = subs)
-            val best = streams.firstOrNull { it.isDirectlyPlayable || it.isCached } ?: streams.firstOrNull()
+            val best = repository.rankPlaybackSources(
+                title = detail.item,
+                sources = streams,
+                preferredService = preferredConnectedDebridOrigin()
+            ).firstOrNull() ?: streams.firstOrNull()
             if (best != null) {
                 playStream(best)
             } else {
                 _activePlayback.value = null
                 _toastMessage.value = "No automatic stream found for S${nextEp.seasonNumber} E${nextEp.episodeNumber}."
             }
+        }
+    }
+
+    suspend fun resolveStreamForPlayer(stream: StreamSource): StreamSource? =
+        if (stream.isDirectlyPlayable) stream
+        else runCatching { repository.debridManager.resolveStream(stream) }.getOrNull()
+
+    fun onPlayerActiveStreamChanged(stream: StreamSource) {
+        _activePlayback.value = _activePlayback.value?.copy(stream = stream)
+    }
+
+    fun recordPlaybackSourceResult(stream: StreamSource, succeeded: Boolean) {
+        val title = _activePlayback.value?.sourceMemoryTitle ?: return
+        if (stream.addonId.isNullOrBlank()) return
+        viewModelScope.launch {
+            runCatching { repository.recordPlaybackSourceResult(title, stream, succeeded) }
         }
     }
 

@@ -275,6 +275,12 @@
     <string name="detail_back">Back</string>
     <string name="detail_favorite">Favorite</string>
     <string name="detail_all_sources">All Sources</string>
+    <string name="detail_finding_best_source">Finding the best source…</string>
+    <string name="detail_more_options">More options</string>
+    <string name="detail_start_over">Start over</string>
+    <string name="detail_add_favorite">Add to favorites</string>
+    <string name="detail_remove_favorite">Remove from favorites</string>
+    <string name="detail_watch_trailer">Trailer</string>
     <string name="detail_play">Play</string>
     <string name="detail_play_count">Play (%1$d)</string>
     <string name="detail_resume">Resume</string>
@@ -434,4 +440,13 @@
     <string name="home_qr_sign_in_steps">Scan with your phone camera to sign in or create a free Quern account. Your addons and settings come back automatically.</string>
     <string name="home_qr_after_sign_in">New account? After signing in, turn on your services and addons from Settings.</string>
     <string name="home_qr_add_addons">Add addons from your phone</string>
+    <string name="player_switched_source">Switched to another source</string>
+    <string name="player_switching_source">Switching source…</string>
+    <string name="player_switch_source">Switch Source</string>
+    <string name="player_switch_source_title">Switch Source</string>
+    <string name="player_source_playing">Playing</string>
+    <string name="player_source_failed">Failed</string>
+    <string name="player_failover_exhausted">Tried 3 sources without success. Pick another source below.</string>
+    <string name="player_source_unplayable">This source cannot be played directly. Connect a Debrid service or pick another source.</string>
+    <string name="player_source_resolve_failed">Could not resolve this source. Pick another one.</string>
 </resources>

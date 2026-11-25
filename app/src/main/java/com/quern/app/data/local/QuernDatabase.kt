@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -185,15 +186,64 @@ interface MediaServerDao {
     suspend fun delete(id: String)
 }
 
+@Entity(tableName = "source_memory", primaryKeys = ["titleId", "addonId", "quality", "service"])
+data class SourceMemoryEntity(
+    val titleId: String,
+    val addonId: String,
+    val quality: String,
+    val service: String,
+    val successes: Int,
+    val failures: Int,
+    val lastResultAt: Long
+)
+
+@Dao
+abstract class SourceMemoryDao {
+    @Query("SELECT * FROM source_memory WHERE titleId = :titleId")
+    abstract suspend fun forTitle(titleId: String): List<SourceMemoryEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    protected abstract suspend fun insert(result: SourceMemoryEntity): Long
+
+    @Query("""
+        UPDATE source_memory
+        SET successes = successes + :successes, failures = failures + :failures, lastResultAt = :at
+        WHERE titleId = :titleId AND addonId = :addonId AND quality = :quality AND service = :service
+    """)
+    protected abstract suspend fun increment(
+        titleId: String, addonId: String, quality: String, service: String,
+        successes: Int, failures: Int, at: Long
+    )
+
+    @Query("""
+        DELETE FROM source_memory WHERE rowid IN (
+            SELECT rowid FROM source_memory ORDER BY lastResultAt DESC, rowid DESC LIMIT -1 OFFSET 500
+        )
+    """)
+    protected abstract suspend fun prune()
+
+    @Transaction
+    open suspend fun record(result: SourceMemoryEntity) {
+        if (insert(result) == -1L) {
+            increment(
+                result.titleId, result.addonId, result.quality, result.service,
+                result.successes, result.failures, result.lastResultAt
+            )
+        }
+        prune()
+    }
+}
+
 @Database(
     entities = [
         AddonEntity::class,
         WatchHistoryEntity::class,
         FavoriteEntity::class,
         MediaServerEntity::class,
-        TombstoneEntity::class
+        TombstoneEntity::class,
+        SourceMemoryEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class QuernDatabase : RoomDatabase() {
@@ -202,6 +252,7 @@ abstract class QuernDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
     abstract fun mediaServerDao(): MediaServerDao
     abstract fun tombstoneDao(): TombstoneDao
+    abstract fun sourceMemoryDao(): SourceMemoryDao
 
     companion object {
         /**
@@ -210,8 +261,19 @@ abstract class QuernDatabase : RoomDatabase() {
          */
         fun build(context: Context, legacyProfileId: String): QuernDatabase =
             Room.databaseBuilder(context.applicationContext, QuernDatabase::class.java, "quern.db")
-                .addMigrations(migration1To2(legacyProfileId), MIGRATION_2_3)
+                .addMigrations(migration1To2(legacyProfileId), MIGRATION_2_3, MIGRATION_3_4)
                 .build()
+
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `source_memory` (" +
+                        "`titleId` TEXT NOT NULL, `addonId` TEXT NOT NULL, `quality` TEXT NOT NULL, " +
+                        "`service` TEXT NOT NULL, `successes` INTEGER NOT NULL, `failures` INTEGER NOT NULL, " +
+                        "`lastResultAt` INTEGER NOT NULL, PRIMARY KEY(`titleId`, `addonId`, `quality`, `service`))"
+                )
+            }
+        }
 
         /** v2 -> v3: adds sync_tombstones for account sync. Existing tables are untouched. */
         internal val MIGRATION_2_3 = object : Migration(2, 3) {

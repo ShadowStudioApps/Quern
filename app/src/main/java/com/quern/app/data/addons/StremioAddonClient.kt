@@ -207,7 +207,8 @@ class StremioAddonClient(
                             qualityBadges = badges,
                             isCached = playableUrl != null,
                             sizeBytes = dto.behaviorHints?.videoSize,
-                            subtitles = subs
+                            subtitles = subs,
+                            addonId = addon.manifest.id
                         )
                     }
                 }
