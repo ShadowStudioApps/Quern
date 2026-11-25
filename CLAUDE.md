@@ -17,7 +17,7 @@ Native Android phone + Android TV client compatible with Stremio addons (protoco
 - Coil 2.7.0, Room 2.6.1, OkHttp 4.12.0, kotlinx.serialization 1.7.3, Coroutines 1.9.0, ZXing 3.5.3, CameraX 1.5.3 (phone QR scanner)
 - minSdk 24, targetSdk/compileSdk 35
 
-Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, servers, metadata, sync, local, companion), `domain/model/`, `player/`, `ui/` (`QuernApp.kt`, `QuernViewModel.kt`, `screens/`, `components/`, `theme/`) and `di/AppContainer.kt`. `sync/supabase_schema.sql` is the optional schema users run in their own Supabase project.
+Layout: `app/src/main/java/com/quern/app/` holds `data/` (addons, debrid, servers, metadata, sync, local, companion), `domain/model/`, `player/`, `ui/` (`QuernApp.kt`, `QuernViewModel.kt`, `screens/`, `components/`, `theme/`) and `di/AppContainer.kt`. `sync/supabase_schema.sql` describes the Quern account service schema.
 
 ## Hard rules
 
