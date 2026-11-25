@@ -1,6 +1,6 @@
 # Quern TV
 
-Native Android phone + Android TV client compatible with Stremio addons (protocol v3), Debrid services and personal media servers. Package `com.quern.app`, version 1.7.0 (code 15).
+Native Android phone + Android TV client compatible with Stremio addons (protocol v3), Debrid services and personal media servers. Package `com.quern.app`, version 1.8.0 (code 16).
 
 ## Repository
 
@@ -91,7 +91,7 @@ Latest baseline (19 Home rows, Glossy Black, after the first-launch speed-profil
 - Full JSON backup export (history, favorites, servers, profiles, optional keys) so users can move devices without losing data.
 - French, Spanish, German, Turkish, Russian and Portuguese lack the new settings strings (only `values` and `values-ar` exist).
 - All theme presets now have a transparent `borderTint` (design choice from the settings redesign).
-- v1.7.0 is the first public release. The next release needs a `versionCode` bump (currently 15).
+- v1.7.0 was the first public release. The current version code is 16.
 - Fixed in PART 1: "QUERN" logo wrap (`maxLines = 1, softWrap = false`), race-free `firstRowFocusRequester` targeting Continue Watching (or first catalog row) on DOWN from "View Details", rail focus syncing back to Home on BACK from another tab, LEFT from lower rows entering the rail on the selected tab instead of the profile button, and removal of the legacy BYO Supabase sign-in/push/pull path from `CloudSyncManager` (keeping Stremio import, JSON/backup import, and `QUERN1:` portable sync code).
 
 ## Step reports
