@@ -93,6 +93,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -114,11 +115,13 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.quern.app.BuildConfig
@@ -128,6 +131,7 @@ import com.quern.app.data.companion.CompanionSessionState
 import com.quern.app.data.local.PinHasher
 import com.quern.app.data.local.PinMigrationState
 import com.quern.app.data.servers.ServerTestResult
+import com.quern.app.data.update.CurrentVersionNotesState
 import com.quern.app.data.update.ManualCheckResult
 import com.quern.app.data.update.UpdateDownloadState
 import com.quern.app.data.update.UpdateErrorKind
@@ -172,7 +176,11 @@ import com.quern.app.ui.components.ProfileAvatarGrid
 import com.quern.app.ui.components.QrCodeCard
 import com.quern.app.ui.components.QuernCompanionSignInCard
 import com.quern.app.ui.components.QuernLayoutClass
+import com.quern.app.ui.components.WhatsNewDialog
+import com.quern.app.ui.components.buildReleaseNotesPreview
 import com.quern.app.ui.components.isTvHardware
+import com.quern.app.ui.components.parseAvailableUpdateNotes
+import com.quern.app.ui.components.parseReleaseEntries
 import com.quern.app.ui.components.quernSwitchColors
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
@@ -257,7 +265,8 @@ private fun isGroupModified(group: SettingsGroup, settings: AppSettings): Boolea
             settings.preferredExternalPlayerPackage != d.preferredExternalPlayerPackage
         SettingsGroup.SERVICES -> false
         SettingsGroup.ACCOUNTS_SYNC -> false
-        SettingsGroup.SYSTEM -> false
+        SettingsGroup.SYSTEM -> settings.updateChannel != d.updateChannel ||
+            settings.showWhatsNewAfterUpdate != d.showWhatsNewAfterUpdate
     }
 }
 
@@ -316,7 +325,10 @@ fun SettingsScreen(
     onCheckForUpdates: () -> Unit = {},
     onDownloadAndInstallUpdate: () -> Unit = {},
     onDismissUpdate: () -> Unit = {},
-    onOpenUnknownSourcesSettings: () -> Boolean = { false }
+    onOpenUnknownSourcesSettings: () -> Boolean = { false },
+    onLoadCurrentVersionNotes: () -> Unit = {},
+    onClearCurrentVersionNotes: () -> Unit = {},
+    onDebugSimulatePostUpdate: (() -> Unit)? = null
 ) {
     val strings = LocalQuernStrings.current
     val palette = LocalQuernPalette.current
@@ -425,6 +437,7 @@ fun SettingsScreen(
         }
         add(SettingsSearchEntry(qString(R.string.settings_export_import_title), "export import backup code json تصدير استيراد نسخ احتياطي", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.ACCOUNT))
         add(SettingsSearchEntry(qString(R.string.accounts_profiles_title), "profile pin lock user بروفايل ملفات", SettingsGroup.ACCOUNTS_SYNC, SettingsSubPage.PROFILES))
+        add(SettingsSearchEntry(qString(R.string.update_section_title), "update whats new changelog version تحديثات ما الجديد", SettingsGroup.SYSTEM))
         add(SettingsSearchEntry(qString(R.string.settings_presets_title), "preset tv phone low end quick bundle إعدادات جاهزة", SettingsGroup.SYSTEM))
         add(SettingsSearchEntry(qString(R.string.system_storage_title), "cache storage clear تخزين كاش", SettingsGroup.SYSTEM))
         add(
@@ -583,6 +596,10 @@ fun SettingsScreen(
                     onDownloadAndInstallUpdate = onDownloadAndInstallUpdate,
                     onDismissUpdate = onDismissUpdate,
                     onOpenUnknownSourcesSettings = onOpenUnknownSourcesSettings,
+                    onLoadCurrentVersionNotes = onLoadCurrentVersionNotes,
+                    onClearCurrentVersionNotes = onClearCurrentVersionNotes,
+                    onDebugSimulatePostUpdate = onDebugSimulatePostUpdate,
+                    onShowToast = onShowToast,
                     onUpdateSettings = onUpdateSettings,
                     onApplyPreset = onApplyPreset,
                     onExportSettingsJson = onExportSettingsJson,
@@ -593,6 +610,7 @@ fun SettingsScreen(
                         onUpdateSettings {
                             it.copy(
                                 updateChannel = d.updateChannel,
+                                showWhatsNewAfterUpdate = d.showWhatsNewAfterUpdate,
                                 crashReportingOptIn = d.crashReportingOptIn
                             )
                         }
@@ -2007,6 +2025,10 @@ private fun SystemSectionPane(
     onDownloadAndInstallUpdate: () -> Unit,
     onDismissUpdate: () -> Unit,
     onOpenUnknownSourcesSettings: () -> Boolean,
+    onLoadCurrentVersionNotes: () -> Unit,
+    onClearCurrentVersionNotes: () -> Unit,
+    onDebugSimulatePostUpdate: (() -> Unit)?,
+    onShowToast: (String) -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onApplyPreset: (QuernDevicePreset, String) -> Unit,
     onExportSettingsJson: () -> String,
@@ -2056,6 +2078,25 @@ private fun SystemSectionPane(
                 title = if (avail != null) qString(R.string.update_available_title) else qString(R.string.update_section_title)
             ) {
                 if (avail != null) {
+                    val parsedNotes = remember(avail, isAr) { parseAvailableUpdateNotes(avail, isAr) }
+                    val previewText = remember(parsedNotes) { buildReleaseNotesPreview(parsedNotes) }
+                    var showWhatsNew by remember(avail.version) { mutableStateOf(false) }
+                    val whatsNewFocus = remember { FocusRequester() }
+                    var pendingWhatsNewFocusReturn by remember { mutableStateOf(false) }
+                    val windowInfo = LocalWindowInfo.current
+
+                    LaunchedEffect(showWhatsNew, windowInfo.isWindowFocused, pendingWhatsNewFocusReturn) {
+                        if (!isTv || showWhatsNew || !pendingWhatsNewFocusReturn || !windowInfo.isWindowFocused) {
+                            return@LaunchedEffect
+                        }
+                        withFrameNanos { }
+                        delay(50L)
+                        if (!showWhatsNew) {
+                            runCatching { whatsNewFocus.requestFocus() }
+                            pendingWhatsNewFocusReturn = false
+                        }
+                    }
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2106,16 +2147,24 @@ private fun SystemSectionPane(
                         border = BorderStroke(1.dp, palette.border),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = avail.releaseNotes.ifBlank { qString(R.string.update_no_notes) },
-                            color = LumaTextPrimary.copy(alpha = 0.9f),
-                            fontSize = 12.sp,
-                            lineHeight = 17.sp,
-                            modifier = Modifier
-                                .heightIn(max = 120.dp)
-                                .verticalScroll(rememberScrollState())
-                                .padding(10.dp)
-                        )
+                        if (parsedNotes.isNotEmpty()) {
+                            Text(
+                                text = previewText,
+                                color = LumaTextPrimary.copy(alpha = 0.9f),
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        } else {
+                            Text(
+                                text = qString(R.string.update_no_notes),
+                                color = LumaTextSecondary,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
                     }
 
                     if (dl is UpdateDownloadState.Downloading) {
@@ -2186,6 +2235,17 @@ private fun SystemSectionPane(
                             selected = true,
                             onClick = { if (!isDownloading) onDownloadAndInstallUpdate() }
                         )
+                        if (parsedNotes.isNotEmpty()) {
+                            SelectablePillOption(
+                                label = qString(R.string.update_action_whats_new),
+                                selected = false,
+                                modifier = Modifier.focusRequester(whatsNewFocus),
+                                onClick = {
+                                    pendingWhatsNewFocusReturn = true
+                                    showWhatsNew = true
+                                }
+                            )
+                        }
                         if (isBlocked) {
                             SelectablePillOption(
                                 label = qString(R.string.update_action_open_permission),
@@ -2205,6 +2265,24 @@ private fun SystemSectionPane(
                                 else qString(R.string.update_action_check),
                             selected = false,
                             onClick = { if (!updateState.checking) onCheckForUpdates() }
+                        )
+                    }
+
+                    if (showWhatsNew && parsedNotes.isNotEmpty()) {
+                        WhatsNewDialog(
+                            release = avail,
+                            sections = parsedNotes,
+                            isTv = isTv,
+                            updateLabel = if (isDownloading) qString(R.string.update_action_downloading)
+                                else qString(R.string.update_action_view),
+                            updateEnabled = !isDownloading,
+                            onUpdate = {
+                                pendingWhatsNewFocusReturn = false
+                                showWhatsNew = false
+                                if (!isDownloading) onDownloadAndInstallUpdate()
+                            },
+                            onLater = { showWhatsNew = false },
+                            onDismiss = { showWhatsNew = false }
                         )
                     }
                 } else {
@@ -2274,6 +2352,124 @@ private fun SystemSectionPane(
                                 }
                             }
                         )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                Spacer(Modifier.height(8.dp))
+
+                SettingToggleRow(
+                    label = qString(R.string.update_show_whats_new_after_label),
+                    checked = settings.showWhatsNewAfterUpdate,
+                    onCheckedChange = { enabled ->
+                        onUpdateSettings { it.copy(showWhatsNewAfterUpdate = enabled) }
+                    }
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                var showCurrentVersionNotes by remember { mutableStateOf(false) }
+                val currentNotesFocus = remember { FocusRequester() }
+                var pendingCurrentNotesFocusReturn by remember { mutableStateOf(false) }
+                val currentNotesWindowInfo = LocalWindowInfo.current
+                val currentNotesState = updateState.currentVersionNotesState
+                val isLoadingCurrentNotes = currentNotesState is CurrentVersionNotesState.Loading
+                val notesUnavailableText = qString(R.string.update_current_notes_unavailable, BuildConfig.VERSION_NAME)
+
+                LaunchedEffect(showCurrentVersionNotes, currentNotesWindowInfo.isWindowFocused, pendingCurrentNotesFocusReturn) {
+                    if (!isTv || showCurrentVersionNotes || !pendingCurrentNotesFocusReturn || !currentNotesWindowInfo.isWindowFocused) {
+                        return@LaunchedEffect
+                    }
+                    withFrameNanos { }
+                    delay(50L)
+                    if (!showCurrentVersionNotes) {
+                        runCatching { currentNotesFocus.requestFocus() }
+                        pendingCurrentNotesFocusReturn = false
+                    }
+                }
+
+                var currentRowFocused by remember { mutableStateOf(false) }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (LocalQuernLayout.current == QuernLayoutClass.COMPACT) Modifier.heightIn(min = 48.dp) else Modifier)
+                        .focusRequester(currentNotesFocus)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (currentRowFocused) palette.accent else Color.Transparent)
+                        .border(
+                            width = if (currentRowFocused) 2.5.dp else 0.dp,
+                            color = if (currentRowFocused) palette.focusRing else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .tvClickable(
+                            enabled = !isLoadingCurrentNotes,
+                            onFocusChangedState = { currentRowFocused = it },
+                            onClick = {
+                                pendingCurrentNotesFocusReturn = true
+                                showCurrentVersionNotes = true
+                                onLoadCurrentVersionNotes()
+                            }
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = qString(R.string.update_whats_new_this_version),
+                        color = if (currentRowFocused) palette.onAccent else LumaTextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = if (currentRowFocused) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = if (isLoadingCurrentNotes) qString(R.string.update_loading_notes)
+                        else "v${BuildConfig.VERSION_NAME}",
+                        color = if (currentRowFocused) palette.onAccent.copy(alpha = 0.9f) else LumaTextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                if (showCurrentVersionNotes) {
+                    when (currentNotesState) {
+                        is CurrentVersionNotesState.Loaded -> {
+                            val sections = remember(currentNotesState.payload, isAr) {
+                                parseReleaseEntries(currentNotesState.payload.entries, isAr)
+                            }
+                            if (sections.isEmpty()) {
+                                LaunchedEffect(currentNotesState) {
+                                    showCurrentVersionNotes = false
+                                    onClearCurrentVersionNotes()
+                                    onShowToast(notesUnavailableText)
+                                }
+                            } else {
+                                WhatsNewDialog(
+                                    version = currentNotesState.payload.version,
+                                    sections = sections,
+                                    isTv = isTv,
+                                    primaryLabel = qString(R.string.common_ok),
+                                    secondaryLabel = null,
+                                    onPrimary = {
+                                        showCurrentVersionNotes = false
+                                        onClearCurrentVersionNotes()
+                                    },
+                                    onDismiss = {
+                                        showCurrentVersionNotes = false
+                                        onClearCurrentVersionNotes()
+                                    }
+                                )
+                            }
+                        }
+                        CurrentVersionNotesState.Unavailable -> {
+                            LaunchedEffect(Unit) {
+                                showCurrentVersionNotes = false
+                                onClearCurrentVersionNotes()
+                                onShowToast(notesUnavailableText)
+                            }
+                        }
+                        CurrentVersionNotesState.Idle,
+                        CurrentVersionNotesState.Loading -> Unit
                     }
                 }
             }
@@ -2444,6 +2640,16 @@ private fun SystemSectionPane(
                             selected = false,
                             onClick = onRefreshHome
                         )
+                        if (onDebugSimulatePostUpdate != null) {
+                            SelectablePillOption(
+                                label = "Simulate Post-Update What's New",
+                                selected = false,
+                                onClick = {
+                                    onDebugSimulatePostUpdate()
+                                    onShowToast("Simulated update to v${BuildConfig.VERSION_NAME} — go back to Home")
+                                }
+                            )
+                        }
                     }
                 }
             }

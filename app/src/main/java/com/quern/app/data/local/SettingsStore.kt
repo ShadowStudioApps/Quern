@@ -91,6 +91,7 @@ private data class NonSecretSettingsSnapshot(
     val nextEpisodeCountdownSec: Int = 10,
     val hiddenCatalogKeys: List<String> = emptyList(),
     val updateChannel: String = UpdateChannel.STABLE.name,
+    val showWhatsNewAfterUpdate: Boolean = true,
     val crashReportingOptIn: Boolean = false
 )
 
@@ -375,6 +376,7 @@ class SettingsStore(context: Context) {
             nextEpisodeCountdownSec = s.nextEpisodeCountdownSec,
             hiddenCatalogKeys = s.hiddenCatalogKeys.toList(),
             updateChannel = s.updateChannel.name,
+            showWhatsNewAfterUpdate = s.showWhatsNewAfterUpdate,
             crashReportingOptIn = s.crashReportingOptIn
         )
     }
@@ -436,6 +438,7 @@ class SettingsStore(context: Context) {
                 nextEpisodeCountdownSec = snap.nextEpisodeCountdownSec.coerceIn(3, 30),
                 hiddenCatalogKeys = snap.hiddenCatalogKeys.toSet(),
                 updateChannel = runCatching { UpdateChannel.valueOf(snap.updateChannel) }.getOrDefault(curr.updateChannel),
+                showWhatsNewAfterUpdate = snap.showWhatsNewAfterUpdate,
                 crashReportingOptIn = snap.crashReportingOptIn
             )
         }
@@ -511,6 +514,7 @@ class SettingsStore(context: Context) {
         val hiddenCatalogs = prefs.getStringSet("hidden_catalog_keys", emptySet())?.toSet() ?: emptySet()
         val updateChannel = prefs.getString("update_channel", defaults.updateChannel.name)
             ?.let { runCatching { UpdateChannel.valueOf(it) }.getOrNull() } ?: defaults.updateChannel
+        val showWhatsNewAfter = prefs.getBoolean("show_whats_new_after_update", defaults.showWhatsNewAfterUpdate)
         val crashOptIn = prefs.getBoolean("crash_reporting_opt_in", defaults.crashReportingOptIn)
         val profileId = prefs.getString("profile_id", defaults.activeProfileId) ?: defaults.activeProfileId
         val profiles = prefs.getString("profiles_json", null)
@@ -557,6 +561,7 @@ class SettingsStore(context: Context) {
             matchFrameRate = prefs.getBoolean("match_frame_rate", defaultMatchFrameRate),
             hiddenCatalogKeys = hiddenCatalogs,
             updateChannel = updateChannel,
+            showWhatsNewAfterUpdate = showWhatsNewAfter,
             crashReportingOptIn = crashOptIn,
             activeProfileId = profileId,
             profiles = profiles
@@ -604,6 +609,7 @@ class SettingsStore(context: Context) {
             .putBoolean("match_frame_rate", s.matchFrameRate)
             .putStringSet("hidden_catalog_keys", s.hiddenCatalogKeys)
             .putString("update_channel", s.updateChannel.name)
+            .putBoolean("show_whats_new_after_update", s.showWhatsNewAfterUpdate)
             .putBoolean("crash_reporting_opt_in", s.crashReportingOptIn)
             .putString("profile_id", s.activeProfileId)
             .putString("profiles_json", profilesJson)

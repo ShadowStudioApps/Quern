@@ -97,6 +97,16 @@ class QuernViewModel(
     fun openUnknownSourcesSettings(activityContext: android.content.Context): Boolean =
         updateManager.openUnknownSourcesSettings(activityContext)
 
+    fun consumePostUpdateNotes() = updateManager.consumePostUpdateNotes()
+
+    fun loadCurrentVersionNotes() = updateManager.loadCurrentVersionNotes()
+
+    fun clearCurrentVersionNotesState() = updateManager.clearCurrentVersionNotesState()
+
+    fun debugSimulatePostUpdate() {
+        if (com.quern.app.BuildConfig.DEBUG) updateManager.debugSimulatePostUpdate()
+    }
+
     // ---- Account sync ----
     val syncStatus: StateFlow<SyncStatus> = syncEngine.status
     val profilesAppliedCount: StateFlow<Int> = syncEngine.profilesAppliedCount

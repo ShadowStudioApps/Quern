@@ -24,6 +24,9 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
 
         val container = (application as QuernApplication).container
+        container.updateManager.onAppLaunch(
+            container.settingsStore.settings.value.showWhatsNewAfterUpdate
+        )
         val viewModel = ViewModelProvider(
             this,
             QuernViewModel.Factory(

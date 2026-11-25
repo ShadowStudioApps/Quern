@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -91,6 +92,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -124,8 +126,10 @@ import com.quern.app.ui.components.LumaMediaCarouselRow
 import com.quern.app.ui.components.LocalQuernLayout
 import com.quern.app.ui.components.QuernLayoutClass
 import com.quern.app.ui.components.QuernHomeSpacing
+import com.quern.app.ui.components.WhatsNewDialog
 import com.quern.app.ui.components.buildAmbientBackdropRequest
 import com.quern.app.ui.components.buildHeroBackdropRequest
+import com.quern.app.ui.components.parseAvailableUpdateNotes
 import com.quern.app.ui.components.tvClickable
 import com.quern.app.ui.theme.LocalQuernPalette
 import com.quern.app.ui.theme.LocalQuernStrings
@@ -646,6 +650,7 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HomeUpdateBanner(
     release: AvailableUpdate,
@@ -655,8 +660,107 @@ private fun HomeUpdateBanner(
 ) {
     val palette = LocalQuernPalette.current
     val railInset = if (isTv) LocalTvRailInset.current else 0.dp
-    var updateFocused by remember { mutableStateOf(false) }
-    var laterFocused by remember { mutableStateOf(false) }
+    val isCompact = LocalQuernLayout.current == QuernLayoutClass.COMPACT
+    val isAr = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val parsedNotes = remember(release, isAr) { parseAvailableUpdateNotes(release, isAr) }
+    var showWhatsNew by remember(release.version) { mutableStateOf(false) }
+    val whatsNewFocus = remember { FocusRequester() }
+    var pendingWhatsNewFocusReturn by remember { mutableStateOf(false) }
+    val windowInfo = LocalWindowInfo.current
+
+    LaunchedEffect(showWhatsNew, windowInfo.isWindowFocused, pendingWhatsNewFocusReturn) {
+        if (!isTv || showWhatsNew || !pendingWhatsNewFocusReturn || !windowInfo.isWindowFocused) {
+            return@LaunchedEffect
+        }
+        withFrameNanos { }
+        delay(50L)
+        if (!showWhatsNew) {
+            runCatching { whatsNewFocus.requestFocus() }
+            pendingWhatsNewFocusReturn = false
+        }
+    }
+
+    @Composable
+    fun BannerButtons() {
+        var updateFocused by remember { mutableStateOf(false) }
+        var whatsNewFocused by remember { mutableStateOf(false) }
+        var laterFocused by remember { mutableStateOf(false) }
+        val pillVertPad = if (isCompact) 9.dp else 5.dp
+        val pillHeightMod = if (isCompact) Modifier.heightIn(min = 38.dp) else Modifier
+
+        Surface(
+            color = if (updateFocused) palette.focusRing else palette.accent,
+            shape = RoundedCornerShape(999.dp),
+            border = if (updateFocused) BorderStroke(1.5.dp, Color.White) else null,
+            modifier = pillHeightMod
+                .clip(RoundedCornerShape(999.dp))
+                .tvClickable(
+                    onFocusChangedState = { updateFocused = it },
+                    onClick = onOpenUpdate
+                )
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp, vertical = pillVertPad)) {
+                Text(
+                    text = qString(R.string.update_action_view),
+                    color = if (updateFocused) Color.Black else palette.onAccent,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        if (parsedNotes.isNotEmpty()) {
+            Surface(
+                color = if (whatsNewFocused) palette.accent else palette.surface,
+                shape = RoundedCornerShape(999.dp),
+                border = BorderStroke(
+                    width = if (whatsNewFocused) 1.5.dp else 1.dp,
+                    color = if (whatsNewFocused) palette.focusRing else palette.border
+                ),
+                modifier = pillHeightMod
+                    .focusRequester(whatsNewFocus)
+                    .clip(RoundedCornerShape(999.dp))
+                    .tvClickable(
+                        onFocusChangedState = { whatsNewFocused = it },
+                        onClick = {
+                            pendingWhatsNewFocusReturn = true
+                            showWhatsNew = true
+                        }
+                    )
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp, vertical = pillVertPad)) {
+                    Text(
+                        text = qString(R.string.update_action_whats_new),
+                        color = if (whatsNewFocused) palette.onAccent else LumaTextPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+        Surface(
+            color = if (laterFocused) palette.accent else palette.surface,
+            shape = RoundedCornerShape(999.dp),
+            border = BorderStroke(
+                width = if (laterFocused) 1.5.dp else 1.dp,
+                color = if (laterFocused) palette.focusRing else palette.border
+            ),
+            modifier = pillHeightMod
+                .clip(RoundedCornerShape(999.dp))
+                .tvClickable(
+                    onFocusChangedState = { laterFocused = it },
+                    onClick = onDismiss
+                )
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp, vertical = pillVertPad)) {
+                Text(
+                    text = qString(R.string.update_action_later),
+                    color = if (laterFocused) palette.onAccent else LumaTextSecondary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
 
     Surface(
         color = palette.surfaceElevated.copy(alpha = 0.94f),
@@ -671,70 +775,85 @@ private fun HomeUpdateBanner(
                 bottom = 2.dp
             )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
+        if (isCompact) {
+            Column(
                 modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(palette.focusRing)
-            )
-            Text(
-                text = qString(R.string.update_banner_text, release.version),
-                color = LumaTextPrimary,
-                fontSize = if (isTv) 12.5.sp else 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Surface(
-                color = if (updateFocused) palette.focusRing else palette.accent,
-                shape = RoundedCornerShape(999.dp),
-                border = if (updateFocused) BorderStroke(1.5.dp, Color.White) else null,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .tvClickable(
-                        onFocusChangedState = { updateFocused = it },
-                        onClick = onOpenUpdate
-                    )
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = qString(R.string.update_action_view),
-                    color = if (updateFocused) Color.Black else palette.onAccent,
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(palette.focusRing)
+                    )
+                    Text(
+                        text = qString(R.string.update_banner_text, release.version),
+                        color = LumaTextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    BannerButtons()
+                }
             }
-            Surface(
-                color = if (laterFocused) palette.accent else palette.surface,
-                shape = RoundedCornerShape(999.dp),
-                border = BorderStroke(
-                    width = if (laterFocused) 1.5.dp else 1.dp,
-                    color = if (laterFocused) palette.focusRing else palette.border
-                ),
+        } else {
+            Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .tvClickable(
-                        onFocusChangedState = { laterFocused = it },
-                        onClick = onDismiss
-                    )
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = qString(R.string.update_action_later),
-                    color = if (laterFocused) palette.onAccent else LumaTextSecondary,
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(palette.focusRing)
                 )
+                Text(
+                    text = qString(R.string.update_banner_text, release.version),
+                    color = LumaTextPrimary,
+                    fontSize = if (isTv) 12.5.sp else 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                BannerButtons()
             }
         }
+    }
+
+    if (showWhatsNew && parsedNotes.isNotEmpty()) {
+        WhatsNewDialog(
+            release = release,
+            sections = parsedNotes,
+            isTv = isTv,
+            updateLabel = qString(R.string.update_action_view),
+            onUpdate = {
+                pendingWhatsNewFocusReturn = false
+                showWhatsNew = false
+                onOpenUpdate()
+            },
+            onLater = {
+                pendingWhatsNewFocusReturn = false
+                showWhatsNew = false
+                onDismiss()
+            },
+            onDismiss = { showWhatsNew = false }
+        )
     }
 }
 

@@ -35,6 +35,7 @@
     <string name="common_save">Save</string>
     <string name="common_close">Close</string>
     <string name="common_done">Done</string>
+    <string name="common_ok">OK</string>
 
     <!-- 7 Top-Level Settings Groups -->
     <string name="group_addons">Addons</string>
@@ -359,6 +360,8 @@
     <string name="update_available_title">Update Available</string>
     <string name="update_banner_text">Quern v%1$s is available</string>
     <string name="update_action_view">Update</string>
+    <string name="update_action_whats_new">What\'s new</string>
+    <string name="update_whats_new_title">What\'s new in v%1$s</string>
     <string name="update_action_later">Later</string>
     <string name="update_action_download_install">Download &amp; Install</string>
     <string name="update_action_install_now">Install Update</string>
@@ -378,6 +381,10 @@
     <string name="update_installer_unavailable">This device didn\'t open the package installer. Install the APK manually or allow app installs in system settings.</string>
     <string name="update_unknown_sources_blocked">This TV blocks installs from unknown sources. Allow Quern under Settings → Apps → Special app access → Install unknown apps, then press Download &amp; Install again.</string>
     <string name="update_no_notes">No release notes provided.</string>
+    <string name="update_show_whats_new_after_label">Show what\'s new after updates</string>
+    <string name="update_whats_new_this_version">What\'s new in this version</string>
+    <string name="update_loading_notes">Loading release notes…</string>
+    <string name="update_current_notes_unavailable">Release notes for v%1$s aren\'t available right now.</string>
     <string name="appearance_screen_size_title">Interface Size</string>
     <string name="appearance_screen_size_help">Make the whole interface smaller so more posters and rows fit on screen. Syncs separately for TV and phone.</string>
     <string name="qr_link_title">Sign in with your phone</string>

@@ -35,6 +35,7 @@
     <string name="common_save">حفظ</string>
     <string name="common_close">إغلاق</string>
     <string name="common_done">تم</string>
+    <string name="common_ok">حسناً</string>
 
     <!-- 7 Top-Level Settings Groups -->
     <string name="group_addons">الإضافات (Addons)</string>
@@ -359,6 +360,8 @@
     <string name="update_available_title">يتوفر تحديث جديد</string>
     <string name="update_banner_text">يتوفر إصدار Quern v%1$s</string>
     <string name="update_action_view">تحديث</string>
+    <string name="update_action_whats_new">ما الجديد</string>
+    <string name="update_whats_new_title">الجديد في v%1$s</string>
     <string name="update_action_later">لاحقاً</string>
     <string name="update_action_download_install">تنزيل وتثبيت</string>
     <string name="update_action_install_now">تثبيت التحديث</string>
@@ -378,6 +381,10 @@
     <string name="update_installer_unavailable">لم يفتح مثبّت الحزم على هذا الجهاز. اسمح بتثبيت التطبيقات من إعدادات النظام أو ثبّت الملف يدوياً.</string>
     <string name="update_unknown_sources_blocked">التلفزيون يمنع التثبيت من مصادر غير معروفة. اسمح لـ Quern من الإعدادات ← التطبيقات ← الوصول الخاص ← تثبيت التطبيقات المجهولة، ثم اضغط تنزيل وتثبيت مرة أخرى.</string>
     <string name="update_no_notes">لا توجد ملاحظات لهذا الإصدار.</string>
+    <string name="update_show_whats_new_after_label">عرض ما الجديد بعد التحديثات</string>
+    <string name="update_whats_new_this_version">ما الجديد في هذا الإصدار</string>
+    <string name="update_loading_notes">جاري تحميل ملاحظات الإصدار…</string>
+    <string name="update_current_notes_unavailable">ملاحظات الإصدار v%1$s غير متوفرة حالياً.</string>
     <string name="appearance_screen_size_title">حجم الواجهة</string>
     <string name="appearance_screen_size_help">صغّر الواجهة بالكامل لعرض المزيد من البوسترات والصفوف على الشاشة. يتزامن بشكل منفصل للتلفزيون والهاتف.</string>
     <string name="qr_link_title">تسجيل الدخول بهاتفك</string>

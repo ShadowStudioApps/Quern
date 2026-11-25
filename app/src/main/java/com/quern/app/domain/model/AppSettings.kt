@@ -430,6 +430,7 @@ data class AppSettings(
     val matchFrameRate: Boolean = false,
     val hiddenCatalogKeys: Set<String> = emptySet(),
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
+    val showWhatsNewAfterUpdate: Boolean = true,
     val crashReportingOptIn: Boolean = false,
     val activeProfileId: String = "main",
     // A fresh install starts with one profile; users add more from the picker's "+" or Settings.

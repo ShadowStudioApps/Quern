@@ -58,6 +58,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,7 +105,9 @@ import com.quern.app.ui.components.DeviceLinkApproveDialog
 import com.quern.app.ui.components.LocalContentFocusMemory
 import com.quern.app.ui.components.LocalTvRailInset
 import com.quern.app.ui.components.QuernBrandMark
+import com.quern.app.ui.components.WhatsNewDialog
 import com.quern.app.ui.components.currentQuernLayout
+import com.quern.app.ui.components.parseReleaseEntries
 import com.quern.app.ui.components.isTvHardware
 import com.quern.app.ui.components.LocalQuernLayout
 import com.quern.app.ui.components.QuernLayoutClass
@@ -134,6 +137,7 @@ import com.quern.app.ui.theme.LumaTextSecondary
 import com.quern.app.ui.theme.QuernGlassBorderBrush
 import com.quern.app.ui.theme.QuernTheme
 import com.quern.app.ui.theme.glossySheen
+import com.quern.app.ui.theme.qString
 import okhttp3.OkHttpClient
 
 /**
@@ -593,7 +597,12 @@ fun QuernApp(
                                 onCheckForUpdates = { viewModel.checkForUpdatesManual() },
                                 onDownloadAndInstallUpdate = { viewModel.downloadAndInstallUpdate(context) },
                                 onDismissUpdate = { viewModel.dismissUpdateBanner() },
-                                onOpenUnknownSourcesSettings = { viewModel.openUnknownSourcesSettings(context) }
+                                onOpenUnknownSourcesSettings = { viewModel.openUnknownSourcesSettings(context) },
+                                onLoadCurrentVersionNotes = { viewModel.loadCurrentVersionNotes() },
+                                onClearCurrentVersionNotes = { viewModel.clearCurrentVersionNotesState() },
+                                onDebugSimulatePostUpdate = if (com.quern.app.BuildConfig.DEBUG) {
+                                    { viewModel.debugSimulatePostUpdate() }
+                                } else null
                             )
                         }
                     }
@@ -766,6 +775,44 @@ fun QuernApp(
                                 .padding(horizontal = 16.dp, vertical = 14.dp)
                         )
                     }
+                }
+            }
+        }
+
+        val isHomeVisible = !profilePickerOpen &&
+            activePlayback == null &&
+            !showingDetail &&
+            currentTab == QuernTab.HOME &&
+            pendingDeviceLink == null
+        var homeShownForPostUpdate by remember { mutableStateOf(false) }
+        LaunchedEffect(isHomeVisible) {
+            if (isHomeVisible) {
+                withFrameNanos { }
+                delay(250L)
+                homeShownForPostUpdate = true
+            } else {
+                homeShownForPostUpdate = false
+            }
+        }
+        if (isHomeVisible && homeShownForPostUpdate) {
+            val postUpdate = updateState.pendingPostUpdate
+            if (postUpdate != null) {
+                val isAr = LocalLayoutDirection.current == LayoutDirection.Rtl
+                val sections = remember(postUpdate, isAr) {
+                    parseReleaseEntries(postUpdate.entries, isAr)
+                }
+                if (sections.isEmpty()) {
+                    LaunchedEffect(postUpdate) { viewModel.consumePostUpdateNotes() }
+                } else {
+                    WhatsNewDialog(
+                        version = postUpdate.version,
+                        sections = sections,
+                        isTv = isTv,
+                        primaryLabel = qString(R.string.common_ok),
+                        secondaryLabel = null,
+                        onPrimary = { viewModel.consumePostUpdateNotes() },
+                        onDismiss = { viewModel.consumePostUpdateNotes() }
+                    )
                 }
             }
         }

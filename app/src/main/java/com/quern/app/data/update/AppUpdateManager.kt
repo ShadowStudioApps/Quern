@@ -37,6 +37,27 @@ import java.io.FileOutputStream
 import java.io.IOException
 
 @Serializable
+data class ReleaseNotesEntry(
+    val version: String,
+    val publishedDateText: String,
+    val releaseNotes: String,
+    val isPrerelease: Boolean = false
+)
+
+@Serializable
+data class ReleaseNotesPayload(
+    val version: String,
+    val entries: List<ReleaseNotesEntry>
+)
+
+sealed interface CurrentVersionNotesState {
+    data object Idle : CurrentVersionNotesState
+    data object Loading : CurrentVersionNotesState
+    data class Loaded(val payload: ReleaseNotesPayload) : CurrentVersionNotesState
+    data object Unavailable : CurrentVersionNotesState
+}
+
+@Serializable
 data class AvailableUpdate(
     val version: String,
     val tagName: String,
@@ -46,8 +67,21 @@ data class AvailableUpdate(
     val assetName: String,
     val downloadUrl: String,
     val assetSizeBytes: Long,
-    val isPrerelease: Boolean
-)
+    val isPrerelease: Boolean,
+    val newerReleases: List<ReleaseNotesEntry> = emptyList()
+) {
+    val releaseEntries: List<ReleaseNotesEntry>
+        get() = newerReleases.ifEmpty {
+            listOf(
+                ReleaseNotesEntry(
+                    version = version,
+                    publishedDateText = publishedDateText,
+                    releaseNotes = releaseNotes,
+                    isPrerelease = isPrerelease
+                )
+            )
+        }
+}
 
 enum class ManualCheckResult {
     UP_TO_DATE,
@@ -78,7 +112,9 @@ data class UpdateUiState(
     val dismissedVersion: String = "",
     val lastCheckedAtMs: Long = 0L,
     val manualCheckResult: ManualCheckResult? = null,
-    val downloadState: UpdateDownloadState = UpdateDownloadState.Idle
+    val downloadState: UpdateDownloadState = UpdateDownloadState.Idle,
+    val pendingPostUpdate: ReleaseNotesPayload? = null,
+    val currentVersionNotesState: CurrentVersionNotesState = CurrentVersionNotesState.Idle
 ) {
     val hasUpdate: Boolean get() = available != null
     val showHomeBanner: Boolean get() = available != null && dismissedVersion != available.version
@@ -101,6 +137,9 @@ class AppUpdateManager(
 
     private var checkJob: Job? = null
     private var downloadJob: Job? = null
+    private var postUpdateFetchJob: Job? = null
+    private var currentNotesJob: Job? = null
+    private var launchHandled = false
 
     private val _state = MutableStateFlow(loadInitialState())
     val state: StateFlow<UpdateUiState> = _state.asStateFlow()
@@ -137,12 +176,125 @@ class AppUpdateManager(
     }
 
     /**
+     * Records the running version on every launch and detects an upgrade over a previously
+     * recorded version (never triggering on a fresh install). Reuses notes saved prior to
+     * download/install when present, or fetches the tag release once silently otherwise.
+     */
+    fun onAppLaunch(showWhatsNewAfterUpdate: Boolean) {
+        synchronized(this) {
+            if (launchHandled) return
+            launchHandled = true
+        }
+        val current = BuildConfig.VERSION_NAME
+        val lastRun = prefs.getString(KEY_LAST_RUN_VERSION, null)
+        prefs.edit().putString(KEY_LAST_RUN_VERSION, current).apply()
+
+        if (lastRun.isNullOrBlank()) {
+            // Fresh install: record version above and never show post-update dialog.
+            prefs.edit().remove(KEY_PENDING_POST_UPDATE).apply()
+            return
+        }
+
+        if (!isNewerVersion(current, lastRun)) {
+            val stored = loadPendingPostUpdate()
+            if (stored != null && !isNewerVersion(stored.version, current)) {
+                prefs.edit().remove(KEY_PENDING_POST_UPDATE).apply()
+            }
+            return
+        }
+
+        val stored = loadPendingPostUpdate()
+        prefs.edit().remove(KEY_PENDING_POST_UPDATE).apply()
+
+        if (stored != null && stored.version == current && stored.entries.isNotEmpty()) {
+            persistCachedCurrentVersionNotes(stored)
+            if (showWhatsNewAfterUpdate) {
+                _state.value = _state.value.copy(pendingPostUpdate = stored)
+            }
+            return
+        }
+
+        if (!showWhatsNewAfterUpdate) return
+
+        val cached = loadCachedCurrentVersionNotes(current)
+        if (cached != null && cached.entries.isNotEmpty()) {
+            _state.value = _state.value.copy(pendingPostUpdate = cached)
+            return
+        }
+
+        postUpdateFetchJob?.cancel()
+        postUpdateFetchJob = scope.launch {
+            val entry = fetchReleaseByTag(current) ?: return@launch
+            if (entry.releaseNotes.isBlank()) return@launch
+            val payload = ReleaseNotesPayload(version = current, entries = listOf(entry))
+            persistCachedCurrentVersionNotes(payload)
+            _state.value = _state.value.copy(pendingPostUpdate = payload)
+        }
+    }
+
+    fun consumePostUpdateNotes() {
+        prefs.edit().remove(KEY_PENDING_POST_UPDATE).apply()
+        _state.value = _state.value.copy(pendingPostUpdate = null)
+    }
+
+    fun loadCurrentVersionNotes() {
+        val current = BuildConfig.VERSION_NAME
+        val cached = loadCachedCurrentVersionNotes(current)
+        if (cached != null && cached.entries.isNotEmpty()) {
+            _state.value = _state.value.copy(
+                currentVersionNotesState = CurrentVersionNotesState.Loaded(cached)
+            )
+            return
+        }
+        currentNotesJob?.cancel()
+        _state.value = _state.value.copy(
+            currentVersionNotesState = CurrentVersionNotesState.Loading
+        )
+        currentNotesJob = scope.launch {
+            val entry = fetchReleaseByTag(current)
+            if (entry != null && entry.releaseNotes.isNotBlank()) {
+                val payload = ReleaseNotesPayload(version = current, entries = listOf(entry))
+                persistCachedCurrentVersionNotes(payload)
+                _state.value = _state.value.copy(
+                    currentVersionNotesState = CurrentVersionNotesState.Loaded(payload)
+                )
+            } else {
+                _state.value = _state.value.copy(
+                    currentVersionNotesState = CurrentVersionNotesState.Unavailable
+                )
+            }
+        }
+    }
+
+    fun clearCurrentVersionNotesState() {
+        currentNotesJob?.cancel()
+        _state.value = _state.value.copy(currentVersionNotesState = CurrentVersionNotesState.Idle)
+    }
+
+    fun debugSimulatePostUpdate() {
+        if (!BuildConfig.DEBUG) return
+        prefs.edit()
+            .putString(KEY_LAST_RUN_VERSION, "0.0.1")
+            .remove(KEY_PENDING_POST_UPDATE)
+            .apply()
+        synchronized(this) {
+            launchHandled = false
+        }
+        onAppLaunch(showWhatsNewAfterUpdate = true)
+    }
+
+    /**
      * Downloads the release APK into `cacheDir/updates/` with live progress, then opens Android's
      * system installer via [FileProvider]. Never installs silently or in the background.
      */
     fun downloadAndInstall(activityContext: Context) {
         val release = _state.value.available ?: return
         if (_state.value.downloadState is UpdateDownloadState.Downloading) return
+
+        // Persist release notes for the target version so the first launch after updating can show them.
+        persistPendingPostUpdate(
+            ReleaseNotesPayload(version = release.version, entries = release.releaseEntries)
+        )
 
         val updatesDir = File(context.cacheDir, UPDATES_DIR).apply { mkdirs() }
         val targetFile = File(updatesDir, release.assetName)
@@ -363,6 +515,7 @@ class AppUpdateManager(
         val arr = runCatching { json.parseToJsonElement(rawJson).jsonArray }.getOrNull() ?: return null
 
         var best: Pair<SemVer, AvailableUpdate>? = null
+        val newerEntries = mutableListOf<Pair<SemVer, ReleaseNotesEntry>>()
         for (el in arr) {
             val obj = el as? JsonObject ?: continue
             val draft = obj["draft"]?.jsonPrimitive?.booleanOrNull == true
@@ -373,6 +526,18 @@ class AppUpdateManager(
             val tagName = obj["tag_name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             val releaseSemVer = SemVer.parse(tagName) ?: continue
             if (releaseSemVer <= currentSemVer) continue
+
+            val publishedIso = obj["published_at"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val dateText = publishedIso.substringBefore("T").ifBlank { publishedIso }
+            val notes = obj["body"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+            val normalizedVersion = tagName.removePrefix("v").removePrefix("V")
+
+            newerEntries += releaseSemVer to ReleaseNotesEntry(
+                version = normalizedVersion,
+                publishedDateText = dateText,
+                releaseNotes = notes,
+                isPrerelease = prerelease
+            )
 
             // Strictly match official release APK asset: Quern-vX.Y.Z-release.apk (never CI artifacts).
             val matchedAsset = obj["assets"]?.jsonArray.orEmpty()
@@ -390,11 +555,6 @@ class AppUpdateManager(
                     Triple(name, url, size)
                 } ?: continue
 
-            val publishedIso = obj["published_at"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val dateText = publishedIso.substringBefore("T").ifBlank { publishedIso }
-            val notes = obj["body"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
-            val normalizedVersion = tagName.removePrefix("v").removePrefix("V")
-
             val candidate = AvailableUpdate(
                 version = normalizedVersion,
                 tagName = tagName,
@@ -410,7 +570,14 @@ class AppUpdateManager(
                 best = releaseSemVer to candidate
             }
         }
-        return best?.second
+        val (bestSemVer, bestUpdate) = best ?: return null
+        val orderedNotes = newerEntries
+            .filter { it.first <= bestSemVer }
+            .sortedByDescending { it.first }
+            .distinctBy { it.second.version }
+            .map { it.second }
+            .take(10)
+        return bestUpdate.copy(newerReleases = orderedNotes)
     }
 
     private fun loadInitialState(): UpdateUiState {
@@ -429,6 +596,69 @@ class AppUpdateManager(
             dismissedVersion = dismissed,
             lastCheckedAtMs = lastChecked
         )
+    }
+
+    private fun fetchReleaseByTag(version: String): ReleaseNotesEntry? {
+        val normalized = version.removePrefix("v").removePrefix("V")
+        val req = Request.Builder()
+            .url("$RELEASE_BY_TAG_API_PREFIX$normalized")
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        return try {
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.i(TAG, "Tag release check HTTP ${resp.code} for v$normalized")
+                    return null
+                }
+                val bodyStr = resp.body?.string().orEmpty()
+                val obj = runCatching { json.parseToJsonElement(bodyStr).jsonObject }.getOrNull()
+                    ?: return null
+                if (obj["draft"]?.jsonPrimitive?.booleanOrNull == true) return null
+                val prerelease = obj["prerelease"]?.jsonPrimitive?.booleanOrNull == true
+                val tagName = obj["tag_name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                val publishedIso = obj["published_at"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val dateText = publishedIso.substringBefore("T").ifBlank { publishedIso }
+                val notes = obj["body"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+                val entryVersion = tagName.removePrefix("v").removePrefix("V").ifBlank { normalized }
+                ReleaseNotesEntry(
+                    version = entryVersion,
+                    publishedDateText = dateText,
+                    releaseNotes = notes,
+                    isPrerelease = prerelease
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.i(TAG, "Tag release check failed: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
+    private fun loadPendingPostUpdate(): ReleaseNotesPayload? {
+        val raw = prefs.getString(KEY_PENDING_POST_UPDATE, null) ?: return null
+        return runCatching { json.decodeFromString<ReleaseNotesPayload>(raw) }.getOrNull()
+    }
+
+    private fun persistPendingPostUpdate(payload: ReleaseNotesPayload) {
+        runCatching { json.encodeToString(payload) }.getOrNull()?.let { encoded ->
+            prefs.edit().putString(KEY_PENDING_POST_UPDATE, encoded).apply()
+        }
+    }
+
+    private fun loadCachedCurrentVersionNotes(version: String): ReleaseNotesPayload? {
+        val raw = prefs.getString(KEY_CACHED_CURRENT_NOTES, null) ?: return null
+        val decoded = runCatching { json.decodeFromString<ReleaseNotesPayload>(raw) }.getOrNull()
+            ?: return null
+        return decoded.takeIf { it.version == version }
+    }
+
+    private fun persistCachedCurrentVersionNotes(payload: ReleaseNotesPayload) {
+        runCatching { json.encodeToString(payload) }.getOrNull()?.let { encoded ->
+            prefs.edit().putString(KEY_CACHED_CURRENT_NOTES, encoded).apply()
+        }
     }
 
     private fun persistCheckResult(nowMs: Long, channel: UpdateChannel, update: AvailableUpdate?) {
@@ -511,6 +741,9 @@ class AppUpdateManager(
         private const val KEY_LAST_CHANNEL = "last_channel"
         private const val KEY_DISMISSED_VERSION = "dismissed_version"
         private const val KEY_CACHED_UPDATE = "cached_update_json"
+        private const val KEY_LAST_RUN_VERSION = "last_run_version"
+        private const val KEY_PENDING_POST_UPDATE = "pending_post_update_json"
+        private const val KEY_CACHED_CURRENT_NOTES = "cached_current_version_notes_json"
         private const val UPDATES_DIR = "updates"
         private const val APK_MIME = "application/vnd.android.package-archive"
         private const val USER_AGENT = "Quern-Android"
@@ -518,6 +751,8 @@ class AppUpdateManager(
 
         private const val RELEASES_API_URL =
             "https://api.github.com/repos/ShadowStudioApps/Quern/releases"
+        private const val RELEASE_BY_TAG_API_PREFIX =
+            "https://api.github.com/repos/ShadowStudioApps/Quern/releases/tags/v"
         private const val OFFICIAL_DOWNLOAD_PREFIX =
             "https://github.com/ShadowStudioApps/Quern/releases/download/"
         private val ASSET_NAME_REGEX = Regex("""^Quern-v(\d+\.\d+\.\d+)-release\.apk$""")
