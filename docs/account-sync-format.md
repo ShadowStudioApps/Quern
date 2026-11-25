@@ -32,7 +32,7 @@ One row per `(user_id, section)`. `payload` is JSON (or an encrypted payload whe
 | `addons` | yes | Installed addons, order, enabled flag, hidden catalogs. Manifest URLs often contain personal tokens. |
 | `secrets` | yes | Debrid API keys, media servers (with passwords and tokens), TMDB key, Trakt tokens, profile PIN hashes. |
 | `settings` | no | Shared entries of `AppSettings` across all devices (excludes `profiles`, `activeProfileId`, `hiddenCatalogKeys`, and the per-device-class keys in `settings_tv` / `settings_phone`). `hiddenCatalogKeys` travels in `addons`. |
-| `settings_tv` | no | Per-device-class settings shared across Android TV devices only (`navigationStyle`, `cardSize`, `fontScale`, `bufferProfile`, `playerEngine`, `preferExternalPlayer`, `preferredExternalPlayerPackage`, `appIcon`, `uiModeOverride`, `screenScalePercent`). Read and written only by TV hardware. |
+| `settings_tv` | no | Per-device-class settings shared across Android TV devices only (`navigationStyle`, `cardSize`, `fontScale`, `bufferProfile`, `playerEngine`, `preferExternalPlayer`, `preferredExternalPlayerPackage`, `appIcon`, `uiModeOverride`, `screenScalePercent`, `matchFrameRate`). Read and written only by TV hardware. |
 | `settings_phone` | no | Same keys and schema as `settings_tv`, shared across phones/tablets only. Read and written only by non-TV hardware so a phone never overwrites a TV's layout. |
 | `profiles` | no | Profile ids, names, avatar colours (no PINs). `activeProfileId` stays local per device. |
 | `favorites` | no | Library/favorites list, with deletions kept as tombstones. |
@@ -85,13 +85,15 @@ Enum values use their Kotlin `name`. Unknown keys are ignored and unknown enum v
     "preferredExternalPlayerPackage": "",
     "appIcon": "SLATE_BLUE",
     "uiModeOverride": "AUTO",
-    "screenScalePercent": 100
+    "screenScalePercent": 100,
+    "matchFrameRate": true
   }
 }
 ```
 Device-class routing uses Android hardware TV detection (`UiModeManager.currentModeType == UI_MODE_TYPE_TELEVISION` or `Configuration.UI_MODE_TYPE_TELEVISION`, independent of `uiModeOverride`):
 - Android TV devices read and write only `settings_tv` and never read or write `settings_phone`.
 - Phones and tablets read and write only `settings_phone` and never read or write `settings_tv`.
+- `matchFrameRate` defaults to on for TV hardware and off for phones. Older snapshots that omit it preserve the local value.
 - Unknown keys in `values` are ignored and unknown enum values keep the device's current value. `screenScalePercent` (`75`–`100`, default `100`) scales root `LocalDensity` edge-to-edge so more posters and rows fit on screen without black borders. `activeProfileId` is never synced so each device still asks "Who's watching?".
 
 ### `profiles`

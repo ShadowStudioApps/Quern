@@ -449,4 +449,15 @@
     <string name="player_failover_exhausted">Tried 3 sources without success. Pick another source below.</string>
     <string name="player_source_unplayable">This source cannot be played directly. Connect a Debrid service or pick another source.</string>
     <string name="player_source_resolve_failed">Could not resolve this source. Pick another one.</string>
+    <string name="playback_display_title">Display</string>
+    <string name="playback_match_frame_rate">Match video frame rate</string>
+    <string name="playback_match_frame_rate_help">Request a display refresh rate that matches the video during playback.</string>
+    <string name="player_info_title">Playback info</string>
+    <string name="player_info_hide">Hide playback info</string>
+    <string name="player_info_video">Video · %1$s · %2$s · %3$s · %4$s</string>
+    <string name="player_info_audio">Audio · %1$s · Channels %2$s</string>
+    <string name="player_info_display">Display · %1$s</string>
+    <string name="player_info_bitrate">Bitrate · %1$s  |  Bandwidth · %2$s</string>
+    <string name="player_info_buffer">Buffer · %1$s s  |  Dropped frames · %2$s</string>
+    <string name="player_info_source">Source · %1$s</string>
 </resources>

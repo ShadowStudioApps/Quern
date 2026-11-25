@@ -368,6 +368,7 @@ fun QuernPlayerScreen(
     var switchDialogNotice by remember(request.sessionId) { mutableStateOf<String?>(null) }
     var resolvingManualSourceId by remember(request.sessionId) { mutableStateOf<String?>(null) }
     var showSubtitleSyncBar by remember { mutableStateOf(false) }
+    var showPlaybackInfo by remember(request.sessionId) { mutableStateOf(false) }
 
     // Preserved track preferences and subtitle sync offset across automatic/manual source switches
     var trackPref by remember(request.sessionId) { mutableStateOf(TrackPreferenceState()) }
@@ -395,6 +396,7 @@ fun QuernPlayerScreen(
             showSubtitleDialog -> showSubtitleDialog = false
             showSpeedDialog -> showSpeedDialog = false
             controlsVisible -> controlsVisible = false
+            showPlaybackInfo -> showPlaybackInfo = false
             else -> onBack()
         }
     }
@@ -517,6 +519,7 @@ fun QuernPlayerScreen(
             .setAudioAttributes(audioAttributes, true)
             .build()
             .apply {
+                setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
                 if (settings.defaultPlaybackSpeed != 1.0f) {
                     setPlaybackParameters(PlaybackParameters(settings.defaultPlaybackSpeed))
                 }
@@ -546,6 +549,12 @@ fun QuernPlayerScreen(
                 prepare()
             }
     }
+
+    var playbackView by remember { mutableStateOf<PlayerView?>(null) }
+    var playbackFrameRate by remember(request.sessionId) { mutableStateOf<PlaybackFrameRate?>(null) }
+    MatchPlaybackFrameRate(
+        playbackView, exoPlayer, lifecycleOwner.lifecycle, settings.matchFrameRate, showPlaybackInfo
+    ) { playbackFrameRate = it }
 
     fun switchToResolvedStream(
         next: StreamSource,
@@ -1065,15 +1074,27 @@ fun QuernPlayerScreen(
                 }
             },
             update = { view ->
+                playbackView = view
                 if (view.player !== exoPlayer) {
                     view.player = exoPlayer
                 }
                 view.resizeMode = resizeMode
             },
             onRelease = { view ->
+                if (playbackView === view) playbackView = null
                 view.player = null
             }
         )
+
+        if (showPlaybackInfo) {
+            PlaybackInfoPanel(
+                player = exoPlayer,
+                view = hostView,
+                providerName = activeStream.providerName,
+                frameRate = { playbackFrameRate },
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 16.dp)
+            )
+        }
 
         // Full-Bleed Cinema Backdrop Starting Screen (Screenshot #2) or Animated Logo on re-buffer
         if ((isBuffering || !hasRenderedFirstFrame || isSwitchingSource) && errorMessage == null) {
@@ -1665,6 +1686,14 @@ fun QuernPlayerScreen(
                             }
                         )
                     }
+                    PlayerPillButton(
+                        label = qString(if (showPlaybackInfo) R.string.player_info_hide else R.string.player_info_title),
+                        isPrimary = false,
+                        onClick = {
+                            showPlaybackInfo = !showPlaybackInfo
+                            showEngineDialog = false
+                        }
+                    )
                     installedPlayers.forEachIndexed { idx, player ->
                         PlayerPillButton(
                             label = if (isAr) "تشغيل عبر ${player.displayName}" else "Play in ${player.displayName}",

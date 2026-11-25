@@ -27,6 +27,7 @@ import com.quern.app.domain.model.SubtitleSize
 import com.quern.app.domain.model.UiModeOverride
 import com.quern.app.domain.model.UpdateChannel
 import com.quern.app.domain.model.UserProfile
+import com.quern.app.ui.components.isTvHardware
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,6 +39,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -106,6 +108,7 @@ class SettingsStore(context: Context) {
     private val syncJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val stateLock = Any()
 
+    private val defaultMatchFrameRate = isTvHardware(context)
     private val _settings = MutableStateFlow(load())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
@@ -198,7 +201,7 @@ class SettingsStore(context: Context) {
 
     fun reset() = synchronized(stateLock) {
         check(prefs.edit().clear().commit()) { "Could not reset settings" }
-        _settings.value = AppSettings()
+        _settings.value = AppSettings(matchFrameRate = defaultMatchFrameRate)
     }
 
     fun applyPreset(preset: QuernDevicePreset) {
@@ -274,6 +277,7 @@ class SettingsStore(context: Context) {
             put("appIcon", s.appIcon.name)
             put("uiModeOverride", s.uiModeOverride.name)
             put("screenScalePercent", s.screenScalePercent)
+            put("matchFrameRate", s.matchFrameRate)
         }
     }
 
@@ -321,7 +325,9 @@ class SettingsStore(context: Context) {
                     ?: curr.uiModeOverride,
                 screenScalePercent = values["screenScalePercent"]?.jsonPrimitive?.intOrNull
                     ?.coerceIn(75, 100)
-                    ?: curr.screenScalePercent
+                    ?: curr.screenScalePercent,
+                matchFrameRate = (values["matchFrameRate"] as? JsonPrimitive)?.booleanOrNull
+                    ?: curr.matchFrameRate
             )
         }
     }
@@ -548,6 +554,7 @@ class SettingsStore(context: Context) {
             cardCorner = cardCorner,
             uiModeOverride = uiMode,
             screenScalePercent = screenScalePercent,
+            matchFrameRate = prefs.getBoolean("match_frame_rate", defaultMatchFrameRate),
             hiddenCatalogKeys = hiddenCatalogs,
             updateChannel = updateChannel,
             crashReportingOptIn = crashOptIn,
@@ -594,6 +601,7 @@ class SettingsStore(context: Context) {
             .putString("card_corner", s.cardCorner.name)
             .putString("ui_mode", s.uiModeOverride.name)
             .putInt("screen_scale_pct", s.screenScalePercent)
+            .putBoolean("match_frame_rate", s.matchFrameRate)
             .putStringSet("hidden_catalog_keys", s.hiddenCatalogKeys)
             .putString("update_channel", s.updateChannel.name)
             .putBoolean("crash_reporting_opt_in", s.crashReportingOptIn)
@@ -616,7 +624,8 @@ class SettingsStore(context: Context) {
             "preferredExternalPlayerPackage",
             "appIcon",
             "uiModeOverride",
-            "screenScalePercent"
+            "screenScalePercent",
+            "matchFrameRate"
         )
     }
 }

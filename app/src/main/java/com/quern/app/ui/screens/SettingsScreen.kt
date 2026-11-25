@@ -414,6 +414,7 @@ fun SettingsScreen(
         add(SettingsSearchEntry(qString(R.string.group_home), "hero poster card size labels unreleased row order continue watching الرئيسية بطاقات", SettingsGroup.HOME_LAYOUT))
         add(SettingsSearchEntry(qString(R.string.home_cw_title), "continue watching sort resume history متابعة المشاهدة", SettingsGroup.HOME_LAYOUT))
         add(SettingsSearchEntry(qString(R.string.group_playback), "player exoplayer mpv external subtitle audio speed aspect buffer skip intro التشغيل ترجمة صوت", SettingsGroup.PLAYBACK))
+        add(SettingsSearchEntry(qString(R.string.playback_match_frame_rate), "frame rate refresh fps معدل الإطارات تحديث الشاشة", SettingsGroup.PLAYBACK))
         add(SettingsSearchEntry(qString(R.string.playback_buffer_title), "buffer network ram cache 4k remux تخزين مؤقت", SettingsGroup.PLAYBACK))
         add(SettingsSearchEntry(qString(R.string.services_debrid_title), "debrid torbox real-debrid alldebrid premiumize ديبريد", SettingsGroup.SERVICES, SettingsSubPage.INTEGRATIONS))
         add(SettingsSearchEntry(qString(R.string.services_media_servers_title), "jellyfin emby plex webdav server خوادم", SettingsGroup.SERVICES, SettingsSubPage.MEDIA_SERVERS))
@@ -540,13 +541,15 @@ fun SettingsScreen(
             targetGroup == SettingsGroup.PLAYBACK && targetSubPage == SettingsSubPage.NONE -> {
                 PlaybackSectionPane(
                     settings = settings,
-                    isModified = isGroupModified(SettingsGroup.PLAYBACK, settings),
+                    isModified = isGroupModified(SettingsGroup.PLAYBACK, settings) ||
+                        settings.matchFrameRate != isTvDevice,
                     onUpdateSettings = onUpdateSettings,
                     onResetSection = {
                         val d = AppSettings()
                         onUpdateSettings {
                             it.copy(
                                 playerEngine = d.playerEngine,
+                                matchFrameRate = isTvDevice,
                                 defaultPlaybackSpeed = d.defaultPlaybackSpeed,
                                 defaultAspectMode = d.defaultAspectMode,
                                 bufferProfile = d.bufferProfile,
@@ -1676,6 +1679,17 @@ private fun PlaybackSectionPane(
                 isModified = isModified,
                 onResetSection = onResetSection
             )
+        }
+
+        item(key = "match_frame_rate") {
+            SettingSectionCard(title = qString(R.string.playback_display_title)) {
+                SettingToggleRow(
+                    label = qString(R.string.playback_match_frame_rate),
+                    checked = settings.matchFrameRate,
+                    onCheckedChange = { enabled -> onUpdateSettings { it.copy(matchFrameRate = enabled) } }
+                )
+                HelpTextLine(qString(R.string.playback_match_frame_rate_help))
+            }
         }
 
         // 1. Player Engine

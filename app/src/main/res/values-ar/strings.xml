@@ -449,4 +449,15 @@
     <string name="player_failover_exhausted">تعذّر تشغيل 3 مصادر. اختر مصدراً آخر من القائمة.</string>
     <string name="player_source_unplayable">تعذّر تشغيل هذا المصدر مباشرة. اربط خدمة Debrid أو اختر مصدراً آخر.</string>
     <string name="player_source_resolve_failed">تعذّر تجهيز هذا المصدر. اختر مصدراً آخر.</string>
+    <string name="playback_display_title">الشاشة</string>
+    <string name="playback_match_frame_rate">مطابقة معدل إطارات الفيديو</string>
+    <string name="playback_match_frame_rate_help">يطلب من الشاشة مطابقة معدل تحديثها مع الفيديو أثناء التشغيل.</string>
+    <string name="player_info_title">معلومات التشغيل</string>
+    <string name="player_info_hide">إخفاء معلومات التشغيل</string>
+    <string name="player_info_video">الفيديو · %1$s · %2$s · %3$s · %4$s</string>
+    <string name="player_info_audio">الصوت · %1$s · القنوات %2$s</string>
+    <string name="player_info_display">الشاشة · %1$s</string>
+    <string name="player_info_bitrate">معدل البت · %1$s  |  عرض النطاق · %2$s</string>
+    <string name="player_info_buffer">المخزن المؤقت · %1$s ث  |  الإطارات المفقودة · %2$s</string>
+    <string name="player_info_source">المصدر · %1$s</string>
 </resources>
